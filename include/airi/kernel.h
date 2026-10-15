@@ -9,4 +9,5 @@ void airi_log(const char *fmt, ...);    // 在局部数组形成日志，再通�
 _Noreturn void airi_halt(void);  // 使当前 CPU 停在不返回的循环中，QEMU 主机进程仍存在
 _Noreturn void airi_panic(const char *message);      // 先报告具体错误再停机，参数须为有效 NUL 字符串
 bool airi_dashboard_draw(const AiriBootInfo *info);  // 预留图形接口，当前入口未调用，因此本章无需提供定义
+void airi_serial_write_bytes(const void *bytes, size_t count); // 按长度同步输出用户副本，不依赖NUL。
 #endif  // 结束头文件包含保护，后续使用同一公开声明

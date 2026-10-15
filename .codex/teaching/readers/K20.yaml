@@ -1,0 +1,26 @@
+checkpoint: K20
+baseline: baseline.yaml
+start: K19
+current_operation: 用户低半区代码经iretq运行，int80进入TSS内核栈，非法指针和坏返回现场不击穿内核
+already_explained:
+- concept: 完整中断现场和独立栈寿命
+  at: ../../../dev-log/core/19-kernel-tasks.md#stack-region-owner
+  establishes: 所有借用结束并离开目标栈后才解除映射归还
+first_use:
+- concept: 用户根与高半区借用
+  at: ../../../dev-log/core/20-user-boundary.md#user-address-space
+  establishes: 所有层需USER，子根不拥有共享内核表，销毁前切离
+- concept: ring3段和TSS.RSP0
+  at: ../../../dev-log/core/20-user-boundary.md#ring3-gates
+  establishes: 用户CS/SS为27/35，TSS移40，int80门DPL3，内核启动门DPL0
+- concept: 自有系统调用ABI与整段用户检查
+  at: ../../../dev-log/core/20-user-boundary.md#int80-contract
+  establishes: RAX编号与返回，逐页验证完整范围再复制，有界长度输出
+- concept: 用户返回检查与分层回收
+  at: ../../../dev-log/core/20-user-boundary.md#safe-user-return
+  establishes: 规范地址和RFLAGS检查在iretq前；回启动栈后才销毁用户内核栈
+not_assumed:
+- ELF、用户libc、并发进程调度、fork/exec/wait、信号和Linux ABI兼容
+limits:
+- 当前只有受控字节映像，不称ELF装载
+- 运行不记录为读者掌握

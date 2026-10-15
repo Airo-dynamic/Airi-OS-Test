@@ -42,8 +42,21 @@ int main(void) { // 宿主仅观察内存中的表和资源变化。
         assert(root[i] == 0); // 不留下指向已释放表的父链接。
     for (unsigned i = 0; i < 13; ++i) // 归还所有测试借用。
         assert(held[i] && airi_page_free(&pool, held[i])); // 每个页面必须仍属于原调用者。
+    data = airi_page_alloc(&pool); // 新测试的数据仍由调用者拥有。
+    assert(data && airi_vm_map(&space, AIRI_VM_DEMO_ADDRESS, data, AIRI_VM_WRITE)); // 建立要借给用户根的内核高半区路径。
+    struct airi_address_space child = {0}; // 用户空间尚无任何所有权。
+    assert(airi_vm_clone_kernel(&child, &space)); // 只借高半区中间表，单独拥有根。
+    assert(airi_vm_map(&child, 0x400000, data, AIRI_VM_USER | AIRI_VM_EXEC)); // 自有低半区四层允许USER。
+    assert(airi_vm_lookup(&child, 0x400000, &translated, &flags) && (flags & AIRI_VM_USER)); // 叶子报告用户权限。
+    assert(!airi_vm_map(&child, AIRI_VM_DEMO_ADDRESS + 4096, data, AIRI_VM_WRITE)); // 不允许子根覆盖借用内核分支。
+    assert(!airi_vm_unmap(&child, AIRI_VM_DEMO_ADDRESS)); // 也不能解除共享内核映射。
+    assert(!airi_vm_map(&space, AIRI_VM_DEMO_ADDRESS + 4096, data, AIRI_VM_USER)); // 高半区不能被标成USER。
+    assert(airi_vm_destroy(&child) && !airi_vm_destroy(&child)); // 只回收用户自有表，第二次拒绝。
+    assert(airi_vm_lookup(&space, AIRI_VM_DEMO_ADDRESS, &translated, NULL) && translated == data); // 销毁用户根不破坏原内核表。
+    assert(airi_vm_unmap(&space, AIRI_VM_DEMO_ADDRESS) && airi_page_free(&pool, data)); // 内核所有者最后自己结束高半区映射和数据页。
+    assert(pool.free == 15); // 根仍被内核持有，无其他泄漏。
     assert(!airi_vm_activate(&space)); // 宿主版本明确不执行特权安装，不能记成硬件验证。
-    assert(airi_page_free(&pool, space.root) && pool.free == 16); // 空根不再使用后，测试手动销毁最后一个所有权。
+    assert(airi_vm_destroy(&space) && pool.free == 16); // 空根不再使用后，测试手动销毁最后一个所有权。
     puts("PASS vm: translation, permissions, shared tables, unmap, exhaustion rollback"); // 全部状态核对通过才打印。
     return 0; // 正常退出宿主观察。
 }

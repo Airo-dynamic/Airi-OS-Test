@@ -207,3 +207,22 @@ bool airi_memory_region_free(struct airi_kernel_region *region) { // 调用前�
     airi_memset(region, 0, sizeof(*region)); // 成功后句柄不能再次释放同一组页面。
     return true; // 当前没有遗留的数据页借用。
 }
+
+bool airi_memory_user_space(struct airi_address_space *space) { // 调用时所需内核栈映射已在长期根中存在。
+    return airi_vm_clone_kernel(space, &kernel_space); // 用户空间只拥有新根和低半区表。
+}
+void airi_memory_use_kernel(void) { // 用户退出后先切回长期根。
+    if (!airi_vm_activate(&kernel_space)) // 同一固定CPU应支持先前已经启用的配置。
+        airi_panic("cannot restore kernel address space"); // 未切离不能继续回收用户根。
+}
+uint64_t airi_memory_take_page(void) { // 物理页生命周期由内核调用者显式管理。
+    return airi_page_alloc(&pages); // 失败保留0哨兵。
+}
+bool airi_memory_return_page(uint64_t physical) { // 不代替调用者解除仍存活映射。
+    return airi_page_free(&pages, physical); // 保留对齐和重复归还检查。
+}
+void *airi_memory_direct(uint64_t physical) { // 仅供已拥有低RAM页的内部调用者使用。
+    if (physical >= AIRI_PHYSICAL_LIMIT) // 不把任意MMIO或超上限地址当普通RAM。
+        airi_panic("physical address outside direct RAM policy"); // 具体错误而非生成无效指针。
+    return (void *)(uintptr_t)(kernel_space.direct_offset + physical); // 页内偏移保留不变。
+}

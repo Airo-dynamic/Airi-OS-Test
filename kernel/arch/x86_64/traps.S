@@ -12,7 +12,7 @@ airi_tables_load: /* rdi 指向 GDT 描述符，rsi 指向 IDT 描述符。 */
     movw %ax, %ds /* 设置数据段选择子。 */
     movw %ax, %es /* 设置额外数据段选择子。 */
     movw %ax, %ss /* 设置内核栈段选择子。 */
-    movw $24, %ax /* TSS 描述符从 GDT 第三项开始，占两项。 */
+    movw $40, %ax /* TSS 描述符从 GDT 第五项开始，占两项。 */
     ltr %ax /* 为双重故障加载独立栈信息。 */
     lidt (%rsi) /* 后续异常从自己的 IDT 取入口。 */
     ret /* 返回 C 初始化函数。 */
@@ -60,6 +60,8 @@ TRAP 29, 1 /* VMM 通信异常。 */
 TRAP 30, 1 /* 安全异常。 */
 TRAP 31 /* 保留向量。 */
 TRAP 32 /* 主PIC IRQ0对应的时钟入口，无硬件错误码。 */
+TRAP 128 /* DPL3的AiriOS系统调用门。 */
+TRAP 129 /* DPL0启动/返回用户执行的内核门。 */
 TRAP 255 /* 未使用的 IDT 项统一停止；可屏蔽中断仍关闭。 */
 airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
     cld /* C ABI 要求字符串方向标志为零；iretq 会恢复原标志。 */
@@ -82,7 +84,7 @@ airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
     movq %rsp, %r12 /* C ABI 保证被调用者保留 R12。 */
     andq $-16, %rsp /* call 之前对齐到 16 字节，不假设异常发生点的栈对齐。 */
     call airi_trap_dispatch /* C 负责报告与明确登记的演示恢复。 */
-    movq %r12, %rsp /* 丢弃调用前可能增加的对齐空间。 */
+    movq %rax, %rsp /* C返回选定的完整现场，同一或另一条调用链。 */
     popq %r15 /* 从保存区域恢复通用寄存器。 */
     popq %r14 /* 顺序与压栈相反。 */
     popq %r13 /* 恢复 R13。 */

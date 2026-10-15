@@ -51,3 +51,12 @@ _Noreturn void airi_panic(const char *message) {  // 收到有效错误文字后
     airi_log("[AIRI_PANIC] %s", message);  // 将当前错误拼进统一失败标记，供主机定位
     airi_halt();  // 当前入口到此停止，不再向调用者返回
 }
+
+void airi_serial_write_bytes(const void *bytes, size_t count) { // 当前串口保持文本换行转换，但逻辑长度可以包含NUL。
+    const uint8_t *data = bytes; // 按字节读取已验证的内核副本。
+    for (size_t i = 0; i < count; ++i) { // 严格使用调用者长度，不扫描数组外终止符。
+        if (data[i] == '\n') // 与原文字输出保持CRLF行为。
+            putchar_serial('\r'); // 原始换行之前增加回车。
+        putchar_serial((char)data[i]); // 包括零字节也真正交给UART。
+    }
+}

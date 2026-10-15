@@ -18,4 +18,10 @@ struct airi_kernel_region { // 所有权句柄必须在使用前清零，不能�
 };
 bool airi_memory_region_create(struct airi_kernel_region *region, uint64_t address, unsigned count); // 建立新的有界RW/NX内核区域，不覆盖已有映射。
 bool airi_memory_region_free(struct airi_kernel_region *region); // 所有借用结束后先解除映射，再归还数据页。
+struct airi_address_space; // 内核内部可持有地址空间，不向UI交出页表。
+bool airi_memory_user_space(struct airi_address_space *space); // 从长期内核根借用高半区。
+void airi_memory_use_kernel(void); // 返回启动内核地址空间后才能销毁用户空间。
+uint64_t airi_memory_take_page(void); // 内核对象明确持有一个物理数据页。
+bool airi_memory_return_page(uint64_t physical); // 映射和借用结束后归还。
+void *airi_memory_direct(uint64_t physical); // 当前受支持RAM的HHDM别名，不创建新映射。
 #endif // 结束包含保护。

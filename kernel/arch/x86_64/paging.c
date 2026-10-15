@@ -2,6 +2,7 @@
 #include <airi/base.h> // 新页表必须用自有 memset 清零。
 #define PRESENT 1ull // x86 PTE 的存在位。
 #define WRITE 2ull // 页表或叶子允许写入。
+#define USER 4ull // 每层都要允许user，不能只改叶子。
 #define PWT 8ull // 设备映射的 write-through 位。
 #define PCD 16ull // 设备映射的 cache-disable 位。
 #define LARGE 128ull // 此实现拒绝已有大页项，不把它当下一级表。
@@ -30,13 +31,15 @@ bool airi_vm_create(struct airi_address_space *s, struct airi_page_pool *pages, 
     uint64_t physical = airi_page_alloc(pages); // 根页也由页池记录所有权。
     if (!physical) // 耗尽时没有地址可清零。
         return false; // 保持输出对象不变。
-    *s = (struct airi_address_space){physical, offset, pages}; // 此后地址空间持有根页，不能归还给其他用途。
+    *s = (struct airi_address_space){.root=physical, .direct_offset=offset, .pages=pages}; // 此后地址空间持有根页，不能归还给其他用途。
     airi_memset(table(s, physical), 0, AIRI_PAGE_SIZE); // 清除旧所有者内容，初始没有任何映射。
     return true; // 成功拥有一个空根表。
 }
 bool airi_vm_map(struct airi_address_space *s, uint64_t address, uint64_t physical, unsigned flags) { // 本阶段只建立 supervisor 4 KiB 映射。
-    if (!s || !s->root || !canonical(address) || address % AIRI_PAGE_SIZE || (physical & ~ADDRESS) || (flags & ~(AIRI_VM_WRITE | AIRI_VM_EXEC | AIRI_VM_DEVICE))) // 拒绝不规范、未对齐、超物理位宽与未知权限。
+    if (!s || !s->root || !canonical(address) || address % AIRI_PAGE_SIZE || (physical & ~ADDRESS) || (flags & ~(AIRI_VM_WRITE | AIRI_VM_EXEC | AIRI_VM_DEVICE | AIRI_VM_USER))) // 拒绝不规范、未对齐、超物理位宽与未知权限。
         return false; // 输入错误不改变页表或页池。
+    if (((flags & AIRI_VM_USER) && address >= AIRI_USER_LIMIT) || (s->borrowed_kernel && (!(flags & AIRI_VM_USER) || address >= AIRI_USER_LIMIT))) // 用户空间不能改写借用的内核高半区。
+        return false; // 也不在借用空间中混入自有supervisor低半区分支。
     uint64_t made[3]; // 保存本次新借出的中间页表，失败时逆序归还。
     uint64_t *links[3]; // 对应父表项的地址，用于拆除本次建立的连接。
     unsigned count = 0; // 只有成功新建的中间表才计入回滚范围。
@@ -44,7 +47,7 @@ bool airi_vm_map(struct airi_address_space *s, uint64_t address, uint64_t physic
     for (unsigned level = 3; level > 0; --level) { // 依次消费第 39、30、21 位起的 9 位索引。
         unsigned index = (unsigned)((address >> (12 + level * 9)) & 511); // 512 项表占一页，每项 8 字节。
         uint64_t *entry = &current[index]; // 父表中指向下一层的槽位。
-        if (*entry & LARGE) // 当前实现从不混合 2 MiB/1 GiB 大页。
+        if ((*entry & LARGE) || ((*entry & PRESENT) && (flags & AIRI_VM_USER) && !(*entry & USER))) // 不支持大页，也不提升既有supervisor路径为user。
             goto rollback; // 不把大页物理起点当页表解引用。
         if (!(*entry & PRESENT)) { // 缺少下一层时才借出页表页。
             uint64_t next = airi_page_alloc(s->pages); // 分配失败必须收回此前新建的表。
@@ -53,14 +56,14 @@ bool airi_vm_map(struct airi_address_space *s, uint64_t address, uint64_t physic
             airi_memset(table(s, next), 0, AIRI_PAGE_SIZE); // 先清零，避免把旧内容解释成有效映射。
             made[count] = next; // 保存本次页表物理地址。
             links[count++] = entry; // 先存父链接，再增加有效回滚条数。
-            *entry = next | PRESENT | WRITE; // 中间层允许写，最终叶子仍独立决定权限。
+            *entry = next | PRESENT | WRITE | ((flags & AIRI_VM_USER) ? USER : 0); // 中间层允许写，最终叶子仍独立决定权限。
         }
         current = table(s, *entry & ADDRESS); // 去掉权限位后取得下一层物理表的直接映射。
     }
     uint64_t *leaf = &current[(address >> 12) & 511]; // 最后一级的索引消费第 12–20 位。
     if (*leaf & PRESENT) // 禁止静默覆盖已有映射，避免失去原数据页所有者。
         goto rollback; // 此时通常没有新建表，仍走统一回滚出口。
-    *leaf = physical | PRESENT | ((flags & AIRI_VM_WRITE) ? WRITE : 0) | ((flags & AIRI_VM_EXEC) ? 0 : NX) | ((flags & AIRI_VM_DEVICE) ? PWT | PCD : 0); // 叶子写入明确权限与物理地址。
+    *leaf = physical | PRESENT | ((flags & AIRI_VM_USER) ? USER : 0) | ((flags & AIRI_VM_WRITE) ? WRITE : 0) | ((flags & AIRI_VM_EXEC) ? 0 : NX) | ((flags & AIRI_VM_DEVICE) ? PWT | PCD : 0); // 叶子写入明确权限、用户位与物理地址。
     invalidate(s, address); // 同地址曾有负面或旧翻译时也不依赖隐式刷新。
     return true; // 数据页仍由调用者持有，页表只拥有中间表与根页。
 rollback: // 失败只拆本次新建的链接，不修改早已存在的分支。
@@ -94,13 +97,13 @@ bool airi_vm_lookup(const struct airi_address_space *s, uint64_t address, uint64
     if (physical) // 调用者可只关心是否存在。
         *physical = (leaf & ADDRESS) | (address & (AIRI_PAGE_SIZE - 1)); // 页内偏移在翻译前后保持不变。
     if (flags) // 可选返回本实现支持的叶子权限。
-        *flags = ((leaf & WRITE) ? AIRI_VM_WRITE : 0) | ((leaf & NX) ? 0 : AIRI_VM_EXEC) | ((leaf & PCD) ? AIRI_VM_DEVICE : 0); // 中间表由本实现固定为 supervisor RW。
+        *flags = ((leaf & WRITE) ? AIRI_VM_WRITE : 0) | ((leaf & NX) ? 0 : AIRI_VM_EXEC) | ((leaf & PCD) ? AIRI_VM_DEVICE : 0) | ((leaf & USER) ? AIRI_VM_USER : 0); // 中间表由本实现固定为 supervisor RW。
     return true; // 只表示软件页表存在，不代表设备或 RAM 访问一定成功。
 }
 bool airi_vm_unmap(struct airi_address_space *s, uint64_t address) { // 调用方必须避免解除当前指令、栈或页表自身的映射。
     uint64_t *tables[4]; // 保存由叶子向根回收所需的路径。
     unsigned indices[4]; // 对应每个父子链接。
-    if (address % AIRI_PAGE_SIZE || !walk(s, address, tables, indices)) // 只接受存在的页起点。
+    if ((s && s->borrowed_kernel && address >= AIRI_USER_LIMIT) || address % AIRI_PAGE_SIZE || !walk(s, address, tables, indices)) // 只接受存在的页起点。
         return false; // 不存在映射不会改变任何所有权。
     tables[0][indices[0]] = 0; // 先移除目标数据页的映射。
     uint64_t release[3]; // 在拆除父链接时暂存待归还的空表。
@@ -152,4 +155,26 @@ bool airi_vm_activate(const struct airi_address_space *s) { // 仅在新表已�
     (void)active_root; // 保留同一源码中的状态声明而避免未使用警告。
     return false; // 主机明确不能证明硬件激活。
 #endif // 结束目标差异。
+}
+
+bool airi_vm_clone_kernel(struct airi_address_space *space, const struct airi_address_space *kernel) { // 内核根和其高半区表必须比所有用户空间存活更久。
+    if (!kernel || !kernel->root || kernel->borrowed_kernel || !airi_vm_create(space, kernel->pages, kernel->direct_offset)) // 只从真实内核根创建新所有者。
+        return false; // 失败时不建立共享链接。
+    airi_memcpy(table(space, space->root) + 256, table(kernel, kernel->root) + 256, 256 * sizeof(uint64_t)); // 仅借用高半区，用户低半区保持全零。
+    space->borrowed_kernel = true; // 后续map/unmap/destroy必须尊重这条所有权边界。
+    return true; // 借出的只有根页，不复制内核所有表。
+}
+static void destroy_table(struct airi_address_space *space, uint64_t physical, unsigned level, unsigned entries) { // 递归深度固定四层，数据页不在此归还。
+    uint64_t *current = table(space, physical); // 非活动表仍通过当前内核HHDM可访问。
+    for (unsigned i = 0; i < entries; ++i) // 用户根只遍历低256项，其他自有层遍历512项。
+        if (level && (current[i] & PRESENT)) // 叶子描述的是外部数据页，不能误当子表释放。
+            destroy_table(space, current[i] & ADDRESS, level - 1, 512); // 自有中间表按子到父归还。
+    airi_page_free(space->pages, physical); // 当前不活动，不会有CPU继续遍历这个根。
+}
+bool airi_vm_destroy(struct airi_address_space *space) { // 调用者先切离该空间，并结束所有借用。
+    if (!space || !space->root || space->root == active_root) // 禁止销毁当前CPU正在使用的根。
+        return false; // 不能在释放页表后继续执行它。
+    destroy_table(space, space->root, 3, space->borrowed_kernel ? 256 : 512); // 借用的内核高半区从不回收。
+    airi_memset(space, 0, sizeof(*space)); // 清掉根地址，防止重复销毁。
+    return true; // 数据页仍由创建进程的调用者逐一归还。
 }

@@ -129,6 +129,11 @@
       "id": "K19",
       "title": "K19 · 两个任务沿各自的栈暂停和继续",
       "document": "dev-log/core/19-kernel-tasks.md"
+    },
+    {
+      "id": "K20",
+      "title": "K20 · ring3系统调用与用户故障隔离",
+      "document": "dev-log/core/20-user-boundary.md"
     }
   ]
 }

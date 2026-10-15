@@ -1,3 +1,4 @@
+#include <airi/user.h> // 用户陷入可选择另一条完整返回现场。
 #include <airi/timer.h> // 唯一开放的设备IRQ交给架构时钟驱动。
 #include <airi/trap.h> // 异常现场的 C 布局。
 #include <airi/kernel.h> // 日志、清零和停止接口。
@@ -17,11 +18,12 @@ struct task_state { // 64 位 TSS 只保存硬件切栈所需地址，不承担�
 _Static_assert(sizeof(struct task_state) == 104, "TSS layout"); // 编译时拒绝错误结构长度。
 _Static_assert(sizeof(struct idt_gate) == 16, "IDT layout"); // 每个门必须恰好 16 字节。
 _Static_assert(sizeof(struct airi_trap_frame) == 176, "trap layout"); // 栈含 15+2+5 个 8 字节槽。
-static uint64_t gdt[5]; // null、代码、数据和两项 TSS 描述符。
+static uint64_t gdt[7]; // null、ring0代码/数据、ring3代码/数据和两项TSS描述符。
 static struct idt_gate idt[256]; // 整张表属于内核静态内存，安装后持续有效。
 static struct task_state tss; // TSS 也必须在 ltr 后持续存在。
 static uint8_t double_fault_stack[16384] __attribute__((aligned(16))); // 原栈损坏时 DF 换这块栈。
 extern const uintptr_t airi_trap_entries[32]; // 汇编产生的异常入口地址表。
+extern void airi_trap_128(void), airi_trap_129(void); // 系统调用与内核启动用户上下文的门。
 extern void airi_trap_32(void); // IRQ0也复用完整通用寄存器保存入口。
 extern void airi_trap_255(void); // 未启用的向量转到统一停止路径。
 extern void airi_tables_load(const void *, const void *); // 汇编依次加载 GDT/TSS/IDT。
@@ -37,25 +39,33 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     gdt[2] = 0x00cf92000000ffffull; // present、ring0、可写数据段。
     uintptr_t base = (uintptr_t)&tss; // TSS 描述符使用内核虚拟地址。
     uint64_t limit = sizeof(tss) - 1; // 描述符界限是最后一个有效字节偏移。
-    gdt[3] = limit | ((base & 0xffffff) << 16) | (0x89ull << 40) | (((base >> 24) & 0xff) << 56); // available 64 位 TSS，地址低 32 位拆入描述符。
-    gdt[4] = base >> 32; // TSS 地址高 32 位存到紧随的第二项。
+    gdt[3] = 0x00affa000000ffffull; // ring3、64位、只读可执行代码段。
+    gdt[4] = 0x00cff2000000ffffull; // ring3、可写数据段。
+    gdt[5] = limit | ((base & 0xffffff) << 16) | (0x89ull << 40) | (((base >> 24) & 0xff) << 56); // available 64 位 TSS，地址低 32 位拆入描述符。
+    gdt[6] = base >> 32; // TSS 地址高 32 位存到紧随的第二项。
     tss.ist[0] = (uintptr_t)(double_fault_stack + sizeof(double_fault_stack)); // 硬件从栈顶向低地址压入 DF 现场。
     tss.io_offset = sizeof(tss); // 当前 TSS 内没有 I/O 权限位图。
     for (unsigned i = 0; i < 256; ++i) { // 全部项目初始化，避免继承加载器状态。
         uintptr_t address = i < 32 ? airi_trap_entries[i] : (uintptr_t)airi_trap_255; // 未使用向量也有明确停止入口。
         if (i == 32) // 唯一开放的设备向量有自己的编号，不能冒充未知255。
             address = (uintptr_t)airi_trap_32; // 指向TRAP32生成的入口。
-        idt[i] = (struct idt_gate){(uint16_t)address, 8, i == 8 ? 1 : 0, 0x8e, (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0}; // DPL0 中断门，只有 DF 使用 IST1。
+        if (i == 128 || i == 129) // 两个软件中断各有固定身份。
+            address = i == 128 ? (uintptr_t)airi_trap_128 : (uintptr_t)airi_trap_129; // 不能让它们落入未知向量255。
+        idt[i] = (struct idt_gate){(uint16_t)address, 8, i == 8 ? 1 : 0, i == 128 ? 0xee : 0x8e, (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0}; // int80门DPL3，其余DPL0；仅DF使用IST1。
     }
     struct table_pointer gdtr = {sizeof(gdt) - 1, (uintptr_t)gdt}; // CPU 复制描述符值，不保留这个局部对象指针。
     struct table_pointer idtr = {sizeof(idt) - 1, (uintptr_t)idt}; // IDT 本体则在静态区持续存在。
     airi_tables_load(&gdtr, &idtr); // 装载表和选择子，函数返回后表已经由本内核拥有。
     airi_log("[TRAP_READY] vectors=32 cs=8 double_fault_ist=1 interrupts=off"); // 该标记只表示异常设施，不宣称调度或 IRQ 完成。
 }
-void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
+struct airi_trap_frame *airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
+    if (f->vector == 128 || f->vector == 129 || ((f->cs & 3) == 3 && f->vector != 32)) // 用户系统调用和用户故障由用户上下文所有者处理。
+        return airi_user_trap(f); // 返回哪条完整现场由明确边界决定。
     if (f->vector == 32) { // PIC重映射后的时钟，不能作为CPU故障停止。
         airi_timer_interrupt(); // 计数并确认IRQ，保持当前任务现场不变。
-        return; // 仍由同一汇编入口恢复全部寄存器和RFLAGS。
+        if ((f->cs & 3) == 3) // IRQ真正打断了ring3执行。
+            airi_user_tick(); // 当前仅计数，不提前宣称多进程抢占。
+        return (f->cs & 3) == 3 ? airi_user_resume(f) : f; // 用户返回仍检查规范地址和标志，kernel直接恢复。
     }
     uint64_t cr2; // 读取最近页故障的线性地址，非 PF 时仅作为附带状态。
     __asm__ volatile("mov %%cr2,%0" : "=r"(cr2)); // =r 请求输出到编译器分配的通用寄存器。
@@ -66,7 +76,7 @@ void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指
         f->rip = expected_resume; // 修改 iretq 将恢复的指令地址，不猜指令长度。
         expected_site = 0; // 一次性登记在返回前消费，不能无限跳过相同错误。
         recovered = true; // 调用者据此检查故障确实发生。
-        return; // 汇编恢复寄存器并执行 iretq。
+        return f; // 汇编恢复同一个故障演示现场并执行iretq。
     }
     airi_panic("unhandled CPU exception"); // 未预期异常不返回有问题的指令。
 }
@@ -116,4 +126,16 @@ void airi_trap_memory_probe(uint64_t address, enum airi_memory_fault kind) { // 
     }
     if (!recovered || expected_site) // 只有处理器进入了正确 PF 入口才算完成。
         airi_panic("page fault probe did not recover"); // 不把普通函数返回误记为权限生效。
+}
+
+void airi_trap_set_stack(uint64_t top) { // 用户陷入时CPU从这里取ring0栈，不借用户提供的RSP。
+    if (!top || top % 16) // 当前入口要求16字节对齐的有效栈顶。
+        airi_panic("invalid ring0 stack top"); // 不装入可导致首次陷入即双重故障的描述。
+    tss.rsp[0] = top; // 所有者必须在用户运行期间保留完整映射。
+}
+
+uint64_t airi_trap_fault_address(void) { // x86控制寄存器读取只留在架构实现。
+    uint64_t address; // CR2保存最近页故障的线性地址。
+    __asm__ volatile("mov %%cr2,%0" : "=r"(address)); // 输出约束让编译器分配通用寄存器。
+    return address; // 仅向PF消费者交出本次数值。
 }
