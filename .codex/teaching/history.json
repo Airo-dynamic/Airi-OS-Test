@@ -34,6 +34,11 @@
       "id": "05",
       "title": "05 · 把启动信息变成可检查的数据",
       "document": "dev-log/core/05-boot-contract.md"
+    },
+    {
+      "id": "06",
+      "title": "06 · 让引导器进入自己的 C 代码，并发出第一行文字",
+      "document": "dev-log/core/06-entry.md"
     }
   ]
 }

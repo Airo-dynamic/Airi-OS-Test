@@ -1,4 +1,4 @@
-# AiriOS · 05
+# AiriOS · 06
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -8,3 +8,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [03 · 让字节复制在重叠时仍然正确](dev-log/core/03-bytes.md)
 - [04 · 在容量有限的数组里形成一行日志](dev-log/core/04-format.md)
 - [05 · 把启动信息变成可检查的数据](dev-log/core/05-boot-contract.md)
+- [06 · 让引导器进入自己的 C 代码，并发出第一行文字](dev-log/core/06-entry.md)

@@ -1,0 +1,56 @@
+checkpoint: '06'
+baseline: baseline.yaml
+start: '05'
+current_operation: 建立入口栈并发送第一行文字
+already_explained:
+- concept: 串口与字符编码
+  at: ../../../dev-log/core/04-format.md#serial-model
+  establishes: 设备按顺序收发字节；QEMU 接到主机输出；整数需转换成 ASCII 字符才显示为数字
+- concept: 容量与格式参数
+  at: ../../../dev-log/core/04-format.md#format-capacity
+  establishes: 数组容量包含 NUL，返回长度计算完整字符数；格式决定可变参数的取值类型
+- concept: 启动结构与ABI
+  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
+  establishes: 适配层与内核按同一固定字段布局读写启动数据，头文件声明这份布局和验证接口
+first_use:
+- concept: UART 发送通路
+  at: ../../../dev-log/core/06-entry.md#serial-path
+  establishes: 内核文字经 UART 到 QEMU，再到主机文件；主机日志文件不是 guest 文件系统
+- concept: I/O 端口、CPU 寄存器与内联汇编
+  at: ../../../dev-log/core/06-entry.md#port-registers
+  establishes: AL 保存字节，DX 保存端口；设备寄存器与 CPU 寄存器不同；约束交代汇编的输入输出
+- concept: 轮询和提交状态
+  at: ../../../dev-log/core/06-entry.md#polling
+  establishes: 发送前反复检查可接收状态；尝试次数不等于时间，状态位不证明主机已显示
+- concept: ELF 入口与栈
+  at: ../../../dev-log/core/06-entry.md#entry-stack
+  establishes: 引导器跳到 ELF 指定入口；RSP 定位自有 BSS 栈，lea 计算地址不解引用
+- concept: C 调用约定
+  at: ../../../dev-log/core/06-entry.md#call-abi
+  establishes: call 压入返回地址；入口满足对齐和方向标志，C 调用依赖这些前提
+- concept: 节、段与链接
+  at: ../../../dev-log/core/06-entry.md#elf-layout
+  establishes: 节组织输入代码数据，装载段指导加载；链接脚本给符号与入口安排地址
+- concept: 构建依赖与独立运行选项
+  at: ../../../dev-log/core/06-entry.md#make-rules
+  establishes: Make 根据目标与依赖时间决定重编译，模式变量定位输入输出；freestanding 与自有运行时排除宿主启动服务
+borrowed:
+- component: Limine 与固定协议头
+  contract: 进入内核前完成装载与早期映射，填写协议状态；本节入口自己准备栈并访问 COM1。
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 汇编、串口、链接和构建需要连接为一条启动执行路径。
+  revision: 沿 ELF 入口建立栈、调用 C 和写 UART；区分生成 ELF 与真正启动。
+- source: 用户本会话反馈：串口未得到解释
+  observation: 术语出现在正文和画像中，却未形成可用于设备发送或接收的模型
+  revision: 04 建立字节和字符通路，06 展开 UART 与端口，10 追踪输入返回；画像引用具体段落及范围
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 汇编位置、栈对齐与符号
+  at: ../../../dev-log/core/06-entry.md#code-kernel-arch-x86-64-entry-s-1
+  establishes: 标签给地址，.size 的当前位置差给长度；RIP 相对形成自有栈顶地址，call 压入返回地址后满足 C 入口对齐
+  status: 本版就地解释；不推断读者已掌握
+- concept: 当前编译单元中的static inline函数
+  at: ../../../dev-log/core/06-entry.md#port-registers
+  establishes: serial.c中的static限制out8/in8仅由当前单元按名字引用；放入头文件时才由每个包含者取得内部定义，inline不保证机器码一定展开
+  status: 本版就地解释；不推断读者已掌握
