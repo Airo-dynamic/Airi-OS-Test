@@ -1,0 +1,23 @@
+checkpoint: K27
+baseline: baseline.yaml
+start: K26
+current_operation: ring3追加正式记录，同一盘由第二个QEMU的新内核扫描并读回
+already_explained:
+- concept: 提交同步与恢复前缀
+  at: ../../../dev-log/core/26-journal.md#journal-order
+  establishes: 数据先同步再提交，失败可不确定，scan按实际介质恢复
+first_use:
+- concept: 用户日志边界
+  at: ../../../dev-log/core/27-user-storage.md#storage-user-copy
+  establishes: 17–19只传数值和有界副本，设备不借用户栈，当前等待仍在内核
+- concept: 正式日志与程序会话
+  at: ../../../dev-log/core/27-user-storage.md#storage-service
+  establishes: 静态服务跨用户exit保留，正常启动只scan，不自动追加
+- concept: 双启动验证身份
+  at: ../../../dev-log/core/27-user-storage.md#storage-two-boots
+  establishes: 两个独立CPU和输出只共享磁盘，受控terminate不冒充主机掉电
+not_assumed:
+- 通用持久文件系统、用户异步等待或真实主机掉电保证
+limits:
+- 64条固定记录，专用工作负载验证固定文本
+- Linux同步与原子替换另行对照，当前用户I/O仍同步等待

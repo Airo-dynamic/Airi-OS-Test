@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -205,11 +205,11 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -c $< -o $@
 
 # 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
 USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
@@ -245,3 +245,14 @@ $(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h
 $(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
 # 独立低地址ELF由内核包装后装载。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/files.o -o $@
+
+# 存储工作负载有独立用户main，普通启动不自动追加正式记录。
+$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h
+# 建立配置专属目录。
+	@mkdir -p $(dir $@)
+# 保持相同用户整数编译约束。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# storage与recover由同一ELF按明确argv分支。
+$(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/program.ld
+# 用户库没有宿主libc依赖。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/storage.o -o $@

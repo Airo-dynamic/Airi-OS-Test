@@ -1,3 +1,4 @@
+#include <airi/storage.h> // 用户存储请求经过有界副本进入日志服务。
 #include <airi/file.h> // 每进程FD表共享打开文件对象。
 #include <airi/console.h> // 内核命令消费服务结果，不依赖主题和绘图。
 #include <airi/elf.h> // 独立用户ELF检查器。
@@ -39,6 +40,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_storage_elf_start[], airi_storage_elf_end[]; // 写入和恢复共用一份明确分支的用户ELF。
 extern const uint8_t airi_files_elf_start[], airi_files_elf_end[]; // 内存文件用户工作负载。
 extern const uint8_t airi_worker_elf_start[], airi_worker_elf_end[]; // exec目标是另一个独立静态ELF。
 extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控损坏输入，验证旧进程保持。
@@ -47,6 +49,8 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
     {"worker", airi_worker_elf_start, airi_worker_elf_end},
+    {"storage", airi_storage_elf_start, airi_storage_elf_end}, // 显式提交记录。
+    {"recover", airi_storage_elf_start, airi_storage_elf_end}, // 只读取已恢复记录。
     {"files", airi_files_elf_start, airi_files_elf_end}, // 真实用户FD演示。
     {"broken", airi_broken_elf_start, airi_broken_elf_end}, // 用于完整的坏ELF失败演示。
 };
@@ -487,6 +491,32 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = (f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_dup(&current->files, (unsigned)f->rdi, f->rsi != 0) : (uint64_t)-9ll); // 单CPU内核中同步加引用。
     else if (f->rax == 14) // 仅绝对定位，不实现Linux全部whence。
         f->rax = (f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_seek(&current->files, (unsigned)f->rdi, f->rsi) : (uint64_t)-9ll); // 共享打开对象的偏移随之变化。
+    else if (f->rax == 17 || f->rax == 18) { // 日志append与read不是通用文件ABI。
+        uint8_t buffer[480]; // payload上限与磁盘格式一致，设备不直接访问用户页。
+        long result; // 实际长度、sequence或负错误。
+        if (f->rax == 17) { // RDI输入地址，RSI长度。
+            if (!f->rsi || f->rsi > sizeof(buffer)) // 不创建空记录或无界内核副本。
+                result = -22; // -EINVAL。
+            else if (!copy_user(current, buffer, f->rdi, (size_t)f->rsi, false)) // 完整复制后才可能产生磁盘副作用。
+                result = -14; // -EFAULT。
+            else { // 设备同步等待临时开IRQ，但不会在CS0切用户。
+                airi_log("[STORAGE_REQUEST] pid=%u operation=append bytes=%llu wait=kernel", current->pid, (unsigned long long)f->rsi); // 诚实区分同步内核等待与后续用户阻塞。
+                result = airi_storage_append(buffer, (size_t)f->rsi); // 成功已完成数据和提交同步。
+            }
+        } else { // RDI索引，RSI用户输出，RDX容量。
+            if (f->rdi >= 64 || f->rdx > sizeof(buffer)) // 完整64位索引不能截断成其他记录。
+                result = -22; // -EINVAL。
+            else if (!user_access(current, f->rsi, (size_t)f->rdx, true)) // 先验证完整用户输出范围。
+                result = -14; // -EFAULT，不进行设备I/O。
+            else { // 仅将校验通过的实际长度复制到用户。
+                result = airi_storage_read((unsigned)f->rdi, buffer, (size_t)f->rdx); // 设备数据和commit重新核对。
+                if (result > 0 && !copy_user(current, buffer, f->rsi, (size_t)result, true)) // 当前映射不应变化。
+                    airi_panic("validated storage output mapping changed"); // 内部不变量破坏明确停止。
+            }
+        }
+        f->rax = (uint64_t)result; // 同一次用户调用取得精确结果。
+    } else if (f->rax == 19) // 已恢复前缀数值查询。
+        f->rax = (uint64_t)airi_storage_count(); // 缺设备或不确定状态返回负数。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     return airi_user_resume(f); // 普通调用继续同一用户，仍检查RSP与标志。
@@ -552,7 +582,7 @@ void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回�
 bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
     size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
     if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
-        airi_console_print(console, "programs: hello processes worker broken files"); // broken是明确损坏的演示输入。
+        airi_console_print(console, "programs: hello processes worker broken files storage recover"); // broken是明确损坏的演示输入。
         return true; // 已处理，不再交给图形扩展。
     }
     if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。

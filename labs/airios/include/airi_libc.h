@@ -29,4 +29,7 @@ long airi_seek(unsigned fd, uint64_t offset); // 只支持绝对定位。
 long airi_read(unsigned fd, void *buffer, size_t bytes); // EOF为0，短读是实际完成数。
 long airi_pread(unsigned fd, void *buffer, size_t bytes, uint64_t offset); // 不移动共享偏移。
 long airi_pwrite(unsigned fd, const void *buffer, size_t bytes, uint64_t offset); // 第四参数R10。
+long airi_log_append(const void *data, size_t bytes); // 最多480字节，成功返回从1开始的sequence。
+long airi_log_read(unsigned index, void *data, size_t capacity); // 索引从0，返回实际长度。
+long airi_log_count(void); // 已恢复有效前缀，错误为负。
 #endif // 结束包含保护。

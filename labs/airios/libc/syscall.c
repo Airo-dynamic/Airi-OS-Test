@@ -63,3 +63,13 @@ long airi_pread(unsigned fd, void *buffer, size_t bytes, uint64_t offset) { // �
 long airi_pwrite(unsigned fd, const void *buffer, size_t bytes, uint64_t offset) { // 与pread使用同一第四参数约定。
     return call4(16, fd, (uintptr_t)buffer, bytes, offset); // 写也可能短于请求。
 }
+
+long airi_log_append(const void *data, size_t bytes) { // 同步记录提交，不等同普通FD写。
+    return call3(17, (uintptr_t)data, bytes, 0); // 数据和commit同步后才返回sequence。
+}
+long airi_log_read(unsigned index, void *data, size_t capacity) { // 内核验证完整输出范围。
+    return call3(18, index, (uintptr_t)data, capacity); // 小容量返回错误，不部分截断记录。
+}
+long airi_log_count(void) { // 只返回数值，不借内核对象。
+    return call3(19, 0, 0, 0); // 真实恢复失败保持负错误。
+}

@@ -27,3 +27,9 @@ airi_broken_elf_end: /* 失败输入恰好八字节。 */
 airi_files_elf_start: /* 映像首地址。 */
 .incbin AIRI_FILES_ELF /* 使用本配置实际链接的用户ELF。 */
 airi_files_elf_end: /* 映像右端，不把后续字节算入文件。 */
+
+.section .rodata /* 存储用户映像属于只读内核初始目录。 */
+.global airi_storage_elf_start, airi_storage_elf_end /* 同一映像按argv选择storage或recover。 */
+airi_storage_elf_start: /* 文件首。 */
+.incbin AIRI_STORAGE_ELF /* 本配置真实链接的用户ELF。 */
+airi_storage_elf_end: /* 文件半开右端。 */

@@ -169,6 +169,11 @@
       "id": "K26",
       "title": "K26 · 校验追加日志、提交同步与坏尾恢复",
       "document": "dev-log/core/26-journal.md"
+    },
+    {
+      "id": "K27",
+      "title": "K27 · 用户存储调用与跨QEMU启动恢复",
+      "document": "dev-log/core/27-user-storage.md"
     }
   ]
 }

@@ -6,6 +6,7 @@ import sys  # 取得当前解释器路径、入口参数及标准错误流。
 from tools import ROOT, tool, make_command  # 复用路径、工具查找与构建参数，不另建工具选择规则。
 from deps import prepare  # 复用外部依赖下载与校验，统一入口先调用它。
 from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
+from storage_test import check_storage_restart # 两个独立CPU从同一实验盘恢复。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
 PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
@@ -125,6 +126,7 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
         console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
         (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
+        check_storage_restart('desktop-normal' if args.graphics else 'normal') # 独立正式日志区的真实跨QEMU恢复。
     else:  # 普通build/run/debug共用指定配置构建路径。
         build(args.profile)  # build/run/debug先构建调用者选择的配置。
         if args.action!='build':  # 单独构建到此结束，run和debug继续启动虚拟机。
