@@ -1,0 +1,23 @@
+checkpoint: K30
+baseline: baseline.yaml
+start: K29
+current_operation: begin接收后拒绝覆盖，poll收集真实完成，原同步日志保持
+already_explained:
+- concept: DMA所有权与超时隔离
+  at: ../../../dev-log/core/25-block-device.md#block-ring-ownership
+  establishes: used确认前不改描述符和缓冲，超时保留静态DMA
+first_use:
+- concept: 接收与收集接口
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-begin-poll
+  establishes: begin0仅接收，poll1待完成，deadline跨调用固定，未收集仍busy
+- concept: 同步适配与设备互斥
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-sync-adapter
+  establishes: 只有自己begin成功才poll，忙拒绝不能偷取别人完成
+- concept: 日志进入前检查忙
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-log-interlock
+  establishes: EBUSY不进入事务，避免未开始操作误置不确定状态
+not_assumed:
+- 多硬件在途、用户SQ/CQ或Linux io_uring兼容
+limits:
+- 仍单硬件请求，非阻塞驱动接口不等于完整用户异步I/O
+- 设备可能在首次poll前已完成，演示不伪造pending必然可见

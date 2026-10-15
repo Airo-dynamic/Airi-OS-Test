@@ -14,6 +14,8 @@ static volatile uint16_t *available, *used; // 设备共享区必须每次真实
 static volatile struct used_element *used_ring; // 只在used.idx变化后消费元素。
 static struct descriptor *descriptors; // 发布后直到完成不可改链。
 static uint64_t request_physical, capacity; // 设备使用guest物理地址，不理解内核高VA。
+static uint32_t active_type; // 当前在途操作只属于成功begin的调用者。
+static uint64_t request_deadline; // 截止跨begin/poll调用保存，不能每次poll重置。
 static bool readonly, can_flush, ready, busy; // 固定队列状态，失败后禁止再次覆盖DMA。
 static uint32_t pci_read(unsigned slot, unsigned function, unsigned offset) { // 仅固定bus0上的q35设备。
     airi_out32(0xcf8, 0x80000000u | slot << 11 | function << 8 | (offset & 0xfcu)); // 选择PCI配置地址。
@@ -101,7 +103,9 @@ bool airi_block_readonly(void) { // 单设备配置启动后保持稳定。
 uint64_t airi_block_sectors(void) { // 只给上层有界容量信息。
     return ready ? capacity : 0; // 停止后不继续发布可用设备。
 }
-static int perform(uint32_t type, uint64_t sector, void *buffer) { // 单队列且最多一个在途请求。
+int airi_block_begin(unsigned type, uint64_t sector, const void *write_data) { // 只提交，不在这个调用中等设备完成。
+    if ((type != 0 && type != 1 && type != 4) || (type == 1 && !write_data)) // 内核接口也验证操作与输入，用户不能直接调用。
+        return -22; // -EINVAL。
     if (!ready) // 之前超时或未初始化。
         return -5; // -EIO，不覆盖可能仍被设备使用的旧DMA。
     if (busy) // 不支持重入和多个调用者覆盖同一静态请求。
@@ -113,13 +117,14 @@ static int perform(uint32_t type, uint64_t sector, void *buffer) { // 单队列�
     if (type == 4 && !can_flush) // 不把缺少FLUSH伪装同步成功。
         return -95; // -EOPNOTSUPP。
     uint64_t flags = airi_irq_save(); // 队列发布部分对本CPU不可打断。
+    active_type = type; // 类型与静态DMA所有权一起保存到后续poll。
     busy = true; // 先取得静态请求所有权。
     request.type = type; // IN=0、OUT=1、FLUSH=4。
     request.reserved = 0; // 协议保留字段写零。
     request.sector = type == 4 ? 0 : sector; // FLUSH不指定数据扇区。
     request.status = 0xff; // 设备必须覆盖状态，不能误用上次成功。
     if (type == 1) // 写请求先复制到内核长期DMA缓冲。
-        airi_memcpy(request.data, buffer, 512); // 上层栈和用户页都不交给设备。
+        airi_memcpy(request.data, write_data, 512); // 上层栈和用户页都不交给设备。
     descriptors[0] = (struct descriptor){request_physical, 16, 1, type == 4 ? 2 : 1}; // 设备只读请求头，NEXT指向数据或状态。
     descriptors[1] = (struct descriptor){request_physical + 16, 512, (uint16_t)(1u | (type == 0 ? 2u : 0u)), 2}; // read数据由设备写，write数据由设备读。
     descriptors[2] = (struct descriptor){request_physical + offsetof(struct block_request, status), 1, 2, 0}; // 状态字节始终由设备写。
@@ -130,15 +135,23 @@ static int perform(uint32_t type, uint64_t sector, void *buffer) { // 单队列�
     __atomic_thread_fence(__ATOMIC_SEQ_CST); // 发布idx在端口通知之前对设备可见。
     airi_out16(io + 16, 0); // 通知队列0有请求。
 #endif // 故障分支仍有真实时间上限。
-    uint64_t deadline = airi_timer_ticks() + 200; // 真实100Hz IRQ，最多约两秒等待。
-    while (used[1] == used_index) { // 设备先写数据/状态，最后发布used.idx。
-        if (airi_timer_ticks() >= deadline) { // 不是按忙循环次数估算时间。
-            int result = stop(-110); // -ETIMEDOUT，静态DMA区隔离且不再复用。
-            airi_irq_restore(flags); // 保留调用前的IF策略。
-            return result; // 上层得到具体错误。
-        }
-        __asm__ volatile("sti; hlt; cli" ::: "memory"); // 暂开IRQ等待PIT唤醒；CS0不会被用户调度器抢占。
+    request_deadline = airi_timer_ticks() + 200; // 一次提交只建立一个真实截止，不因多次poll延长。
+    airi_irq_restore(flags); // 返回到原调用者的IF策略，不在begin中睡眠。
+    return 0; // 仅表示已接受，busy直到poll收集或错误隔离才释放。
+}
+bool airi_block_pending(void) { // 仅查询驱动所有权状态。
+    return busy; // 设备可能已写used，未收集仍属于在途请求。
+}
+int airi_block_poll(void *buffer) { // 只检查一次，不hlt，不要求用户指针。
+    if (!busy) // 没有本驱动接收的请求可收集。
+        return -22; // -EINVAL，不能读上次残留status当新完成。
+    uint64_t flags = airi_irq_save(); // 完成收集和busy撤销作为同一次内核操作。
+    if (used[1] == used_index) { // 设备尚未发布新完成。
+        int result = airi_timer_ticks() >= request_deadline ? stop(-110) : 1; // 真超时才reset并隔离，1明确仍在途。
+        airi_irq_restore(flags); // 无完成也不改变原IF。
+        return result; // 调用者可去做别的工作，之后再poll。
     }
+    unsigned type = active_type; // 不从新调用参数猜测旧请求类型。
     __atomic_thread_fence(__ATOMIC_SEQ_CST); // 观察idx之后再读取设备完成内容。
     unsigned next_index = used[1]; // 读取这次设备序号。
     struct used_element completion = used_ring[used_index % queue_size]; // 同一槽的完整id与length。
@@ -154,12 +167,21 @@ static int perform(uint32_t type, uint64_t sector, void *buffer) { // 单队列�
     }
     ++used_index; // 本次已消费，不再重复处理同一个槽。
     int result = request.status == 0 ? 0 : request.status == 2 ? -95 : -5; // 设备IOERR与UNSUPP都明确交回。
-    if (!result && type == 0) // 只有成功读才能把设备数据交给上层。
+    if (!result && type == 0 && buffer) // 只有成功读才能把设备数据交给上层。
         airi_memcpy(buffer, request.data, 512); // 复制结束后设备DMA缓冲才可供下次覆盖。
     (void)airi_in8(io + 19); // 清可能遗留的legacy ISR状态，完成仍以used环判断。
     busy = false; // 已确认完成，可以重用同一静态请求。
     airi_irq_restore(flags); // 系统调用进入时IF0，普通内核演示进入时IF1。
-    return result; // 0表示设备完成，不自动代表应用事务持久化。
+    return result; // 收集完成后才能重用静态DMA，0不是应用事务持久化。
+}
+static int perform(unsigned type, uint64_t sector, void *buffer) { // 原同步接口组合begin与poll，语义保持。
+    uint64_t flags = airi_irq_save(); // 等待过程仍临时开IRQ，但不抢占CS0。
+    int result = airi_block_begin(type, sector, buffer); // busy或参数错误不会偷取别人的完成。
+    if (!result) // 只有本次提交成功才可以收集。
+        while ((result = airi_block_poll(buffer)) == 1) // 1是驱动待完成状态，不是成功字节数。
+            __asm__ volatile("sti; hlt; cli" ::: "memory"); // 用PIT唤醒后重查，截止由首次begin固定。
+    airi_irq_restore(flags); // 系统调用IF0与普通内核IF1都按原样恢复。
+    return result; // 0或负错误，旧read/write/flush契约不变。
 }
 int airi_block_read(uint64_t sector, void *buffer) { // 单扇区固定长度接口。
     return perform(0, sector, buffer); // read只在完成后写入上层副本。
@@ -182,6 +204,14 @@ void airi_block_demo(void) { // 独立实验盘，不接宿主真实磁盘。
 #endif // 正常路径还需验证真正读写。
     if (error) // 初始读取必须完成。
         airi_panic("cannot read block demo sector"); // 不用未初始化before覆盖磁盘。
+    if (airi_block_begin(0, sector, NULL) || !airi_block_pending() || airi_block_begin(0, sector, NULL) != -16) // 接收后即使设备已快完成，也不可覆盖未收集请求。
+        airi_panic("nonblocking block submission ownership failed"); // 不把第二次提交覆盖旧DMA。
+    int polled; // 首次poll可能已完成，不能伪造必须观测到pending。
+    while ((polled = airi_block_poll(after)) == 1) // 每次只看一次，等待策略留在调用者。
+        __asm__ volatile("sti; hlt" ::: "memory"); // 此启动演示等待真实PIT，不改变begin的非等待语义。
+    if (polled || airi_block_pending() || airi_memcmp(before, after, 512)) // 完成身份和原内容都要正确。
+        airi_panic("nonblocking block completion failed"); // 不能只看busy清了。
+    airi_log("[BLOCK_NONBLOCK_OK] accepted=1 overlap=-16 collected=1"); // 未收集前所有权独占，实际数据读回。
     for (unsigned i = 0; i < sizeof(pattern); ++i) // 不用全零数据掩盖没执行的写。
         pattern[i] = (uint8_t)(i * 37u + 19u); // 可复现非零模式。
     if (readonly) { // 只读盘允许读取，但写必须拒绝。

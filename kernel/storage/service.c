@@ -38,8 +38,12 @@ long airi_storage_append(const void *data, size_t bytes) { // 当前同步副本
         return -19; // -ENODEV。
     if (airi_block_readonly()) // 只读状态查询不破坏已恢复前缀。
         return -30; // -EROFS，不把正常只读拒绝标成不确定写。
+    if (airi_block_pending()) // 异步适配接入后，不能把别人的在途请求当本次日志I/O。
+        return -16; // -EBUSY，未进入日志所以不会错误置poisoned。
     return airi_journal_append(&store, data, bytes); // 数据、提交和同步均完成后才成功。
 }
 long airi_storage_read(unsigned index, void *data, size_t capacity) { // 单条记录不是RAM文件偏移接口。
+    if (airi_block_pending()) // 读日志同样不能收集其他调用者的完成。
+        return -16; // -EBUSY，原日志状态保持。
     return available ? airi_journal_read(&store, index, data, capacity) : -19; // 返回实际长度或明确错误。
 }

@@ -189,6 +189,11 @@
       "id": "K29",
       "title": "K29 · 阻塞管道、条件等待与可恢复的内核服务栈",
       "document": "dev-log/core/29-wait-queues.md"
+    },
+    {
+      "id": "K30",
+      "title": "K30 · 块请求begin/poll与同步适配的所有权",
+      "document": "dev-log/core/30-block-begin-poll.md"
     }
   ]
 }
