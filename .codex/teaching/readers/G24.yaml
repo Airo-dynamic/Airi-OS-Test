@@ -1,0 +1,46 @@
+checkpoint: G24
+baseline: baseline.yaml
+start: G23
+current_operation: 组合G23与K13，借用本轮boot/console和设备帧缓冲绘制Terminal/System
+already_explained:
+- concept: 启动信息的复制与借用
+  at: ../../../dev-log/core/08-real-boot-info.md#boot-lifetimes
+  establishes: 固定数组复制元数据，帧缓冲地址仍借用原像素；静态描述持续有效，使用地址依赖原映射
+- concept: 主机管道到 guest 输入
+  at: ../../../dev-log/core/10-input.md#uart-input-path
+  establishes: 父进程写字节到 QEMU 标准输入，QEMU 交给 UART，内核积累命令并回送结果
+- concept: 绘图顺序与裁剪
+  at: ../../../dev-log/graphics/15-windows.md#paint-order
+  establishes: 后写覆盖前写；order 表示底到顶；应用绘图借用 body 裁剪，返回后恢复整屏
+- concept: 画布与图像寿命
+  at: ../../../dev-log/graphics/23-native-window.md#display-lifetime
+  establishes: 平台拥有 pixels，图像包装在同步显示期读取；先释放包装，尺寸改变才换数组
+- concept: 串口和可选图形的链接选择
+  at: ../../../dev-log/core/11-serial-build.md#serial-display-link
+  establishes: 入口调用同名airi_console_draw；串口实现返回false，desktop-配置选择图形实现，首帧返回后才发布READY。
+first_use:
+- concept: 共享源码与真实服务
+  at: ../../../dev-log/graphics/24-guest-display.md#guest-services
+  establishes: 主机与 guest 分别运行各自编译副本；live 使用实际 boot/console，不取得 reference 文件
+- concept: 首帧完成记录
+  at: ../../../dev-log/graphics/24-guest-display.md#frame-completion
+  establishes: 先完成图形处理再发布 READY；无图形继续串口，graphics 值说明实际结果
+- concept: 新文本会话重新绑定，后续帧保留状态
+  at: ../../../dev-log/graphics/24-guest-display.md#guest-services
+  establishes: 首次有效绘图、console地址改变，或同地址重置使extension_context不再指向desktop时，ui_init重建并装主题扩展；对象与绑定都未变才复用后续帧。dashboard console有静态寿命。
+borrowed: []
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 主机参考与真实内核之间的环境切换需要显式说明。
+  revision: 从K13保留的内核文本循环接入共享绘图，解释live数据、串口回退和完成标记。
+- source: v2 独立源码伴读与连续复敲
+  observation: 仪表台曾保存局部console地址，且切换console时没有重新安装主题扩展。
+  revision: 仪表台console改为静态；新console或同地址重置后失效的extension_context都会重建桌面并绑定扩展，绑定不变的后续帧保留窗口与主题；G26增加换会话后的双主题像素观察。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 共享像素到设备像素
+  at: ../../../dev-log/graphics/24-guest-display.md#code-kernel-console-display-c-1
+  establishes: ui_draw直接借用启动描述的设备帧缓冲；u_rect按设备pitch定位，native按通道位域打包，没有另建中间32位RGB数组。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
+requires_core: K13

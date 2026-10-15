@@ -1,0 +1,2 @@
+# 显式选择图形时才包含；列出共享 C 模型与绘图。
+UI_SOURCES := frontend/render/draw.c frontend/core/state.c frontend/core/paint.c frontend/core/commands.c frontend/core/pointer.c frontend/core/editing.c frontend/apps/common.c frontend/apps/documents.c frontend/apps/series.c frontend/apps/builtin.c frontend/apps/terminal.c frontend/apps/files.c frontend/apps/editor.c frontend/apps/tasks.c frontend/apps/system.c frontend/apps/settings.c frontend/apps/viewer.c
