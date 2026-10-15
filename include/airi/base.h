@@ -9,4 +9,8 @@ void *airi_memmove(void *dst, const void *src, size_t n);  // 按地址次序选
 void *airi_memset(void *dst, int value, size_t n);  // 将 value 转成一个无符号字节，填入 dst 的 n 个位置
 int airi_memcmp(const void *a, const void *b, size_t n);  // 按无符号字节比较 n 项，首个差异决定返回值正负
 size_t airi_strlen(const char *s);  // 读到 NUL 才停止，返回前面的字符数，不计 NUL
+/* 截断时仍返回完整所需字符数，不含 NUL。
+ * 支持 %s/%c/%d/%u/%x/%p/%%、l/ll/z 及整数前导零宽度。 */
+int airi_vsnprintf(char *dst, size_t cap, const char *fmt, va_list args);  // 接收已开始遍历的参数状态，按 cap 截断保存并返回完整所需长度
+int airi_snprintf(char *dst, size_t cap, const char *fmt, ...);  // 普通调用入口，省略号接收 fmt 所约定的额外实参
 #endif  // 结束头文件包含保护，后续使用同一公开声明

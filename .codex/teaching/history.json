@@ -24,6 +24,11 @@
       "id": "03",
       "title": "03 · 让字节复制在重叠时仍然正确",
       "document": "dev-log/core/03-bytes.md"
+    },
+    {
+      "id": "04",
+      "title": "04 · 在容量有限的数组里形成一行日志",
+      "document": "dev-log/core/04-format.md"
     }
   ]
 }

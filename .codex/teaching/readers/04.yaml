@@ -1,0 +1,35 @@
+checkpoint: '04'
+baseline: baseline.yaml
+start: '03'
+current_operation: 把 IO:123 格式化到有限数组
+already_explained:
+- concept: NUL 字符串
+  at: ../../../dev-log/core/03-bytes.md#nul-string
+  establishes: NUL 是零字节；strlen 不计终止零，字节复制不会自动补零
+- concept: 字节指针与对象大小
+  at: ../../../dev-log/core/03-bytes.md#byte-pointers
+  establishes: 指针定位调用者准备的字节；const 限制写入，size_t 表示大小
+first_use:
+- concept: 串口与字符编码
+  at: ../../../dev-log/core/04-format.md#serial-model
+  establishes: 设备按顺序收发字节；QEMU 接到主机输出；整数需转换成 ASCII 字符才显示为数字
+- concept: 容量与格式参数
+  at: ../../../dev-log/core/04-format.md#format-capacity
+  establishes: 数组容量包含 NUL，返回长度计算完整字符数；格式决定可变参数的取值类型
+borrowed: []
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 格式化的长度、容量与截断需要保持同一组输入。
+  revision: 贯穿 IO:123 与五字节数组，连接 emit、参数遍历、终止零和返回长度。
+- source: 用户本会话反馈：串口未得到解释
+  observation: 术语出现在正文和画像中，却未形成可用于设备发送或接收的模型
+  revision: 04 建立字节和字符通路，06 展开 UART 与端口，10 追踪输入返回；画像引用具体段落及范围
+- source: v2 独立源码伴读与连续复敲
+  observation: SIZE读取旁注应与固定LP64的long分支一致
+  revision: 在原代码单元和相关机制正文修正；不将运行通过写成已经掌握
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 变参取值、宽度和类型
+  at: ../../../dev-log/core/04-format.md#code-kernel-lib-base-c-3
+  establishes: va_arg 必须按格式分支读取实际类型；fmt 的每次推进分别跳过百分号、宽度或长度标记，size_t 与 long 的约定限定在 LP64
+  status: 本版就地解释；不推断读者已掌握
