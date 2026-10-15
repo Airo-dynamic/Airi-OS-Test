@@ -1,0 +1,23 @@
+checkpoint: L05
+baseline: baseline.yaml
+start: K32 + L04
+current_operation: Linux双消费者有界队列与单次release/acquire发布的futex等待
+already_explained:
+- concept: 持久条件与等待登记
+  at: ../../../dev-log/core/29-wait-queues.md#wait-saved-request
+  establishes: 原frame与请求保留，重查条件后才唤醒，当前AiriOS单CPU不抢占内核
+first_use:
+- concept: mutex与条件谓词
+  at: ../../../dev-log/linux/05-threads.md#threads-queue-predicate
+  establishes: while重查、wait释放再重拿同一锁、closed仍排空、join后读取线程结果
+- concept: release/acquire与futex比较入睡
+  at: ../../../dev-log/linux/05-threads.md#threads-futex-publication
+  establishes: 普通数据由原子flag发布，内核比较期望值避免睡过WAKE，relaxed仅做独立统计
+- concept: 线程与运行时任务
+  at: ../../../dev-log/linux/05-threads.md#threads-run-trace
+  establishes: 实际TID和pthread句柄、bthread任务分开，跟踪中库内部futex不能全归手写flag
+not_assumed:
+- AiriOS已实现SMP/futex、所有条件wait都实际睡眠或本轮Linux已经运行
+limits:
+- SSH255，Linux分支编译/运行/strace未验证
+- Mac只检查拒绝分支，代码和操作完整不代替环境证据

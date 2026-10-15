@@ -204,6 +204,11 @@
       "id": "K32",
       "title": "K32 · 用户异步I/O、CQ阻塞与fork/exec/exit资源轮次",
       "document": "dev-log/core/32-user-async.md"
+    },
+    {
+      "id": "L05",
+      "title": "L05 · pthread有界队列、futex与原子发布",
+      "document": "dev-log/linux/05-threads.md"
     }
   ]
 }
