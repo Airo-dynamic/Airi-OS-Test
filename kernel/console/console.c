@@ -1,7 +1,7 @@
 #include <airi/console.h>  // 引入控制台状态与逻辑键编号
 #include <airi/base.h>     // 引入自有字节操作和有界格式化函数
 
-static void emit(struct airi_console *c, const char *fmt, ...) {  // 向console输出环新增一条有界格式化记录
+void airi_console_print(struct airi_console *c, const char *fmt, ...) {  // 向console输出环新增一条有界格式化记录
     char *line = c->lines[c->total_lines % AIRI_CONSOLE_LINES];  // 逻辑行号取余得到可复用槽位，line借用该行的128字节数组
     va_list args;  // 准备遍历fmt之后实际传入的格式参数
     va_start(args, fmt);  // 从最后一个具名参数fmt之后开始读取格式实参
@@ -56,7 +56,7 @@ void airi_journal_line(const struct airi_console *c, unsigned i, char *s, size_t
                           : "framebuffer absent; serial console active");  // 校验失败时说明图形缺失，现有串口通路仍可输出
         break;  // 本项文字已形成，结束switch而不继续生成下一项
     default:  // 固定8项记录中的最后一项为本地命令输入状态
-        airi_snprintf(s, n, "0007 console  local command interpreter; logical-key input");  // 最后一项说明本地命令解释器接收逻辑键；下一章才接入设备轮询
+        airi_snprintf(s, n, "0007 console  local command interpreter; logical-key input");  // 最后一项说明本地命令解释器接收设备轮询转换后的逻辑键
         break;  // 本项文字已形成，结束switch而不继续生成下一项
     }
 }
@@ -89,22 +89,22 @@ void airi_map_line(const struct airi_console *c, unsigned i, char *s, size_t n) 
                   (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把当前64位字段转成格式要求的unsigned long long
 }
 static void system_info(struct airi_console *c) {  // 将启动身份和内核尺寸加入命令输出
-    emit(c, "AiriOS 0.1 / x86_64 / bootstrap kernel");  // 将AiriOS 0.1 / x86_64 / bootstrap kernel保存为一条命令说明或身份记录
-    emit(c, "Console: local    CPU: single    Boot: UEFI / %s", c->boot->loader);  // 把本次查询字段按Console: local    CPU: single    Boot: UEFI / %s的格式保存到输出环
-    emit(c, "Kernel image: %llu KiB    Boot ABI: v%u",  // 把本次查询字段按Kernel image: %llu KiB    Boot ABI: v%u的格式保存到输出环
+    airi_console_print(c, "AiriOS 0.1 / x86_64 / bootstrap kernel");  // 将AiriOS 0.1 / x86_64 / bootstrap kernel保存为一条命令说明或身份记录
+    airi_console_print(c, "Console: local    CPU: single    Boot: UEFI / %s", c->boot->loader);  // 把本次查询字段按Console: local    CPU: single    Boot: UEFI / %s的格式保存到输出环
+    airi_console_print(c, "Kernel image: %llu KiB    Boot ABI: v%u",  // 把本次查询字段按Kernel image: %llu KiB    Boot ABI: v%u的格式保存到输出环
          (unsigned long long)(c->boot->kernel_size / 1024), c->boot->version);  // 字节除1024转KiB，再按%llu约定提供unsigned long long
 }
 void airi_console_init(struct airi_console *c, const AiriBootInfo *b) {  // 清命令状态并绑定只读启动结构，形成初始文字
     airi_memset(c, 0, sizeof(*c));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
     c->boot = b;     // 将借用启动信息，描述与内存地图须持续有效置为b，后续读取使用新状态
     system_info(c);  // 从同一启动结构生成系统身份与内核镜像尺寸
-    emit(c, "");     // 在输出环中保存一条空行，为后续显示保留间隔
-    emit(c, "System console attached.");      // 将System console attached.保存为一条命令说明或身份记录
-    emit(c, "help       Command reference");  // 将help       Command reference保存为一条命令说明或身份记录
-    emit(c, "mem        Physical memory inventory");  // 将mem        Physical memory inventory保存为一条命令说明或身份记录
-    emit(c, "devices    Console, input and display endpoints");  // 将devices    Console, input and display endpoints保存为一条命令说明或身份记录
-    emit(c, "log        Boot journal");  // 将log        Boot journal保存为一条命令说明或身份记录
-    emit(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
+    airi_console_print(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
+    airi_console_print(c, "System console attached.");  // 将System console attached.保存为一条命令说明或身份记录
+    airi_console_print(c, "help       Command reference");  // 将help       Command reference保存为一条命令说明或身份记录
+    airi_console_print(c, "mem        Physical memory inventory");  // 将mem        Physical memory inventory保存为一条命令说明或身份记录
+    airi_console_print(c, "devices    Console, input and display endpoints");  // 将devices    Console, input and display endpoints保存为一条命令说明或身份记录
+    airi_console_print(c, "log        Boot journal");  // 将log        Boot journal保存为一条命令说明或身份记录
+    airi_console_print(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
 }
 static void execute(struct airi_console *c) {  // 读取完整提交命令，更新历史并产生结果
     char command[AIRI_COMMAND_SIZE];  // 本次提交使用独立命令副本，避免清输入时丢失分派文字
@@ -117,7 +117,7 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
         start[--length] = 0;  // 先缩短长度，再在被移除的尾部空格处写NUL
     if (!length)  // 首尾去空格后为空命令时不提交
         return;  // 输入只有空白，返回而不增加命令计数或记录历史
-    emit(c, "airi> %s", start);  // 将本次真正提交的命令保存为输出环的一行
+    airi_console_print(c, "airi> %s", start);  // 将本次真正提交的命令保存为输出环的一行
     ++c->commands;  // 非空命令的累计提交次数增加一次
     if (c->history_count == AIRI_HISTORY_SIZE) {  // 8条历史已满时腾出最后一个槽
         airi_memmove(c->history, c->history + 1, (AIRI_HISTORY_SIZE - 1) * AIRI_COMMAND_SIZE);  // 后7条完整历史前移一槽，重叠区域用memmove保住待读字节
@@ -126,54 +126,56 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
     airi_snprintf(c->history[c->history_count++], AIRI_COMMAND_SIZE, "%s", start);  // 先在旧计数下标保存命令，再把历史计数加一
     c->view = AIRI_VIEW_TERMINAL;  // 切回Terminal显示当前输入或命令结果
     c->scroll = 0;  // 回到输出尾部，便于看到最新命令
-    char line[AIRI_CONSOLE_WIDTH];  // 命令查询先在128字节局部数组形成一行，再由emit复制进输出环
+    char line[AIRI_CONSOLE_WIDTH];  // 命令查询先在128字节局部数组形成一行，再由airi_console_print复制进输出环
     if (equal(start, "help")) {     // 提交文字完整等于help时生成命令列表
-        emit(c, "COMMAND    OPERATION");  // 将COMMAND    OPERATION保存为一条命令说明或身份记录
-        emit(c, "sys        Kernel and boot identity");  // 将sys        Kernel and boot identity保存为一条命令说明或身份记录
-        emit(c, "mem        Usable / held physical memory summary");  // 将mem        Usable / held physical memory summary保存为一条命令说明或身份记录
-        emit(c, "mem map    Complete physical address inventory");  // 将mem map    Complete physical address inventory保存为一条命令说明或身份记录
-        emit(c, "devices    Registered console hardware endpoints");  // 将devices    Registered console hardware endpoints保存为一条命令说明或身份记录
-        emit(c, "log        Boot journal (ordered events, no wall clock)");  // 将log        Boot journal (ordered events, no wall clock)保存为一条命令说明或身份记录
-        emit(c, "echo TEXT  Write text to this console");  // 将echo TEXT  Write text to this console保存为一条命令说明或身份记录
-        emit(c, "clear      Clear terminal scrollback");  // 将clear      Clear terminal scrollback保存为一条命令说明或身份记录
-        emit(c, "F1-F4      Terminal / Memory / Devices / Journal");  // 将F1-F4      Terminal / Memory / Devices / Journal保存为一条命令说明或身份记录
-        emit(c, "PgUp/PgDn  Scroll terminal or memory inventory");  // 将PgUp/PgDn  Scroll terminal or memory inventory保存为一条命令说明或身份记录
-        emit(c, "Up/Down    Command history    Ctrl-L: clear");  // 将Up/Down    Command history    Ctrl-L: clear保存为一条命令说明或身份记录
+        airi_console_print(c, "COMMAND    OPERATION");  // 将COMMAND    OPERATION保存为一条命令说明或身份记录
+        airi_console_print(c, "sys        Kernel and boot identity");  // 将sys        Kernel and boot identity保存为一条命令说明或身份记录
+        airi_console_print(c, "mem        Usable / held physical memory summary");  // 将mem        Usable / held physical memory summary保存为一条命令说明或身份记录
+        airi_console_print(c, "mem map    Complete physical address inventory");  // 将mem map    Complete physical address inventory保存为一条命令说明或身份记录
+        airi_console_print(c, "devices    Registered console hardware endpoints");  // 将devices    Registered console hardware endpoints保存为一条命令说明或身份记录
+        airi_console_print(c, "log        Boot journal (ordered events, no wall clock)");  // 将log        Boot journal (ordered events, no wall clock)保存为一条命令说明或身份记录
+        airi_console_print(c, "echo TEXT  Write text to this console");  // 将echo TEXT  Write text to this console保存为一条命令说明或身份记录
+        airi_console_print(c, "clear      Clear terminal scrollback");  // 将clear      Clear terminal scrollback保存为一条命令说明或身份记录
+        airi_console_print(c, "F1-F4      Terminal / Memory / Devices / Journal");  // 将F1-F4      Terminal / Memory / Devices / Journal保存为一条命令说明或身份记录
+        airi_console_print(c, "PgUp/PgDn  Scroll terminal or memory inventory");  // 将PgUp/PgDn  Scroll terminal or memory inventory保存为一条命令说明或身份记录
+        airi_console_print(c, "Up/Down    Command history    Ctrl-L: clear");  // 将Up/Down    Command history    Ctrl-L: clear保存为一条命令说明或身份记录
     } else if (equal(start, "sys"))  // 完整匹配sys时查询同一启动身份
         system_info(c);  // 从同一启动结构生成系统身份与内核镜像尺寸
     else if (equal(start, "mem")) {  // 完整匹配mem时按启动地图类别统计字节数
-        emit(c, "TYPE                  KiB");  // 将TYPE                  KiB保存为一条命令说明或身份记录
-        emit(c, "usable                %llu",  // 把本次查询字段按usable                %llu的格式保存到输出环
+        airi_console_print(c, "TYPE                  KiB");  // 将TYPE                  KiB保存为一条命令说明或身份记录
+        airi_console_print(c, "usable                %llu",  // 把本次查询字段按usable                %llu的格式保存到输出环
              (unsigned long long)(airi_memory_bytes(c->boot, AIRI_MEMORY_USABLE) / 1024));  // 字节除1024转KiB，再按%llu约定提供unsigned long long
-        emit(c, "boot reclaim (held)   %llu",  // 把本次查询字段按boot reclaim (held)   %llu的格式保存到输出环
+        airi_console_print(c, "boot reclaim (held)   %llu",  // 把本次查询字段按boot reclaim (held)   %llu的格式保存到输出环
              (unsigned long long)(airi_memory_bytes(c->boot, AIRI_MEMORY_BOOT_RECLAIM) / 1024));  // 字节除1024转KiB，再按%llu约定提供unsigned long long
-        emit(c, "kernel / modules      %llu",  // 把本次查询字段按kernel / modules      %llu的格式保存到输出环
+        airi_console_print(c, "kernel / modules      %llu",  // 把本次查询字段按kernel / modules      %llu的格式保存到输出环
              (unsigned long long)(airi_memory_bytes(c->boot, AIRI_MEMORY_KERNEL) / 1024));  // 字节除1024转KiB，再按%llu约定提供unsigned long long
-        emit(c, "%u firmware regions. No allocator accounting yet.", c->boot->region_count);  // 把本次查询字段按%u firmware regions. No allocator accounting yet.的格式保存到输出环
+        airi_console_print(c, "%u firmware regions. No allocator accounting yet.", c->boot->region_count);  // 把本次查询字段按%u firmware regions. No allocator accounting yet.的格式保存到输出环
     } else if (equal(start, "mem map")) {  // 完整匹配mem map时逐条输出实际物理范围
-        emit(c, "ID  PHYSICAL START   PHYSICAL END     TYPE");  // 将ID  PHYSICAL START   PHYSICAL END     TYPE保存为一条命令说明或身份记录
+        airi_console_print(c, "ID  PHYSICAL START   PHYSICAL END     TYPE");  // 将ID  PHYSICAL START   PHYSICAL END     TYPE保存为一条命令说明或身份记录
         for (unsigned i = 0; i < c->boot->region_count; ++i) {  // 只遍历启动地图有效前缀，每项形成一行范围说明
             airi_map_line(c, i, line, sizeof(line));  // 把第i条地图范围写入128字节临时行，下一步复制进命令输出环
-            emit(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
+            airi_console_print(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
         }
     } else if (equal(start, "devices")) {  // 完整匹配devices时显示当前固定设备端点
-        emit(c, "NAME    CLASS     CONFIGURATION");  // 将NAME    CLASS     CONFIGURATION保存为一条命令说明或身份记录
+        airi_console_print(c, "NAME    CLASS     CONFIGURATION");  // 将NAME    CLASS     CONFIGURATION保存为一条命令说明或身份记录
         for (unsigned i = 0; i < 3; ++i) {  // 逐项输出当前约定的3个设备说明
-            airi_device_line(c, i, line, sizeof(line));  // 把第i个固定设备描述写入临时行，随后emit保存
-            emit(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
+            airi_device_line(c, i, line, sizeof(line));  // 把第i个固定设备描述写入临时行，随后airi_console_print复制进输出环
+            airi_console_print(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
         }
     } else if (equal(start, "log")) {  // 完整匹配log时逐条显示有序启动记录
         for (unsigned i = 0; i < airi_journal_count(); ++i) {  // 按8条启动记录的有效下标查询并显示
             airi_journal_line(c, i, line, sizeof(line));  // 把第i条启动事件格式化到临时行，再追加到输出环
-            emit(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
+            airi_console_print(c, "%s", line);  // 把本次查询字段按%s的格式保存到输出环
         }
     } else if (equal(start, "clear"))  // 完整匹配clear时清可见输出环而不重置累计逻辑号
         c->line_count = 0;  // 清除可见历史行数，累计逻辑行号仍保留
     else if (!airi_memcmp(start, "echo ", length < 5 ? length : 5) && length >= 5)  // 最多比较当前长度与5的较小值，再要求至少5字节，确认echo加空格前缀
-        emit(c, "%s", start + 5);  // 略过echo和空格这5字节，将余部作为本条输出
-    else  // 前一分支未成立时执行下方替代操作
-        emit(c, "%s: unknown command. Type help.", start);  // 把本次查询字段按%s: unknown command. Type help.的格式保存到输出环
-    emit(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
+        airi_console_print(c, "%s", start + 5);  // 略过echo和空格这5字节，将余部作为本条输出
+    else if (c->extension && c->extension(c, start, c->extension_context)) {  // 同步调用可选消费者；它自己形成输出，不能保留局部命令指针。
+        /* 扩展已处理本条命令，不再生成未知命令错误。 */
+    } else  // 没有扩展或扩展不认识本命令时，保留原来的具体错误。
+        airi_console_print(c, "%s: unknown command. Type help.", start);  // 把本次查询字段按%s: unknown command. Type help.的格式保存到输出环
+    airi_console_print(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
 }
 bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑键并报告显示状态是否变化
     if (key >= AIRI_KEY_F1 && key <= AIRI_KEY_F4) {  // 连续功能键范围F1到F4用于选择四种命令视图

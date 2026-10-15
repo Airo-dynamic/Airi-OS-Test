@@ -1,4 +1,4 @@
-# AiriOS · 10
+# AiriOS · K11
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -13,3 +13,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [08 · 将真实引导响应复制到自己的接口](dev-log/core/08-real-boot-info.md)
 - [09 · 先让普通字符成为一条可执行命令](dev-log/core/09-console.md)
 - [10 · 把串口和键盘字节接入内核命令模型](dev-log/core/10-input.md)
+- [K11 · 让串口构建独立于图形支线](dev-log/core/11-serial-build.md)

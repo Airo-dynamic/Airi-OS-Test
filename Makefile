@@ -1,69 +1,127 @@
-# 交叉编译C和汇编的LLVM驱动
+# 用既有make_command取得交叉工具参数；统一airios入口在K13加入。
+# 内核C编译器由调用参数覆盖；此处默认clang，不借宿主libc。
 CC := clang
-# 把独立ELF对象链接成内核
+# ELF链接器默认LLD，调用参数可传入真实找到的路径。
 LD := ld.lld
-# 后续主机观察使用本机C编译器
+# 主机实验用宿主编译器，可以链接宿主libc。
 HOST_CC := cc
-# 当前构建变体，未指定时normal
+# ?=仅在调用者未赋值时取normal，各测试配置独立构建。
 PROFILE ?= normal
-# 当前变体产物目录
+# $(PROFILE)展开当前配置名称，OUT指向这一配置的产物目录。
 OUT := build/$(PROFILE)
-# 已接入的内核C文件清单
-SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c kernel/boot/info.c kernel/main.c kernel/console/console.c kernel/arch/x86_64/input.c
-# 每个C文件映射到对象路径，再加入汇编入口对象
+# 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
+SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
+    kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c
+# 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
+ifneq ($(filter desktop-%,$(PROFILE)),)
+include frontend/sources.mk # 本分支取得图形自己的源码清单。
+# guest 图形适配与纯 C 前端进入同一内核，参考服务和 Cocoa 不进入。
+SOURCES += kernel/console/display.c $(UI_SOURCES)
+else # 没有desktop-前缀时只选择串口实现。
+# 串口实现没有字体、绘图与桌面状态。
+SOURCES += kernel/console/serial_display.c
+endif # 结束当前可选图形分支。
+# 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
+CASE := $(patsubst desktop-%,%,$(PROFILE))
+# patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
 OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
-# 独立x86-64 ELF、C11和无宿主运行时等编译约束
+# 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
           -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 自有接口和协议头的包含目录
+# 预处理器从自有include、固定协议头third_party和前端include取得声明。
 CPPFLAGS := -Iinclude -Ithird_party
-# 按PROFILE构建变体选择下面的故障或输出宏
-ifeq ($(PROFILE),no-framebuffer)
-# 在已有预处理参数后追加当前变体宏
+# 只有显式图形配置需要前端头文件。
+ifneq ($(filter desktop-%,$(PROFILE)),)
+CPPFLAGS += -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
+endif # 结束当前可选图形分支。
+# Make条件只在no-framebuffer配置加入下方测试宏。
+ifeq ($(CASE),no-framebuffer)
+# +=追加预处理选项，让启动适配模拟缺少图形响应。
 CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-# 结束本次PROFILE条件分支
-endif
-# 按PROFILE构建变体选择下面的故障或输出宏
-ifeq ($(PROFILE),missing-memory)
-# 在已有预处理参数后追加当前变体宏
+endif # 结束 no-framebuffer 的编译条件
+# 缺内存响应配置采用独立构建目录和下面宏。
+ifeq ($(CASE),missing-memory)
+# 模拟必需内存地图缺失，内核应打印具体PANIC。
 CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
-# 结束本次PROFILE条件分支
-endif
-# 按PROFILE构建变体选择下面的故障或输出宏
-ifeq ($(PROFILE),edit-experiment)
-# 在已有预处理参数后追加当前变体宏
+endif # 结束 missing-memory 的编译条件
+# 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
+ifeq ($(CASE),edit-experiment)
+# 单引号由shell保护内部双引号，编译器取得C字符串宏值；下一续行同时设置学习日志文字。
 CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
             -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-# 结束本次PROFILE条件分支
-endif
+endif # 结束 edit-experiment 的文字覆盖条件
 
-# 这些名字是操作目标，即使存在同名文件也不判已完成
+# 这些名称是动作目标，即使同名文件存在也执行其规则。
 .PHONY: all kernel image host-test clean
-# all为默认动作，依赖image，自身没有recipe。
+# 默认动作依赖镜像，触发内核编译、链接和镜像制作。
 all: image
-# kernel为显式编译入口，ELF目标决定是否重建。
+# 只构建独立内核ELF，不制作启动镜像。
 kernel: $(OUT)/airios.elf
-# 声明本目标依赖哪些输入；源文件比对象新时重新执行recipe
+# 模式规则将相同相对路径的C源文件编成当前配置对象；%匹配路径主体。
 $(OUT)/%.o: %.c
-	# 先创建目标父目录；@隐藏命令回显，$(dir $@)取目标目录
+# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
 	@mkdir -p $(dir $@)
-	# 分别传预处理与编译参数；$<为首个源前提，$@为当前目标路径
+# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# 声明本目标依赖哪些输入；源文件比对象新时重新执行recipe
+# 同一对象布局下编译带预处理的汇编入口。
 $(OUT)/%.o: %.S
-	# 先创建目标父目录；@隐藏命令回显，$(dir $@)取目标目录
+# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
 	@mkdir -p $(dir $@)
-	# 分别传预处理与编译参数；$<为首个源前提，$@为当前目标路径
+# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# ELF任一对象或链接脚本更新时重新链接。
+# ELF依赖全部对象与链接脚本，任一变化会重新链接。
 $(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld
-	# 独立静态链接，无宿主libc，链接脚本决定段与入口位置
+# 这一完整续行命令用ELF x86-64、无标准库、静态链接、4KiB页对齐和不可执行栈；-T指定自有布局，最后-o写目标。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
 	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-# image是.PHONY动作，每次调用都运行镜像制作；依赖先更新ELF。
+# 镜像先要求独立ELF成功。
 image: $(OUT)/airios.elf
-	# 把当前PROFILE传给镜像脚本，复用已锁定固件与引导器
+# 把同一配置的ELF装入UEFI启动镜像。
 	python3 scripts/image.py $(PROFILE)
-# 加载编译器生成的头文件依赖；缺失.d不会中断第一次构建
+# 主机字节算法、启动合同与命令状态检查，保留assert并启用ASan/UBSan。
+host-test:
+# 先建立主机检查产物目录。
+	@mkdir -p build/tests
+# 以下完整续行命令编译主机检查；fno-builtin避免优化绕过被测实现，sanitizer检查内存和未定义行为，AIRI_HOST_TEST避开真实端口指令。
+	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
+	    -fsanitize=address,undefined -DAIRI_HOST_TEST -Iinclude tests/unit/base_test.c \
+	    kernel/lib/base.c kernel/boot/info.c \
+	    kernel/console/console.c kernel/arch/x86_64/input.c \
+		    -o build/tests/base_test
+# 只有全部assert成立才打印PASS，失败状态返回Make。
+	./build/tests/base_test
+# 清理仅删除可重建产物，保留运行证据artifacts。
+clean:
+# 调用shutil删除build；ignore_errors允许尚不存在目录。
+	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'
+# 后缀替换得到自动依赖文件；前缀-允许首次构建尚无.d。
 -include $(OBJECTS:.o=.d)
+
+
+# 手动选择图形动作时才读取支线目标；默认构建不检查该目录。
+ifneq ($(filter ui-preview ui-test lab-editor,$(MAKECMDGOALS)),)
+include frontend/targets.mk # 仅显式图形动作读取相应规则。
+endif # 结束当前可选图形分支。
+
+# 三个观察名称均是动作，即使有同名文件也运行。
+.PHONY: lab-memmove lab-boot-info
+# 重新构建重叠移动与截断输出观察。
+lab-memmove:
+# 建立观察程序目录，保持所有可重建产物在build。
+	@mkdir -p build/labs
+# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
+	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
+	    labs/host/base/memmove_trace.c kernel/lib/base.c -o build/labs/memmove
+# 打印左/右重叠及截断结果。
+	./build/labs/memmove
+# 重新构建合法/损坏启动数据观察。
+lab-boot-info:
+# 建立观察程序目录，保持所有可重建产物在build。
+	@mkdir -p build/labs
+# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
+	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
+	    labs/host/boot/boot_info_probe.c kernel/boot/info.c -o build/labs/boot-info
+# 打印启动合同的正常与独立失败原因。
+	./build/labs/boot-info

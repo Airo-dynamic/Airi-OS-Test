@@ -1,70 +1,71 @@
-#include <airi/kernel.h>   // 引入启动日志、错误停机与串口接口
-#include <airi/console.h>  // 引入控制台状态与逻辑键编号
+#include <airi/arch.h>     // 通过架构边界使用忙等提示。
+#include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
+#include <airi/console.h>  // 取得命令环、按键与视图类型。
 
-static struct airi_console console;  // 内核静态对象保留同一控制台的输入缓冲和显示内容
+static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
 
-#ifndef AIRI_DEMO_MESSAGE  // 构建参数未指定输出文字时采用下方默认值
-#define AIRI_DEMO_MESSAGE "Hello from AiriOS P1"  // 给本次启动准备默认演示文字
-#endif  // 结束当前条件编译范围
-_Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 校验启动信息后持续轮询输入并回送新命令输出
-    const char *error = airi_boot_validate(info);  // 验证启动合同，NULL表示有效，非NULL是可直接输出的只读错误原因
-    if (error)  // 启动合同验证返回非NULL原因时，在使用信息之前停止
-        airi_panic(error);  // 把当前失败原因送到UART并停止内核
-    airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 把当前启动状态记录送到UART
-             info->loader);  // 把启动适配器保存的引导器名称作为%s实参
-    airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 把当前启动状态记录送到UART
-             (unsigned long long)info->kernel_physical_base,  // 把当前64位字段转成格式要求的unsigned long long
-             (unsigned long long)info->kernel_virtual_base, (unsigned long long)info->kernel_size);  // 把当前64位字段转成格式要求的unsigned long long
-    airi_log("[HHDM] offset=0x%llx", (unsigned long long)info->direct_map_offset);  // 把当前启动状态记录送到UART
-    for (uint32_t i = 0; i < info->region_count; ++i) {  // 逐条记录实际地图有效范围，尚未对其进行分配
-        const struct airi_memory_region *r = &info->regions[i];  // 取实际启动地图第i条范围的只读地址，后续记录其物理起点和长度
-        airi_log("[MEMORY] index=%u base=0x%llx length=0x%llx kind=%s", i,  // 把当前启动状态记录送到UART
-                 (unsigned long long)r->base, (unsigned long long)r->length,  // 把当前64位字段转成格式要求的unsigned long long
-                 airi_memory_name(r->kind));  // 把当前用途编号转为记录中的可读分类文字
+#ifndef AIRI_DEMO_MESSAGE  // 允许修改实验在编译时替换输出文本。
+#define AIRI_DEMO_MESSAGE "Hello from AiriOS P1"  // 普通配置默认输出的学习标记文字。
+#endif  // 结束默认演示文字的条件定义
+_Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交入稳定启动描述；_Noreturn 声明内核不返回加载器。
+    const char *error = airi_boot_validate(info);  // 校验必需启动字段，NULL 表示通过，字符串给出失败原因。
+    if (error)  // 有具体原因则不能继续读取未经验证的数据。
+        airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
+    airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
+             info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
+    airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 串口分别记录内核物理位置、虚拟地址和字节长度。
+             (unsigned long long)info->kernel_physical_base,  // 转换到 %llx 要求的无符号 long long。
+             (unsigned long long)info->kernel_virtual_base, (unsigned long long)info->kernel_size);  // 虚拟地址采用十六进制，内核大小按字节十进制输出。
+    airi_log("[HHDM] offset=0x%llx", (unsigned long long)info->direct_map_offset);  // 记录把物理地址换成直接映射虚拟地址的偏移量。
+    for (uint32_t i = 0; i < info->region_count; ++i) {  // 只遍历启动描述声明的有效区域，不读取固定数组剩余项。
+        const struct airi_memory_region *r = &info->regions[i];  // 借用第 i 条区域描述。
+        airi_log("[MEMORY] index=%u base=0x%llx length=0x%llx kind=%s", i,  // 逐项输出下标、物理起点、长度及用途。
+                 (unsigned long long)r->base, (unsigned long long)r->length,  // 地址和长度都是64位范围，按 long long 适配格式。
+                 airi_memory_name(r->kind));  // 将区域种类转成可读名称，不改变区域数据。
     }
-    uint64_t usable = airi_memory_bytes(info, AIRI_MEMORY_USABLE);  // 沿实际启动地图累加可用范围长度，结果单位是字节
-    airi_log("[MEMORY_SUMMARY] usable_bytes=%llu boot_reclaim_bytes=%llu",  // 把当前启动状态记录送到UART
-             (unsigned long long)usable,  // 把当前64位字段转成格式要求的unsigned long long
-             (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 把当前64位字段转成格式要求的unsigned long long
-    airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 把当前启动状态记录送到UART
-    airi_console_init(&console, info);  // console绑定已验证的同一启动结构，初始化命令历史和输出环
-    bool graphics = false;  // 当前只接串口，图形状态尚未启用
-    if (graphics) {  // 只有本次图形真正启用时才报告成功显示参数
-        const struct airi_framebuffer *fb = &info->framebuffer;  // 借用适配器给出的实际帧缓冲描述
-        airi_log("[FRAMEBUFFER] width=%llu height=%llu pitch=%llu bpp=%u",  // 把当前启动状态记录送到UART
-                 (unsigned long long)fb->width, (unsigned long long)fb->height,  // 把软件画布像素宽度、软件画布像素高度转成格式要求的unsigned long long
-                 (unsigned long long)fb->pitch, (unsigned)fb->bpp);  // pitch是字节行距，转unsigned long long配%llu；bpp转unsigned配%u。
-    } else  // 前一分支条件未成立时转入随后的单条替代操作
-        airi_log("[FRAMEBUFFER_UNAVAILABLE] using serial output");  // 把当前启动状态记录送到UART
-    /* P1 input checkpoint: serial state is ready; no drawing is implemented yet. */
-    airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 把当前启动状态记录送到UART
-             (unsigned long long)usable);  // 把当前64位字段转成格式要求的unsigned long long
-    airi_log("[AIRI_LESSON_READY] serial command loop active");  // 把当前启动状态记录送到UART
-    airi_serial_write("airi> ");  // 发送没有换行的提示符，等待下一条输入
-    for (;;) {  // 本操作持续循环，只有明确终点或分支才能退出
-        int key = airi_input_poll();  // 每轮从键盘或UART取一个事件，无事件返回0
-        if (!key) {  // 当前轮询没有逻辑事件时保持输入输出状态并继续等待
-            __asm__ volatile("pause");  // 无输入时向CPU发忙等提示，仍继续轮询而没有睡眠调度
-            continue;  // 本项不参与当前结果，跳过本轮剩余操作进入下一项
+    uint64_t usable = airi_memory_bytes(info, AIRI_MEMORY_USABLE);  // 按实际种类累加可用区域字节数，不等同虚拟机总配置内存。
+    airi_log("[MEMORY_SUMMARY] usable_bytes=%llu boot_reclaim_bytes=%llu",  // 输出可用内存与暂由加载器占用的可回收内存两个值。
+             (unsigned long long)usable,  // 可用字节数转换匹配 %llu。
+             (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 另行累计加载器可回收区域，不混入 usable。
+    airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
+    airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
+    bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
+    if (graphics) {  // 有效图形路径才输出图形参数。
+        const struct airi_framebuffer *fb = &info->framebuffer;  // 借用刚用于绘图的同一份帧缓冲描述。
+        airi_log("[FRAMEBUFFER] width=%llu height=%llu pitch=%llu bpp=%u",  // 记录尺寸、字节行距和每像素位数，供截图与日志比对。
+                 (unsigned long long)fb->width, (unsigned long long)fb->height,  // 宽高转为与 %llu 相同的参数类型。
+                 (unsigned long long)fb->pitch, (unsigned)fb->bpp);  // pitch 按字节输出，bpp 按位数输出。
+    } else  // 未完成图形时仍发送串口原因并继续启动。
+        airi_log("[DISPLAY_SERIAL] no frame produced; using serial output");  // 图形不适用时记录原因路径，后面仍进入串口命令循环。
+    /* Written AFTER all drawing, so tests can take a completed screenshot. */
+    airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
+             (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
+    airi_serial_write("airi> ");  // 输出首个串口提示符。
+    for (;;) {  // 没有退出条件，内核持续轮询输入。
+        int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
+        if (!key) {  // 没有新键时不处理命令和重画。
+            airi_arch_relax();  // 提示当前架构正在忙等；这不是睡眠或调度。
+            continue;  // 跳过当前不适用项，继续检查下一项。
         }
-        uint64_t before = console.total_lines;  // 记录按键前逻辑行号，提交后只发送新增输出
-        bool changed = airi_console_key(&console, key);  // 把一个逻辑事件交给命令模型，返回是否可能需要刷新显示
-        if (!changed)  // 该事件未改变可显示状态时无需发送更新记录
-            continue;  // 本项不参与当前结果，跳过本轮剩余操作进入下一项
-        if (key == '\n' || key == '\r') {  // 回车或换行说明本轮已提交命令，向串口发布完成后的控制台输出
-            uint64_t first = console.total_lines - console.line_count;  // 求环中最早仍有效的逻辑行号
-            if (before < first)  // 按键前起点已经被新输出覆盖时，从仍有效的最旧行开始
-                before = first;  // 原起点已被覆盖时提升到仍可读取的最旧记录
-            for (uint64_t i = before; i < console.total_lines; ++i) {  // 按逻辑行号读取仍保留或本次新增的console输出
-                airi_serial_write(airi_console_line(&console, i));  // 读取第i条仍保留文字并逐字节送给UART
-                airi_serial_write("\n");  // 每发送一条环记录后补串口换行
+        uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。
+        bool changed = airi_console_key(&console, key);  // 按键改变命令或页面状态，返回是否需要刷新。
+        if (!changed)  // 被忽略的按键不产生新帧。
+            continue;  // 跳过当前不适用项，继续检查下一项。
+        if (key == '\n' || key == '\r') {  // 回车完成命令，才把新增输出回显到 UART。
+            uint64_t first = console.total_lines - console.line_count;  // 日志环只保留 line_count 行，first 是尚可读取的最早逻辑行。
+            if (before < first)  // 若本次命令挤掉旧行，先把读取起点限到仍存在的区域。
+                before = first;  // 不访问已经被覆盖的逻辑行。
+            for (uint64_t i = before; i < console.total_lines; ++i) {  // 逐行回显本次命令产生且仍保留的内容。
+                airi_serial_write(airi_console_line(&console, i));  // 逻辑行号由环接口转换为数组下标。
+                airi_serial_write("\n");  // 为该行补串口行结束。
             }
-            airi_serial_write("airi> ");  // 发送没有换行的提示符，等待下一条输入
+            airi_serial_write("airi> ");  // 输出首个串口提示符。
         }
-
-        /* Published after command handling; this checkpoint reports serial completion only. */
-        if (key == '\n' || key == '\r' || key >= AIRI_KEY_PAGE_UP)  // 提交或功能事件处理完后才发更新记录，普通逐字节输入不产生这条完成标记
-            airi_log("[CONSOLE_UPDATE] view=%u commands=%u page=%u", (unsigned)console.view,  // 把当前启动状态记录送到UART
-                     console.commands, console.map_page);  // 发布处理后的提交计数与内存页号，供主机确认动作已完成
+        if (graphics)  // 只在启动时建立了图形路径的情况下重画。
+            airi_console_draw(&console);  // 把变更后的命令与页面状态写成完整画面。
+        /* Published after rendering: interaction tests observe completed frames. */
+        if (key == '\n' || key == '\r' || key >= AIRI_KEY_PAGE_UP)  // 命令提交与功能键在绘图后发布可观察完成记录。
+            airi_log("[CONSOLE_UPDATE] view=%u commands=%u page=%u", (unsigned)console.view,  // 输出当前页面、累计命令和内存页号，观察程序据此等待具体状态。
+                     console.commands, console.map_page);  // 这两个计数来自刚处理并重画的同一命令对象。
     }
 }
