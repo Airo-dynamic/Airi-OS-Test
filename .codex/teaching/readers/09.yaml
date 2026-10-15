@@ -1,0 +1,41 @@
+checkpoint: 09
+baseline: baseline.yaml
+start: 08
+current_operation: 将 mem 字符积累成命令并生成结果
+already_explained:
+- concept: NUL 字符串
+  at: ../../../dev-log/core/03-bytes.md#nul-string
+  establishes: NUL 是零字节；strlen 不计终止零，字节复制不会自动补零
+- concept: 容量与格式参数
+  at: ../../../dev-log/core/04-format.md#format-capacity
+  establishes: 数组容量包含 NUL，返回长度计算完整字符数；格式决定可变参数的取值类型
+- concept: 内存地图与地址映射
+  at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
+  establishes: 地图记录物理范围及用途；页表将虚拟地址映射到物理地址；HHDM 按固定偏移直接映射
+- concept: 重叠复制
+  at: ../../../dev-log/core/03-bytes.md#overlap-copy
+  establishes: 同一数组的源与目标重叠时选择搬运方向，命令历史满后用它将后七条前移一槽
+first_use:
+- concept: 控制台输入和输出状态
+  at: ../../../dev-log/core/09-console.md#console-state
+  establishes: console 保存正在输入的字符和已生成结果；UART 是字节通路，图形终端是显示方式
+- concept: 输出环与逻辑编号
+  at: ../../../dev-log/core/09-console.md#ring-lines
+  establishes: 递增行号通过余数映射到有限槽位；覆盖旧行后仅保留有效区间
+- concept: 字符与功能键
+  at: ../../../dev-log/core/09-console.md#logical-keys
+  establishes: ASCII 字符直接加入输入，功能键使用独立编号，回车才提交命令
+- concept: 命令结果与未实现操作
+  at: ../../../dev-log/core/09-console.md#console-theme
+  establishes: 文本会话保存输入、历史与输出；mem读取启动地图，theme day没有处理分支，六次构造提交同时观察查询、回显与未知命令
+borrowed: []
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 命令状态的多个字段需要由逐字符输入和一次提交组织。
+  revision: 沿 m、e、m、回车连接输入、历史、统计与输出环。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 输出接收者和环形下标
+  at: ../../../dev-log/core/09-console.md#code-kernel-console-console-c-1
+  establishes: 私有 emit(c, ...) 接收拥有输入和输出环的 console 对象，用有限格式化生成当前文字；环形下标用取余回绕，写入计数和可见行数分别控制覆盖与读取
+  status: 本版就地解释；不推断读者已掌握

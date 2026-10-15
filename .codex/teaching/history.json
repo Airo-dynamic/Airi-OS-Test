@@ -49,6 +49,11 @@
       "id": "08",
       "title": "08 · 将真实引导响应复制到自己的接口",
       "document": "dev-log/core/08-real-boot-info.md"
+    },
+    {
+      "id": "09",
+      "title": "09 · 先让普通字符成为一条可执行命令",
+      "document": "dev-log/core/09-console.md"
     }
   ]
 }

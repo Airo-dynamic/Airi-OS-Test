@@ -1,4 +1,4 @@
-# AiriOS · 08
+# AiriOS · 09
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -11,3 +11,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [06 · 让引导器进入自己的 C 代码，并发出第一行文字](core/06-entry.md)
 - [07 · 把 ELF 放入 UEFI 镜像并看到第一行](core/07-first-boot.md)
 - [08 · 将真实引导响应复制到自己的接口](core/08-real-boot-info.md)
+- [09 · 先让普通字符成为一条可执行命令](core/09-console.md)
