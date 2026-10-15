@@ -84,3 +84,25 @@ long airi_ready(unsigned fd) { // 仅查询当前管道条件。
 long airi_wait_ready(unsigned fd, unsigned events, unsigned ticks) { // 条件满足返回事件位，超时0，负值是错误。
     return call3(22, fd, events, ticks); // 内核保存现场并在同一次调用后恢复。
 }
+
+long airi_io_alloc(void) { // 自有句柄不是可解引用的用户内存。
+    return call3(23, 0, 0, 0); // 最多四个注册buffer。
+}
+long airi_io_put(uint64_t handle, const void *data, size_t bytes) { // 用户输入先同步复制，之后不能覆盖BUSY。
+    return call3(24, handle, (uintptr_t)data, bytes); // 最多512字节，短输入尾部清零。
+}
+long airi_io_get(uint64_t handle, void *data, size_t bytes) { // 完整输出范围在内核验证。
+    return call3(25, handle, (uintptr_t)data, bytes); // 成功0，字节范围由本次bytes决定。
+}
+long airi_io_free(uint64_t handle) { // 注册资源与用户堆页分开。
+    return call3(26, handle, 0, 0); // 不允许提前释放请求借用的buffer。
+}
+long airi_io_submit(unsigned operation, uint64_t handle, const struct airi_io_submission *submission) { // 本次int80内复制16字节数值结构。
+    return call3(27, operation, handle, (uintptr_t)submission); // 成功不代表I/O已经完成。
+}
+long airi_io_next(struct airi_io_completion *completion, unsigned wait) { // 空CQ可返回-11或登记当前用户等待。
+    return call3(28, (uintptr_t)completion, wait, 0); // 真正I/O字节/错误保存在completion.result。
+}
+long airi_io_state_get(struct airi_io_state *state) { // 状态快照不会消耗CQ或解锁buffer。
+    return call3(29, (uintptr_t)state, 0, 0); // 四十字节，不含内核地址。
+}

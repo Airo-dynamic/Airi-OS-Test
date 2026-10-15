@@ -57,6 +57,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
         airi_log("[STORAGE_INIT_ERROR] error=%d", storage_error); // 保留具体失败。
         airi_panic("storage recovery failed"); // 不继续提供错误前缀。
     }
+    airi_async_init(); // 所有设备配置都初始化固定资源池，设备错误由CQ表达。
     airi_async_demo(); // 三个真实设备操作和一个有界范围错误完成。
     airi_user_demo(); // 正常与非法用户程序结束后仍回到启动栈和串口。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
@@ -77,6 +78,8 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_log("[AIRI_P3_READY] user=ring3 elf=static fork=copy exec=transaction wait=blocked"); // 完整内核进程路径结束并恢复后才发布。
     if (airi_storage_count() >= 0) // 超时隔离的故障镜像不宣称磁盘阶段可用。
         airi_log("[AIRI_P4_READY] files=ram pipes=blocking block=virtio journal=crc writable=%u", !airi_block_readonly()); // Linux实测状态另记，不由guest标记证明。
+    if (airi_storage_count() >= 0 && !airi_block_readonly()) // 可写正常设备已完成用户异步生命周期。
+        airi_log("[AIRI_P5_READY] wait=blocked sq=4 cq=4 registered=1 lifecycle=reclaimed"); // Linux实验实测另记，不由guest标记代替。
     airi_serial_write("airi> ");  // 输出首个串口提示符。
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。

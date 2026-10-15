@@ -10,6 +10,12 @@ struct airi_io_completion { // 结果归属于明确cookie与buffer，不按完�
     int64_t result; // 读写成功512，FLUSH成功0，错误负数。
     uint32_t operation, reserved; // 操作类型与必须为零的保留字段。
 };
+struct airi_io_state { // 只读有界快照，不含队列或内核指针。
+    uint32_t queued, active, completed, registered_buffers, busy_buffers, outstanding; // 本owner当前轮次的实际数值。
+    uint32_t retired_active, reserved; // 同一ID旧epoch仍由内核收集的ACTIVE，不交旧结果给新映像。
+    uint64_t epoch; // 可观察同一PID的映像资源轮次。
+};
+_Static_assert(sizeof(struct airi_io_state) == 40, "state ABI size"); // 两端按同一固定长度复制。
 _Static_assert(sizeof(struct airi_io_submission) == 16, "submission ABI size"); // 读用户结构前固定字节数。
 _Static_assert(sizeof(struct airi_io_completion) == 32, "completion ABI size"); // CQ输出不能随编译器结构变化。
 #endif // 结束保护。

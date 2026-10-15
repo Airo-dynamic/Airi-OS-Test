@@ -14,6 +14,10 @@ static struct airi_aio_buffer *find_buffer(struct airi_aio_engine *e, const stru
     struct airi_aio_buffer *buffer = &e->buffers[index]; // 索引已限制。
     return buffer->state != AIRI_AIO_BUFFER_FREE && buffer->owner == owner->id && buffer->epoch == owner->epoch && buffer->handle == handle ? buffer : NULL; // 旧句柄和其他owner都不能命中。
 }
+static void event(struct airi_aio_engine *e, unsigned stage, const struct airi_aio_request *request, long result) { // 同步只读观察，不把内部指针保留到回调之后。
+    if (e->backend.event) // 主机模型可以不安装观察器。
+        e->backend.event(e->backend.context, stage, request, result); // 观察者不得重入修改引擎。
+}
 int airi_aio_init(struct airi_aio_engine *e, const struct airi_aio_backend *backend, uint64_t base, uint64_t sectors) { // 仅用于无在途借用的新对象。
     if (!e || !backend || !backend->begin || !backend->poll || !sectors || base > UINT64_MAX - sectors) // 检查后端与有界扇区范围。
         return -22; // -EINVAL，旧对象不改。
@@ -43,8 +47,10 @@ void airi_aio_close(struct airi_aio_engine *e, unsigned id) { // 活动请求不
     if (!owner) // 无资源可撤销。
         return; // 不影响其他owner。
     for (unsigned i = 0; i < AIRI_AIO_REQUESTS; ++i) // 只取消尚未交给设备的排队项。
-        if (e->requests[i].state == AIRI_AIO_QUEUED && e->requests[i].owner == id && e->requests[i].epoch == owner->epoch) // ACTIVE仍需被真实poll收集。
+        if (e->requests[i].state == AIRI_AIO_QUEUED && e->requests[i].owner == id && e->requests[i].epoch == owner->epoch) { // ACTIVE仍需被真实poll收集。
+            event(e, AIRI_AIO_CANCEL, &e->requests[i], -125); // 记录撤销而非伪造设备完成。
             airi_memset(&e->requests[i], 0, sizeof(e->requests[i])); // 未提交请求没有后端借用，可立即复用。
+        }
     for (unsigned i = 0; i < AIRI_AIO_BUFFERS; ++i) // 注册缓冲不被DMA直接使用。
         if (e->buffers[i].owner == id && e->buffers[i].epoch == owner->epoch) // 只撤销本轮次所有权。
             airi_memset(&e->buffers[i], 0, sizeof(e->buffers[i])); // 在途数据副本仍在ACTIVE单元中。
@@ -156,6 +162,7 @@ int airi_aio_submit(struct airi_aio_engine *e, unsigned id, unsigned operation, 
         buffer->state = AIRI_AIO_BUFFER_BUSY; // 用户不可修改或释放，直到CQ收集。
     }
     ++owner->outstanding; // 接受时预留CQ容量，完成时不释放信用。
+    event(e, AIRI_AIO_SUBMIT, request, 0); // 已接受不表示I/O完成。
     return 0; // 请求可稍后开始，也可通过CQ报I/O错误。
 }
 static int complete(struct airi_aio_engine *e, struct airi_aio_request *request, int result) { // 后端已结束借用，才能回收请求单元。
@@ -169,7 +176,9 @@ static int complete(struct airi_aio_engine *e, struct airi_aio_request *request,
         unsigned tail = (owner->head + owner->count) % AIRI_AIO_CQ; // CQ环当前尾槽。
         owner->completions[tail] = (struct airi_io_completion){request->cookie, request->handle, result ? result : request->operation == AIRI_IO_FLUSH ? 0 : 512, request->operation, 0}; // cookie关联身份，不推断完成顺序。
         ++owner->count; // 结果完全写好才发布可收集数量。
-    }
+        event(e, AIRI_AIO_COMPLETE, request, owner->completions[tail].result); // 真实CQ已形成，记录对应结果。
+    } else // 原owner退出或已经进入新epoch。
+        event(e, AIRI_AIO_DROP, request, result ? result : request->operation == AIRI_IO_FLUSH ? 0 : 512); // 后端已结束，完成不会交给新对象。
     airi_memset(request, 0, sizeof(*request)); // 无主完成丢弃，ACTIVE副本也只在真实收集后才复用。
     return 0; // 完成信用仍留到pop或owner关闭。
 }
@@ -228,6 +237,7 @@ int airi_aio_pump(struct airi_aio_engine *e) { // 只由普通内核服务调用
         if (!result) { // 只有被后端接收才变ACTIVE。
             next->state = AIRI_AIO_ACTIVE; // 数据副本保持到真实poll。
             e->active = (int)(next - e->requests); // 数组内指针差得到本槽。
+            event(e, AIRI_AIO_START, next, 0); // 所有在途状态完整发布后才记录开始。
             return 0; // 不在同次pump里等待它完成。
         }
         if (result > 0) // begin只允许0或负错误。
@@ -244,4 +254,36 @@ bool airi_aio_work(const struct airi_aio_engine *e) { // 用于决定是否需�
         if (e->requests[i].state != AIRI_AIO_REQUEST_FREE) // 已完成CQ不在请求池内。
             return true; // 还不能丢弃引擎对象。
     return false; // 只有用户尚未收集的CQ不要求设备推进。
+}
+
+int airi_aio_state(struct airi_aio_engine *e, unsigned id, struct airi_io_state *state) { // 复制有限数值，不暴露池地址。
+    struct airi_aio_owner *owner = find_owner(e, id); // 只统计当前轮次。
+    if (!owner || e->faulted) // 无有效身份。
+        return -5; // -EIO。
+    if (!state) // 无效内核输出不修改引擎。
+        return -22; // -EINVAL。
+    *state = (struct airi_io_state){.completed = owner->count, .outstanding = owner->outstanding, .epoch = owner->epoch}; // CQ计数与信用分别表示。
+    for (unsigned i = 0; i < AIRI_AIO_REQUESTS; ++i) // 请求身份按owner与epoch筛选。
+        if (e->requests[i].owner == id && e->requests[i].epoch == owner->epoch) { // 旧ACTIVE不冒充新轮次的在途。
+            state->queued += e->requests[i].state == AIRI_AIO_QUEUED; // 接受但尚未开始。
+            state->active += e->requests[i].state == AIRI_AIO_ACTIVE; // 已交后端且未收集。
+        } else if (e->requests[i].owner == id && e->requests[i].state == AIRI_AIO_ACTIVE) // 旧epoch仍占后端，但不属于新映像请求。
+            ++state->retired_active; // 只给计数，不能读取旧buffer或CQ。
+    for (unsigned i = 0; i < AIRI_AIO_BUFFERS; ++i) // 只读当前注册集合。
+        if (e->buffers[i].owner == id && e->buffers[i].epoch == owner->epoch && e->buffers[i].state != AIRI_AIO_BUFFER_FREE) { // 排除空槽和其他身份。
+            ++state->registered_buffers; // 总注册数。
+            state->busy_buffers += e->buffers[i].state == AIRI_AIO_BUFFER_BUSY; // 含完成但CQ尚未收集。
+        }
+    return 0; // 结果只在本次调用时刻成立。
+}
+bool airi_aio_quiescent(const struct airi_aio_engine *e) { // 关闭会话后验证静态池也已回收，不只看物理页统计。
+    if (e->faulted || e->active >= 0 || airi_aio_work(e)) // 无主ACTIVE也必须收集完。
+        return false; // 不可销毁或重建引擎。
+    for (unsigned i = 0; i < AIRI_AIO_OWNERS; ++i) // CQ与信用属于owner。
+        if (e->owners[i].id) // 活owner说明资源尚未释放。
+            return false; // 不能把空SQ当全部结束。
+    for (unsigned i = 0; i < AIRI_AIO_BUFFERS; ++i) // 注册池由内核长期存储，页数不变也可能泄漏。
+        if (e->buffers[i].state != AIRI_AIO_BUFFER_FREE) // 任一占用都不是quiescent。
+            return false; // 交给调用者报告。
+    return true; // 单调代数保留不是资源占用。
 }

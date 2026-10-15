@@ -1,0 +1,29 @@
+checkpoint: K32
+baseline: baseline.yaml
+start: K31
+current_operation: ring3提交与CQ等待，其他用户交替进展，退出/exec旧轮次晚完成安全退役
+already_explained:
+- concept: CQ信用、buffer BUSY与owner epoch
+  at: ../../../dev-log/core/31-async-queues.md#async-credit
+  establishes: 接受预留完成位，收集才解锁，ACTIVE副本保持到后端结束
+- concept: 启动服务继续位置
+  at: ../../../dev-log/core/29-wait-queues.md#wait-kernel-continuation
+  establishes: active与idle分开，完整frame边界回启动栈，恢复用户前重新登记继续现场
+first_use:
+- concept: 用户描述与注册资源的两种寿命
+  at: ../../../dev-log/core/32-user-async.md#async-user-abi
+  establishes: 描述当次复制可立即复用，注册buffer到CQ收集都BUSY，句柄不是指针
+- concept: 进程owner生命周期
+  at: ../../../dev-log/core/32-user-async.md#async-process-owner
+  establishes: fork空上下文，exec新epoch且旧副本不关新owner，exit留ACTIVE内核排空
+- concept: 真实阶段观察
+  at: ../../../dev-log/core/32-user-async.md#async-observer
+  establishes: submit/start/complete/drop/cancel来自状态变化，只读回调不保留或重入对象
+- concept: 慢设备等待证据
+  at: ../../../dev-log/core/32-user-async.md#async-throttled-proof
+  establishes: QMP真实限速，按实际父PID核对另一用户进展位于CQ登记与WAKE之间
+not_assumed:
+- Linux注册用户页零拷贝、共享ring规则、真实主机掉电保证或完整跨架构移植
+limits:
+- 固定复制池、四项软件SQ和单硬件在途
+- Linux实验另行记录，guest P5_READY不证明Linux实测

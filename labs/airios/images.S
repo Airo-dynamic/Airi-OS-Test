@@ -45,3 +45,9 @@ airi_pipes_elf_end: /* 文件右端。 */
 airi_waits_elf_start: /* 文件开始。 */
 .incbin AIRI_WAITS_ELF /* 本配置独立ELF。 */
 airi_waits_elf_end: /* 半开右端。 */
+
+.section .rodata /* 用户异步工作负载与exec别名共用同一ELF。 */
+.global airi_async_elf_start, airi_async_elf_end /* 初始映像边界。 */
+airi_async_elf_start: /* 文件首字节。 */
+.incbin AIRI_ASYNC_ELF /* 本配置真实链接的用户程序。 */
+airi_async_elf_end: /* 文件半开右端。 */

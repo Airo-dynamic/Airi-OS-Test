@@ -185,7 +185,7 @@ lab-boot-info:
 	./build/labs/boot-info
 
 # 用户C使用自己的低地址模型、入口和库；绝不沿用内核高地址链接脚本。
-USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -mcmodel=small
+USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -mcmodel=small -Iinclude
 # 每个配置拥有独立用户对象，避免跨配置复用旧二进制。
 USER_OBJECTS := $(OUT)/user/start.o $(OUT)/user/hello.o $(OUT)/user/bytes.o $(OUT)/user/syscall.o
 # 入口汇编与内核汇编分别形成对象，符号_start不在同一个链接目标中冲突。
@@ -195,13 +195,13 @@ $(OUT)/user/start.o: labs/airios/start.S
 # 当前交叉编译器不链接宿主运行时。
 	$(CC) $(USER_FLAGS) -c $< -o $@
 # 用户C程序只读取自有用户库声明。
-$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h
+$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 先建立输出目录。
 	@mkdir -p $(dir $@)
 # 编译为用户模型对象。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # 用户库的字节实现与系统调用实现共用这一规则。
-$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h
+$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 输出目录与当前配置绑定。
 	@mkdir -p $(dir $@)
 # 所有用户库均使用同样的freestanding约束。
@@ -211,16 +211,16 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf $(OUT)/user/async.elf
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -DAIRI_WAITS_ELF='"$(OUT)/user/waits.elf"' -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -DAIRI_WAITS_ELF='"$(OUT)/user/waits.elf"' -DAIRI_ASYNC_ELF='"$(OUT)/user/async.elf"' -c $< -o $@
 
 # 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
 USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
 # 普通用户C工作负载仍使用相同低地址编译约束。
-$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h
+$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 创建当前配置目录。
 	@mkdir -p $(dir $@)
 # 只读取用户库头，不引入内核实现。
@@ -231,7 +231,7 @@ $(OUT)/user/processes.elf: $(USER_COMMON) $(OUT)/user/processes.o labs/airios/pr
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/processes.o -o $@
 
 # exec目标独立编译，保持同一用户ABI与链接布局。
-$(OUT)/user/worker.o: labs/airios/worker.c labs/airios/include/airi_libc.h
+$(OUT)/user/worker.o: labs/airios/worker.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 建立当前配置输出目录。
 	@mkdir -p $(dir $@)
 # 普通用户C仅链接自己的运行库。
@@ -242,7 +242,7 @@ $(OUT)/user/worker.elf: $(USER_COMMON) $(OUT)/user/worker.o labs/airios/program.
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/worker.o -o $@
 
 # 文件演示有独立用户main，复用自有入口与库。
-$(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h
+$(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 按配置建立目录。
 	@mkdir -p $(dir $@)
 # 同样禁止宿主库和浮点寄存器。
@@ -253,7 +253,7 @@ $(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/files.o -o $@
 
 # 存储工作负载有独立用户main，普通启动不自动追加正式记录。
-$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h
+$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 建立配置专属目录。
 	@mkdir -p $(dir $@)
 # 保持相同用户整数编译约束。
@@ -264,7 +264,7 @@ $(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/progra
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/storage.o -o $@
 
 # 非阻塞管道有独立用户main，保持前面程序各自可运行。
-$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h
+$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 当前配置目录单独建立。
 	@mkdir -p $(dir $@)
 # 不链接内核头或宿主运行时。
@@ -275,7 +275,7 @@ $(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/pipes.o -o $@
 
 # 阻塞和就绪等待工作负载独立于非阻塞管道程序。
-$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h
+$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h include/airi/io_abi.h
 # 仍按配置隔离用户对象。
 	@mkdir -p $(dir $@)
 # 只使用自有用户库与整数寄存器。
@@ -284,3 +284,14 @@ $(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h
 $(OUT)/user/waits.elf: $(USER_COMMON) $(OUT)/user/waits.o labs/airios/program.ld
 # 低地址静态链接，不借宿主入口。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/waits.o -o $@
+
+# 异步用户程序与重置别名共用独立main和低地址入口。
+$(OUT)/user/async.o: labs/airios/async.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+# 当前配置的对象目录。
+	@mkdir -p $(dir $@)
+# USER_FLAGS含公开ABI头，不能依赖内核内部结构。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 自有入口、库与async main单独链接。
+$(OUT)/user/async.elf: $(USER_COMMON) $(OUT)/user/async.o labs/airios/program.ld
+# 仍为无宿主libc的静态ELF。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/async.o -o $@

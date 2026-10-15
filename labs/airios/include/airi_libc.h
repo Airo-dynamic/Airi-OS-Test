@@ -1,5 +1,6 @@
 #ifndef AIRI_USER_LIBC_H // 用户库头与内核基础库分开。
 #define AIRI_USER_LIBC_H // 包含保护。
+#include <airi/io_abi.h> // 自有固定宽度提交、完成和只读状态，不包含内核结构。
 #include <stddef.h> // 用户对象字节长度。
 #include <stdint.h> // 用户ABI的64位寄存器值。
 void *memcpy(void *destination, const void *source, size_t bytes); // 双方不重叠的用户空间复制。
@@ -39,4 +40,11 @@ long airi_log_count(void); // 已恢复有效前缀，错误为负。
 long airi_pipe(unsigned ends[2], unsigned nonblocking); // nonblocking=0阻塞，1暂不可完成时返回-11。
 long airi_ready(unsigned fd); // 管道当前条件查询，不是Linux epoll ABI。
 long airi_wait_ready(unsigned fd, unsigned events, unsigned ticks); // READ/WRITE条件，0纯查询，最多500tick，超时返回0。
+long airi_io_alloc(void); // 注册一个512字节内核buffer，返回句柄而不是指针。
+long airi_io_put(uint64_t handle, const void *data, size_t bytes); // IDLE可修改，BUSY返回-16。
+long airi_io_get(uint64_t handle, void *data, size_t bytes); // CQ收集后才可读取。
+long airi_io_free(uint64_t handle); // 旧句柄-9，BUSY-16。
+long airi_io_submit(unsigned operation, uint64_t handle, const struct airi_io_submission *submission); // 0仅接收，描述在返回前已复制。
+long airi_io_next(struct airi_io_completion *completion, unsigned wait); // 0不等，1阻塞；返回0仅表示交出一条CQ。
+long airi_io_state_get(struct airi_io_state *state); // 当前轮次与同PID退役ACTIVE的只读数值。
 #endif // 结束包含保护。

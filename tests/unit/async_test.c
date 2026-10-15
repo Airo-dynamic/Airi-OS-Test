@@ -42,7 +42,7 @@ static void drain(void) { // 模型有固定两次pending，服务预算必须�
     assert(!device.pending); // 没有owner也要结束后端借用。
 }
 int main(void) { // host只验证明确模型，真设备由独立guest演示。
-    struct airi_aio_backend backend = {&device, begin, poll}; // 绑定延后完成模型。
+    struct airi_aio_backend backend = {&device, begin, poll, NULL}; // 绑定延后完成模型。
     assert(!airi_aio_init(&engine, &backend, 100, 16)); // 固定可访问模型扇区。
     assert(!airi_aio_open(&engine, 1) && !airi_aio_open(&engine, 2)); // 两个独立owner用于全局SQ满观察。
     long writer = airi_aio_buffer_alloc(&engine, 1), reader = airi_aio_buffer_alloc(&engine, 1), error_buffer = airi_aio_buffer_alloc(&engine, 1); // 同一owner三个对象。
@@ -87,10 +87,13 @@ int main(void) { // host只验证明确模型，真设备由独立guest演示。
     assert(!airi_aio_pump(&engine) && device.pending); // 后端已经借请求单元，不能提前复用它。
     assert(!airi_aio_submit(&engine, 1, AIRI_IO_FLUSH, 0, 0, 61)); // 此排队项在reset时可以取消。
     assert(!airi_aio_reset(&engine, 1)); // 同一编号新epoch，旧ACTIVE仍留到收集。
+    struct airi_io_state state; // 只读快照须准确区分新轮次与退役请求。
+    assert(!airi_aio_state(&engine, 1, &state) && !state.active && state.retired_active == 1 && !state.outstanding && !state.registered_buffers); // 不把旧ACTIVE算成新请求或继承buffer。
     long replacement = airi_aio_buffer_alloc(&engine, 1); // 可复用旧buffer槽，但handle必须不同。
     assert(replacement > 0 && replacement != writer && airi_aio_buffer_get(&engine, 1, writer, output, 1) == -9 && airi_aio_buffer_get(&engine, 1, reader, output, 1) == -9); // 旧句柄不能命中新对象。
     assert(!airi_aio_buffer_put(&engine, 1, replacement, "new", 3)); // 新轮次有独立内容。
     drain(); // 旧ACTIVE读会完成，但不能写新buffer或新CQ。
+    assert(!airi_aio_state(&engine, 1, &state) && !state.retired_active); // 后端结束后退役计数也归零。
     assert(airi_aio_pop(&engine, 1, &completion) == -11 && !airi_aio_buffer_get(&engine, 1, replacement, output, 3) && !airi_memcmp(output, "new", 3)); // 晚完成按epoch丢弃。
     assert(!airi_aio_submit(&engine, 1, AIRI_IO_READ, replacement, 100, 70)); // 再覆盖owner直接退出的情形。
     assert(!airi_aio_pump(&engine) && device.pending); // ACTIVE副本已经被后端持有。
@@ -110,6 +113,7 @@ int main(void) { // host只验证明确模型，真设备由独立guest演示。
     assert(airi_aio_open(&engine, 9) == -11); // owner池满与buffer池满分别报告。
     for (unsigned id = 1; id <= 8; ++id) // 释放全部代数对象。
         airi_aio_close(&engine, id); // 重复close安全不制造新信用。
+    assert(airi_aio_quiescent(&engine)); // 静态owner、buffer和ACTIVE全部归还。
     puts("PASS async broker: SQ/CQ backpressure, cookie identity, busy buffers, errors, owner reset and late completion"); // 模型结论与guest实测分开。
     return 0; // 全部断言成立。
 }

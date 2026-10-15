@@ -71,7 +71,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     (work/'command.json').write_text(json.dumps(cmd,indent=2))  # 保存实际参数列表供本轮复现。
     case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
-    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]' if case == 'block-timeout' else '[AIRI_P4_READY]' # 正常配置等完整存储阶段，隔离盘只保留进程可用标记。
+    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]' if case == 'block-timeout' else '[AIRI_P4_READY]' if case == 'block-readonly' else '[AIRI_P5_READY]' # 正常等完整异步阶段，受限设备只发布实际可用能力。
     if case == 'block-missing': # 缺盘是明确设备初始化失败，不能继续宣称存储可用。
         expected = '[AIRI_PANIC] virtio block initialization failed' # 错误码另外核对。
     if case in ('trap-fatal', 'stack-guard'): # 未处理异常镜像必须进入具体停止路径。
@@ -102,6 +102,10 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         assert async_marker in text # 接收、忙与完成身份须符合当前设备。
                         storage_marker = '[STORAGE_SKIPPED]' if case == 'block-timeout' else '[STORAGE_RECOVERED]' # 只读仍可恢复，隔离盘不能提供空日志。
                         assert storage_marker in text # 正式区必须实际扫描或明确未提供。
+                        user_async_marker = '[ASYNC_UNAVAILABLE_OK]' if case == 'block-timeout' else '[ASYNC_READONLY_OK]' if case == 'block-readonly' else '[ASYNC_USER_OK]' # 真正用户程序按设备状态分支。
+                        assert user_async_marker in text and '[ASYNC_USER_DEMO_OK]' in text # 资源回收由launch核对。
+                        if case not in ('block-timeout', 'block-readonly'): # 可写正常设备还须通过新epoch验证。
+                            assert '[ASYNC_EXEC_RESET_OK]' in text # 不以旧映像输出冒充exec。
                         assert '[WAIT_USER_OK]' in text and '[WAIT_IDLE_OK]' in text and '[WAIT_DEMO_OK]' in text # 真阻塞、超时与现场继续均已完成。
                         assert text.index('[WAIT_TIMEOUT_OK]') < text.index('[WAIT_BUSY_DONE]') # 纯计算用户不能饿死等待超时。
                         assert '[PIPE_USER_OK]' in text # 有界流、背压、关闭与fork共享均已实际运行。

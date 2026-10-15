@@ -199,6 +199,11 @@
       "id": "K31",
       "title": "K31 · 有界SQ/CQ、注册缓冲、信用与晚完成",
       "document": "dev-log/core/31-async-queues.md"
+    },
+    {
+      "id": "K32",
+      "title": "K32 · 用户异步I/O、CQ阻塞与fork/exec/exit资源轮次",
+      "document": "dev-log/core/32-user-async.md"
     }
   ]
 }
