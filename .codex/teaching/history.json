@@ -1,0 +1,14 @@
+{
+  "schema": 3,
+  "git": {
+    "branch": "main",
+    "marker": "AiriOS-Checkpoint"
+  },
+  "checkpoints": [
+    {
+      "id": "00",
+      "title": "00 · 从空目录找到并运行一个程序",
+      "document": "dev-log/00-first-tool.md"
+    }
+  ]
+}

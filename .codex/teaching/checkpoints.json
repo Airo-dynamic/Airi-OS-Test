@@ -1,0 +1,26 @@
+{
+  "schema": 3,
+  "kind": "serial kernel, Linux and author tools",
+  "chapters": [
+    {
+      "id": "00",
+      "track": "core",
+      "title": "00 · 从空目录找到并运行一个程序",
+      "document": "dev-log/00-first-tool.md",
+      "requires": [],
+      "files": {
+        "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95"
+      },
+      "commands": [
+        "python3 scripts/probe.py  # 执行脚本默认的 python3 查找和版本探测\nif python3 scripts/probe.py airi_no_such_tool; then exit 1; fi  # 故障应返回非零；若意外成功，then 以 1 中止此组观察"
+      ],
+      "reader": ".codex/teaching/readers/00.yaml"
+    }
+  ],
+  "owned": [
+    "scripts/probe.py"
+  ],
+  "endpoints": [
+    "00"
+  ]
+}

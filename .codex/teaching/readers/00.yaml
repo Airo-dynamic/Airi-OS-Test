@@ -1,0 +1,28 @@
+checkpoint: '00'
+baseline: baseline.yaml
+start: empty
+current_operation: 找到 python3 并运行版本命令
+already_explained: []
+first_use:
+- concept: 内核与虚拟电脑
+  at: ../../../dev-log/00-first-tool.md#kernel-model
+  establishes: 内核管理 CPU、内存与设备，QEMU 提供模拟机器；主机上的脚本不在 guest 中执行
+- concept: 进程、环境变量和搜索结果
+  at: ../../../dev-log/00-first-tool.md#tool-process
+  establishes: 可执行文件与一次运行不同；PATH 搜索返回路径字符串或 None；异常把失败交回入口
+- concept: 参数列表、子进程与退出码
+  at: ../../../dev-log/00-first-tool.md#process-arguments
+  establishes: sys.argv 取用户参数，subprocess.run 按列表边界启动路径；失败交入口，进程退出状态由父进程消费
+borrowed:
+- component: Python 与主机进程接口
+  contract: 按显示的文件路径启动子进程，输出继承当前终端，失败与超时返回入口
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 章首先解释教学重组，主程序代码与参数解释没有顺序衔接。
+  revision: 从找到 python3 到执行版本命令连续追踪；语法解释放在实际使用前。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: Python 的参数列表与失败传播
+  at: ../../../dev-log/00-first-tool.md#code-scripts-probe-py-2
+  establishes: 列表保留程序名和每项参数的边界；sys.argv[1] 取得第二项即用户给出的工具名，None 表示未找到，SystemExit 把失败交回 Shell
+  status: 本版就地解释；不推断读者已掌握
