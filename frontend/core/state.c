@@ -1,4 +1,6 @@
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
+#include "ui.h"  // 引入前端服务合同与桌面状态
+#include <airi/base.h>  // 引入自有字节操作和有界格式化函数
 static bool appearance(struct airi_console *console, const char *command, void *context) {  // 本扩展只消费完整的主题命令。
     struct ui_desktop *desktop = context;  // 原样取回 ui_init 绑定的桌面，数据由调用平台拥有。
     if (airi_strlen(command) == 9 && !airi_memcmp(command, "theme day", 9))  // 比较长度后再比较字节，不接受附带尾部参数。
@@ -78,5 +80,43 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
 void ui_service_state(struct ui_desktop *s, enum ui_state state) {  // 切换服务显示状态并刷新相应快照
     s->service_state = state;  // 用调用者指定状态切换服务反馈，随后刷新决定是否继续查询快照
     ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
+}
+
+void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char *name,  // 调用服务操作，成功后刷新，失败形成错误对话框
+                const char *data) {  // data借用本次请求正文，回调返回前按合同复制或读取
+    char error[160] = "This operation is unavailable.";  // 先给160字节错误缓冲设置未连接原因，服务失败时可覆盖
+    if (s->service_state == UI_NORMAL && s->backend.action &&  // 先要求服务正常且动作回调存在，再调用它；短路与避免空函数指针
+        s->backend.action(s->backend.context, s->directory, action, id, name, data, error, sizeof(error))) {  // 服务回调收到明确操作与完整输入，仅true使前端进入成功提交
+        copy(s->toast, sizeof(s->toast),  // 成功提示写到160字节toast数组，下一行按操作选择具体反馈
+             s->backend.mode == UI_REFERENCE  // 按实际绑定后端模式选择后续参考说明或内核说明，不修改mode字段
+                 ? (action == UI_SAVE ? "Saved to session storage."  // 参考保存成功只说明本会话内存记录已更新
+                                      : "Session storage updated.")  // 其他参考记录操作成功使用工作区更新提示
+                 : (action == UI_SAVE ? "Document saved." : "Operation completed."));  // 真实后端按保存或其他操作选择成功提示，前提是回调已返回true
+        ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
+        if (action == UI_RENAME && id == s->editor_id)  // 重命名目标正是当前编辑文档时，同时更新窗口内名称，正文与保存点不变
+            copy(s->editor_name, 64, name);  // 把name复制到当前文档名，64是包含NUL的数组容量
+        if (action == UI_SAVE) {  // 只有保存服务已返回成功才进入此处，随后建立新的前端保存点
+            if (s->pending_close) {  // 此保存是未保存关闭确认的一部分，成功提交后才关Editor窗口
+                s->windows[UI_EDITOR].open = false;  // 保存关闭请求已经成功提交，此时才隐藏Editor窗口，保存文字仍在服务中
+                s->active = -1;  // 没有活动窗口，-1哨兵不能拿去索引应用数组
+                s->pending_close = false;  // 结束关闭请求，后续普通保存不应沿用旧关闭动作
+            }
+            s->dirty = false;  // 当前文字与保存副本一致，清除未保存标记
+            copy(s->saved, sizeof(s->saved), s->editor);  // 把服务已接受的文字记录为独立保存点
+            if (s->editor_id < 0)  // 新文档尚无服务id，刷新后按提交名称找到新建记录并绑定编辑器
+                for (unsigned i = 0; i < s->file_count; ++i)  // 只遍历本次目录快照有效前缀，未用槽不参与
+                    if (!airi_memcmp(s->files[i].name, name, airi_strlen(name) + 1)) {  // 在新目录快照中完整匹配刚保存的名称，连NUL比较避免前缀相同误绑定
+                        s->editor_id = s->files[i].id;  // 读取或保存成功后绑定该快照项的服务id，后续保存用此身份而不用显示下标
+                        copy(s->editor_name, 64, name);  // 把name复制到当前文档名，64是包含NUL的数组容量
+                        break;  // 结束当前最近一层循环或应用分派，不执行其剩余候选
+                    }
+        }
+    } else {  // 前一分支条件未成立时处理当前替代路径
+        s->pending_close = false;     // 结束关闭请求，后续普通保存不应沿用旧关闭动作
+        s->dialog = UI_DIALOG_ERROR;  // 把服务失败显示成错误对话框
+        copy(s->dialog_title, sizeof(s->dialog_title), action == UI_SAVE ? "Save failed" : "Operation unavailable");  // 保存失败使用明确标题，其余保留通用操作错误。
+        airi_snprintf(s->dialog_text, sizeof(s->dialog_text), "%s%s", error,  // 在容量内先写服务返回的具体原因。
+                      action == UI_SAVE ? " Your edits are still open." : "");  // 追加恢复说明，不清空编辑器或重设保存点。
+    }
 }
 

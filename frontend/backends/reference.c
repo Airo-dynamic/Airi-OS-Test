@@ -33,7 +33,7 @@ static unsigned files(void *unused, const char *path, struct ui_file *out, unsig
             for (; *rest; ++rest)  // 只在父目录之后的路径余部查斜杠，判断是否直接子项
                 if (*rest == '/') {  // 子项名称中又有斜杠说明它在更深目录，本次只列直接子项
                     direct = false;  // 路径余部还有层级分隔，条目位于更深目录而非直接子项
-                    break;  // 此路径含子目录分隔符，结束当前斜杠查找循环
+                    break;  // 结束当前最近一层循环或应用分派，不执行其剩余候选
                 }
             if (direct)  // 仅直接子项进入本次目录查询结果
                 out[n++] = f->entry;  // 按旧下标复制整条元信息，再增加返回条数；服务记录未搬动
@@ -53,7 +53,7 @@ static bool read(void *unused, int id, char *out, size_t cap) {  // 按服务id�
 }
 static bool error(char *out, size_t cap, const char *message) {  // 把失败原因写入调用者错误缓冲并返回false
     airi_snprintf(out, cap, "%s", message);  // 将具体失败原因复制到调用者错误数组，cap包含终止零的位置
-    return false;  // 失败原因已写到调用者数组，false表示服务记录没有提交本次修改
+    return false;  // 失败原因已写出，请求方据false显示错误而不更新保存点
 }
 static bool valid_name(const char *name) {  // 检查文件名非空、长度与禁止路径分隔符
     size_t n = airi_strlen(name);  // 名称内容字节数用于空名与63字节上限检查，不计NUL
@@ -64,28 +64,98 @@ static bool valid_name(const char *name) {  // 检查文件名非空、长度与
             return false;  // 名称含非法形状或字节，阻止后续服务修改
     return true;  // 所有名称约束均通过，可继续生成目标路径
 }
-static bool action(void *unused, const char *directory, enum ui_action act, int id,  // 校验请求后改变服务记录，错误留在输出缓冲
-                   const char *name, const char *data, char *out, size_t cap) {  // name和data借用请求文字，out与cap由调用者提供来接收本次错误原因
+static bool action(void *unused, const char *directory, enum ui_action act, int id, const char *name, const char *data,  // 校验请求后改变服务记录，错误留在输出缓冲
+                   char *out, size_t cap) {  // 错误正文写到调用者out数组，cap是该数组的字节容量，服务不保留此地址
     (void)unused;  // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
-    (void)id;      // 此阶段只创建新记录，接口保留的现有文件id参数尚不使用
-    (void)data;    // 此阶段只创建空记录，接口保留的文字参数尚不使用
-    if (act != UI_CREATE_FILE && act != UI_CREATE_DIR)  // 本阶段仅支持创建，其他操作在占用任何服务槽之前报告不可用
-        return error(out, cap, "This checkpoint only creates files and directories.");  // 拒绝本次服务修改并向调用者报告：This checkpoint only creates files and directories
-    if (!valid_name(name))  // 先检查名称形状，失败时不会拼路径或占用服务槽
-        return error(out, cap, "Use a non-empty file name without slashes, up to 63 bytes.");  // 拒绝本次服务修改并向调用者报告：Use a non-empty file name without slashes, up to 63 bytes
-    char target[128];  // 先在局部数组形成完整目标路径，通过校验后才改服务
-    int length = airi_snprintf(target, sizeof(target), "%s/%s", directory, name);  // 先拼父目录、斜杠和名称；返回所需字节数供完整路径容量检查
-    if (length >= (int)sizeof(target))  // 完整路径所需长度达到128时没有NUL位置，拒绝创建
-        return error(out, cap, "Target path is too long.");  // 拒绝本次服务修改并向调用者报告：Target path is too long
-    for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
-        if (entries[i].used && !airi_memcmp(entries[i].entry.path, target, (size_t)length + 1))  // 只比较已占用槽的完整目标路径，长度加1连NUL一起匹配，重名不覆盖原记录
-            return error(out, cap, "An item with that name already exists.");  // 拒绝本次服务修改并向调用者报告：An item with that name already exists
-    for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
-        if (!entries[i].used) {  // 找到空服务槽后才能新建记录
-            add(i, directory, name, act == UI_CREATE_DIR, "");  // 填当前空服务槽，操作种类决定是否目录，初始正文为空
+    if (act == UI_EXECUTE)  // 执行请求暂不启动主机或guest程序，返回真实未连接错误
+        return error(out, cap,  // 把失败原因写给调用者，false阻止前端误记为成功
+                     "Application execution is not connected. The source stays in the editor; no "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
+                     "guest or host process was started.");  // 结束未连接错误正文：本请求既未启动guest程序也未启动主机程序
+    if (act == UI_CREATE_FILE || act == UI_CREATE_DIR || (act == UI_SAVE && id < 0)) {  // 创建项目和未绑定id的另存都需要新槽；已存在文档的保存后面按id处理
+        if (!valid_name(name))  // 先检查名称形状，失败时不会拼路径或占用服务槽
+            return error(out, cap, "Use a non-empty file name, without slashes, up to 63 bytes.");  // 拒绝本次服务修改并向调用者报告：Use a non-empty file name, without slashes, up to 63 bytes
+        char target[128];  // 先在局部数组形成完整目标路径，通过校验后才改服务
+        int length = airi_snprintf(target, 128, "%s/%s", directory, name);  // 先拼当前目录与新名称；返回完整所需内容字节数，用于发现128字节数组的截断
+        if (length >= 128)  // 所需内容已占满数组，NUL没有位置，拒绝截断路径以免误指另一文件
+            return error(out, cap, "Target path is too long.");  // 拒绝本次服务修改并向调用者报告：Target path is too long
+        for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+            if (entries[i].used && !airi_memcmp(entries[i].entry.path, target, (size_t)length + 1))  // 只比较已占用槽的完整目标路径，长度加1连NUL一起匹配，重名不覆盖原记录
+                return error(out, cap, "An item with that name already exists.");  // 拒绝本次服务修改并向调用者报告：An item with that name already exists
+        for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+            if (!entries[i].used) {  // 找到空服务槽后才能新建记录
+                add(i, directory, name, act == UI_CREATE_DIR, act == UI_SAVE ? data : "");  // 新建槽按操作决定目录类型，新文档保存时填正文，其余创建为空
+                return true;  // 该服务修改已完整提交，前端可重新查询当前记录
+            }
+        return error(out, cap, "Reference workspace capacity reached (32 items).");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached (32 items)
+    }
+    if (id < 1 || id > UI_FILES || !entries[id - 1].used)  // 拒绝1到32之外或已删除的服务id，检查完成前不访问id-1槽
+        return error(out, cap, "The item no longer exists. Refresh the directory.");  // 拒绝本次服务修改并向调用者报告：The item no longer exists. Refresh the directory
+    struct reference_file *f = &entries[id - 1];  // id已验证，减1找到对应服务槽
+    if (act == UI_COPY_FILE || act == UI_MOVE_FILE) {  // 这两种操作使用name作为目标目录，并保留原普通文件名称与正文
+        if (f->entry.directory)  // 目录没有普通文档内容，此操作需要拒绝
+            return error(out, cap, "Directory copy requires a recursive filesystem provider.");  // 拒绝本次服务修改并向调用者报告：Directory copy requires a recursive filesystem provider
+        char target[128];  // 先在局部数组形成完整目标路径，通过校验后才改服务
+        int length = airi_snprintf(target, 128, "%s/%s", name, f->entry.name);  // name在复制移动操作中是目标目录；保持原文件名，先检查组合路径能否完整保存
+        if (length >= 128)  // 所需内容已占满数组，NUL没有位置，拒绝截断路径以免误指另一文件
+            return error(out, cap, "Target path is too long.");  // 拒绝本次服务修改并向调用者报告：Target path is too long
+        for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+            if (entries[i].used && !airi_memcmp(entries[i].entry.path, target, (size_t)length + 1))  // 只比较已占用槽的完整目标路径，长度加1连NUL一起匹配，重名不覆盖原记录
+                return error(out, cap, "The target already contains an item with that name.");  // 拒绝本次服务修改并向调用者报告：The target already contains an item with that name
+        if (act == UI_MOVE_FILE) {  // 普通文件移动保留id，只修改完整路径
+            airi_snprintf(f->entry.path, 128, "%s", target);  // 校验通过后提交新完整路径，文件服务id与正文保持不变
             return true;  // 该服务修改已完整提交，前端可重新查询当前记录
         }
-    return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
+        for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+            if (!entries[i].used) {  // 找到空服务槽后才能新建记录
+                add(i, name, f->entry.name, false, f->text);  // 复制普通文件到目标目录name，以同一名称和独立正文创建新id
+                return true;  // 该服务修改已完整提交，前端可重新查询当前记录
+            }
+        return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
+    }
+    if (act == UI_SAVE) {  // 保存请求只修改这个服务记录的文字与长度
+        if (f->entry.directory)  // 目录没有普通文档内容，此操作需要拒绝
+            return error(out, cap, "Cannot write a directory as a document.");  // 拒绝本次服务修改并向调用者报告：Cannot write a directory as a document
+        airi_snprintf(f->text, sizeof(f->text), "%s", data);  // 把此次保存正文复制到服务的8192字节数组，前端输入合同已将正文限制为8191字节
+        f->entry.bytes = (unsigned)airi_strlen(f->text);  // 保存后以实际存储文字长度更新快照中的字节数
+        return true;  // 该服务修改已完整提交，前端可重新查询当前记录
+    }
+    if (act == UI_DELETE) {  // 删除请求先检查目录是否仍含后代记录
+        if (f->entry.directory) {  // 删除目录前检查全部服务槽，当前实现只允许删除没有后代的目录
+            size_t len = airi_strlen(f->entry.path);  // 当前待删目录路径的字节长度，稍后用它定位后代路径中的斜杠边界
+            for (unsigned i = 0; i < UI_FILES; ++i)   // 逐个检查服务32槽，查询或创建受当前占用状态约束
+                if (entries[i].used && airi_strlen(entries[i].entry.path) > len &&  // 只检查占用槽且路径比待删目录长的项，目录自己不算自己的后代
+                    !airi_memcmp(entries[i].entry.path, f->entry.path, len) &&  // 父路径字节必须完整相等，随后还需检查真正的斜杠层级边界
+                    entries[i].entry.path[len] == '/')  // 相同前缀后还必须紧接斜杠，避免把projects2误当projects的后代
+                    return error(out, cap, "The folder is not empty. Remove its contents first.");  // 拒绝本次服务修改并向调用者报告：The folder is not empty. Remove its contents first
+        }
+        f->used = false;  // 删除仅释放服务槽，之后查询不再返回此记录
+        return true;      // 该服务修改已完整提交，前端可重新查询当前记录
+    }
+    if (act == UI_RENAME) {  // 重命名先验证目标名称与完整路径，再更新服务元信息
+        if (airi_strlen(f->entry.name) == airi_strlen(name) &&  // 名称长度相同后才比较全部字节，同名重命名无需改服务记录
+            !airi_memcmp(f->entry.name, name, airi_strlen(name) + 1))  // 连NUL比较当前名字，完全相同的重命名视为已完成
+            return true;  // 该服务修改已完整提交，前端可重新查询当前记录
+        if (!valid_name(name))  // 先检查名称形状，失败时不会拼路径或占用服务槽
+            return error(out, cap, "Invalid file name.");  // 拒绝本次服务修改并向调用者报告：Invalid file name
+        if (f->entry.directory)  // 目录重命名还需同步改变全部后代路径，本参考服务不实现该操作
+            return error(out, cap, "Folder renaming requires the future VFS provider.");  // 拒绝本次服务修改并向调用者报告：Folder renaming requires the future VFS provider
+        char target[128];  // 先在局部数组形成完整目标路径，通过校验后才改服务
+        airi_snprintf(target, sizeof(target), "%s", f->entry.path);  // 将原完整路径复制到128字节临时数组，随后只替换最后名称
+        size_t parent = airi_strlen(target);  // 先从原路径文尾开始向前寻找最后斜杠，找到后保留其前面的父目录
+        while (parent && target[parent - 1] != '/')  // 从原路径末尾向前找最后斜杠，保留父目录前缀
+            --parent;  // 从路径尾部向前寻找最后一个目录分隔符
+        int written = airi_snprintf(target + parent, sizeof(target) - parent, "%s", name);  // 在父目录后的剩余空间写新名称，返回未截断名称的所需字节数
+        if (written < 0 || (size_t)written >= sizeof(target) - parent)  // 新名称未完整装入剩余空间时拒绝重命名，服务原路径仍保留
+            return error(out, cap, "Target path is too long.");  // 拒绝本次服务修改并向调用者报告：Target path is too long
+        size_t length = airi_strlen(target);     // 校验通过后的新完整路径长度，不含NUL，后续重名比较会加1
+        for (unsigned i = 0; i < UI_FILES; ++i)  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+            if (entries[i].used && !airi_memcmp(entries[i].entry.path, target, length + 1))  // 把新完整路径连NUL与已占用槽比较，完全同名时拒绝覆盖已有文件
+                return error(out, cap, "An item with that name already exists.");  // 拒绝本次服务修改并向调用者报告：An item with that name already exists
+        airi_snprintf(f->entry.path, 128, "%s", target);  // 校验通过后提交新完整路径，文件服务id与正文保持不变
+        airi_snprintf(f->entry.name, 64, "%s", name);     // 复制单项名称到服务元信息，64字节数组最多容纳63内容字节与NUL
+        return true;  // 该服务修改已完整提交，前端可重新查询当前记录
+    }
+    return error(out, cap, "Unsupported workspace operation.");  // 拒绝本次服务修改并向调用者报告：Unsupported workspace operation
 }
 void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服务并填入回调表
     airi_memset(entries, 0, sizeof(entries));  // 把服务拥有的32个槽清空，再填本会话初始参考文件
@@ -93,19 +163,19 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
         "-- Read a series and write a summary\nlocal values = {12, 18, 21, 32, 29, 37}\n\nlocal "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
         "sum = 0\nfor _, value in ipairs(values) do\n    sum = sum + value\nend\n\nlocal mean = "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
         "sum / #values\nprint(string.format(\"mean: %.2f\", mean))\n\n-- Run requires the future "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "application service.\n-- This reference workspace only edits the source.\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
+        "application service.\n-- This reference workspace only edits the source.\n");  // 初始main.lua末尾说明Run尚缺应用执行服务，当前只提供正文编辑
     add(1, "/home/airi/projects/telemetry", "series.csv", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-        "seconds,load\n0,12\n1,18\n2,21\n3,32\n4,29\n5,37\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
+        "seconds,load\n0,12\n1,18\n2,21\n3,32\n4,29\n5,37\n");  // 初始CSV含一行标题与6组时间秒数、测量整数；当前先作为普通文字存服务
     add(2, "/home/airi/projects/telemetry", "README.md", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
         "# Telemetry workspace\n\nThis is a frontend reference dataset.\nSave changes update this "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "session's memory only.\nNative application execution is intentionally unconnected.\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
+        "session's memory only.\nNative application execution is intentionally unconnected.\n");  // README明确保存只改当前进程内存，执行服务尚未连接
     add(3, "/home/airi/projects/telemetry", "output", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
     add(6, "/home/airi/projects/telemetry", "sum.c", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
         "#include <stdio.h>\n\nint main(void) {\n    const int values[] = {12, 18, 21, 32};\n    "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
         "int total = 0;\n    for (unsigned i = 0; i < 4; ++i)\n        total += values[i];\n    "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "printf(\"sum: %d\\n\", total);\n    return 0;\n}\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
+        "printf(\"sum: %d\\n\", total);\n    return 0;\n}\n");  // 存入示例C文件最后打印与返回正文，这段字符串是数据而不是本次参与编译的C程序
     add(7, "/home/airi/projects/telemetry", "project.airi", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-        "[project]\nname = telemetry\nentry = main.lua\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
+        "[project]\nname = telemetry\nentry = main.lua\n");  // 存入项目说明文字，包含名字与入口；当前尚未把它当配置装载
     add(4, "/home/airi/projects", "telemetry", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
     add(5, "/home/airi", "projects", true, "");      // 向明确编号的服务槽填这份路径、名称、目录标记与正文
     boot = (AiriBootInfo){.magic = AIRI_BOOT_MAGIC,  // 为主机窗口准备固定参考启动结构，System明确标成示例数据
@@ -125,5 +195,9 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
         .base = 0x200000, .length = 0x2900000, .kind = AIRI_MEMORY_BOOT_RECLAIM};  // 设置参考物理范围起点、参考物理范围字节长度、参考内存用途分类
     boot.regions[3] = (struct airi_memory_region){  // 参考地图第3项填写可用物理范围
         .base = 0x2b00000, .length = 0xd500000, .kind = AIRI_MEMORY_USABLE};  // 设置参考物理范围起点、参考物理范围字节长度、参考内存用途分类
-    *b = (struct ui_backend){.mode = UI_REFERENCE, .boot = &boot, .files = files, .read = read, .action = action};  // 通过b写调用者的整份回调表，函数地址交给files/read/action，未指定context字段自动为NULL
+    *b = (struct ui_backend){.mode = UI_REFERENCE,  // 通过b写调用者的整份回调表，函数地址交给files/read/action，未指定context字段自动为NULL
+                             .boot = &boot,   // 设置借用启动信息，描述与内存地图须持续有效
+                             .files = files,  // 保存目录查询函数地址，前端提供目录与数组，回调复制元信息而不出借服务槽
+                             .read = read,    // 服务合同保存完整正文读取函数地址，桌面传服务id与调用者数组
+                             .action = action};  // 服务合同保存操作函数地址，修改请求与失败正文通过该回调交接
 }

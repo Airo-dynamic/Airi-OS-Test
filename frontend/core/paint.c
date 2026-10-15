@@ -1,9 +1,9 @@
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
 static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
-void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按当前窗口次序绘制整帧
+void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按窗口层次画整帧，并将对话框留在最后
     if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
-        return;  // 当前按当前窗口次序绘制整帧在本分支结束，后续语句不执行
+        return;  // 当前按窗口层次画整帧，并将对话框留在最后在本分支结束，后续语句不执行
     s->width = (int)f->width;    // 当前帧画布宽度按像素保存，绘图已检查帧缓冲能用且宽度可转int
     s->height = (int)f->height;  // 当前帧画布高度按像素保存，窗口收窄和坐标布局使用这个尺寸
     u_begin(f);  // 借用本次画布描述，建立颜色布局与整屏裁剪
@@ -20,7 +20,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
     u_text(s->width - 263, 10,  // 顶栏右侧说明当前画面来自主机参考还是内核控制台
            s->backend.mode == UI_REFERENCE ? "Local session" : "Local console",  // 顶栏用实际后端模式标明主机参考工作区或guest内核控制台
            U_SMALL, U_MUTED);  // 系统状态保持次要前景
-    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);  // 顶栏右侧画资源入口图标，当前只绘制图标，资源栏状态将在18章加入
+    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);      // 顶栏右侧画资源入口图标，是否展开由桌面monitor状态决定
     u_rect(0, UI_TOP, UI_DOCK, s->height - 66, U_PANEL);  // 用工具栏底色写矩形，起点(0,36)，尺寸56×s->height - 66像素
     u_rect(55, 36, 1, s->height - 66, U_EDGE);     // 用分隔线色写矩形，起点(55,36)，尺寸1×s->height - 66像素
     for (unsigned i = 0; i < UI_APP_COUNT; ++i) {  // 逐个检查7个有效应用编号
@@ -110,4 +110,69 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
             u_text(tx, s->height - 23, titles[i], U_SMALL, s->active == (int)i ? U_ACCENT : U_MUTED);  // 在整屏x=tx、整屏y=s->height - 23显示titles[i]
             tx += 88;  // 任务栏下一应用标题右移88像素
         }
+    if (s->toast[0]) {  // 短提示非空时在普通窗口之后覆盖绘制
+        u_rect(s->width - 382, s->height - 78, 360, 34, U_RAISED);  // 用选中背景色写矩形，起点(s->width - 382,s->height - 78)，尺寸360×34像素
+        u_text(s->width - 368, s->height - 70, s->toast, U_SMALL, U_TEXT);  // 在整屏x=s->width - 368、整屏y=s->height - 70显示本次操作短提示
+    }
+    if (s->dialog) {  // 菜单和普通窗口已经绘完，再写对话框像素，使它覆盖下层
+        struct ui_rect d = {s->width / 2 - 240, s->height / 2 - 112, 480, 224};  // 480×224对话框以整屏中心为中心，左上扣除半宽半高
+        u_round((struct ui_rect){d.x + 4, d.y + 6, d.w, d.h}, 7, U_SHADOW);  // 在对话框右移4、下移6像素的位置画7像素半径阴影
+        u_round(d, 2, U_CONTROL);  // 弹窗使用独立清晰边界
+        u_round((struct ui_rect){d.x + 1, d.y + 1, d.w - 2, d.h - 2}, 1, U_SURFACE);  // 中性内容表面
+        if (s->dialog == UI_DIALOG_ERROR) u_rect(d.x + 1, d.y + 1, 3, d.h - 2, U_RED);  // 错误沿左缘标明，正文仍完整可读
+        u_rect(d.x + 24, d.y + 49, d.w - 48, 1, U_EDGE);  // 标题与说明之间轻分隔
+        u_text(d.x + 24, d.y + 20, s->dialog_title, U_LABEL, s->dialog == UI_DIALOG_ERROR ? U_RED : U_TEXT);  // 在整屏x=d.x + 24、整屏y=d.y + 20显示对话框标题
+        /* Wrap body on words without breaking paths outside their containing dialog. */
+        char row[64];  // 对话框单显示行最多63内容字节，再留一格NUL
+        unsigned used = 0;  // 当前对话框显示片段的内容长度从0字节开始
+        int y = d.y + 58;   // 对话框正文第一行在框顶下移58像素
+        const char *p = s->dialog_text;  // 借用对话框正文首字节，分词换行不修改原说明
+        while (*p && y < d.y + 135) {    // 正文仍有字节且下一行起点未到框内135像素位置时继续绘制
+            while (*p == ' ')  // 新显示行开始时跳过连续空格，避免换行后的行首保留分词空白
+                ++p;  // 消费当前文字字节后指针向后推进一字节
+            const char *start = p, *last_space = NULL;  // 记录本显示行起点；NULL表示尚未找到可回退的单词边界
+            while (*p && *p != '\n' && (size_t)(p - start) < sizeof(row) - 1) {  // 扫描到NUL、显式换行或63字节容量便停止；每次写候选行后还要检查像素宽度
+                row[p - start] = *p;     // 用当前扫描偏移把一个对话框字节放入局部候选行
+                row[p - start + 1] = 0;  // 候选行每新增一个字节就补NUL，才能立即测像素宽度
+                if (u_text_width(row, U_BODY) > 432)  // 候选行超过对话框正文432像素时准备换行
+                    break;  // 候选行已超432像素，退出这层扫描，后面选择可回退的单词边界
+                if (*p == ' ')  // 记住当前空格，超过宽度时可回退到单词边界
+                    last_space = p;  // 记住当前空格位置，超宽时可回到这里结束本显示行
+                ++p;  // 消费当前文字字节后指针向后推进一字节
+            }
+            if (*p && *p != '\n' && last_space && last_space > start)  // 因像素宽或字节容量停住且仍有本行余文时，若记录过非行首空格便回退到它
+                p = last_space;  // 把下一行扫描起点回退到最后空格，后续先跳空格继续
+            used = (unsigned)(p - start);  // 两个同数组指针之差给出本次需要复制的字节数
+            if (!used && *p) {  // 长词首字节就超宽时至少推进一个字节，避免无限停在原地
+                ++p;  // 消费当前文字字节后指针向后推进一字节
+                used = 1;  // 过宽长词至少显示并消费一字节，保证下一轮推进
+            }
+            airi_memcpy(row, start, used);  // 复制当前显示片段[start,p)的used个字节到局部row，下一行补NUL
+            row[used] = 0;  // 给本次选定显示片段补NUL，再交文字绘图
+            u_text(d.x + 24, y, row, U_BODY, U_TEXT);  // 在整屏x=d.x + 24、整屏y=y显示本次拆出的显示文字行
+            if (*p == '\n')  // 原文显式换行也应消费，不成为下一行首内容
+                ++p;  // 消费当前文字字节后指针向后推进一字节
+            y += 22;  // 对话框下一行向下移动22像素
+        }
+        if (s->dialog == UI_DIALOG_NEW_FILE || s->dialog == UI_DIALOG_NEW_DIR || s->dialog == UI_DIALOG_RENAME || s->dialog == UI_DIALOG_SAVE_AS) {  // 创建、重命名和另存需要名称字段，其他确认框不画输入
+            u_rect(d.x + 24, d.y + 118, 432, 34, U_SURFACE);  // 用窗口正文底色写矩形，起点(d.x + 24,d.y + 118)，尺寸432×34像素
+            u_frame((struct ui_rect){d.x + 24, d.y + 118, 432, 34}, U_BLUE);  // 沿当前显式矩形的四边画一像素边框
+            u_clip((struct ui_rect){d.x + 34, d.y + 119, 412, 32});  // 把后续文字或像素限制在本次显式矩形内，长内容在边界停止写入
+            u_text(d.x + 34, d.y + 126, s->dialog_input, U_BODY, U_TEXT);  // 在整屏x=d.x + 34、整屏y=d.y + 126显示对话框输入字段
+            u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
+        }
+        u_button((struct ui_rect){d.x + d.w - 204, d.y + 174, 84, 30},  // 对话框右侧先画取消或关闭按钮，接下来的种类选择文字
+                 (s->dialog == UI_DIALOG_ERROR || s->dialog == UI_DIALOG_INFO) ? "Close" : "Cancel", false, false);  // 错误框只关闭提示，其余框此按钮取消待确认操作
+        if (s->dialog == UI_DIALOG_CLOSE) {  // 未保存关闭对话框额外提供取消与丢弃两条明确操作
+            u_button((struct ui_rect){d.x + 180, d.y + 174, 84, 30}, "Cancel", false, false);  // 画文字"Cancel"按钮；其矩形供后续事件命中共用，当前仅输出像素
+            u_button((struct ui_rect){d.x + 276, d.y + 174, 84, 30}, "Discard", false, false);  // 画文字"Discard"按钮；其矩形供后续事件命中共用，当前仅输出像素
+        }
+        if (s->dialog != UI_DIALOG_ERROR && s->dialog != UI_DIALOG_INFO)  // 纯错误框只有关闭按钮，其余种类再画确认动作
+            u_button((struct ui_rect){d.x + d.w - 108, d.y + 174, 84, 30},  // 在对话框右端画当前种类的确认按钮，事件接入后才执行动作
+                     s->dialog == UI_DIALOG_CLOSE   ? "Save"     // 未保存关闭确认的主按钮先保存，成功回调之后才关闭
+                     : s->dialog == UI_DIALOG_DELETE ? "Delete"  // 删除确认框主按钮明确使用Delete文字，避免与保存混淆
+                     : s->dialog == UI_DIALOG_STOP ? "End task"  // 停止参考任务确认框主按钮明确显示End task
+                                      : "Confirm",  // 其他确认种类采用通用Confirm按钮文字
+                     true, false);  // 确认按钮用强调状态且可用，实际动作仍由事件入口执行
+    }
 }
