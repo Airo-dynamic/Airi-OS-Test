@@ -54,6 +54,11 @@
       "id": "09",
       "title": "09 · 先让普通字符成为一条可执行命令",
       "document": "dev-log/core/09-console.md"
+    },
+    {
+      "id": "10",
+      "title": "10 · 把串口和键盘字节接入内核命令模型",
+      "document": "dev-log/core/10-input.md"
     }
   ]
 }

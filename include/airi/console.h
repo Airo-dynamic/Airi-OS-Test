@@ -41,4 +41,6 @@ unsigned airi_journal_count(void);  // 返回当前固定启动记录数量
 void airi_journal_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定启动事件格式化到调用者输出缓冲
 void airi_device_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定设备描述格式化到调用者输出缓冲
 void airi_map_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定物理内存范围格式化成一行文字
+int airi_input_poll(void);  // 当前内核循环从UART或PS/2读取一个逻辑事件
+int airi_keyboard_decode(uint8_t code);  // 主机观察和设备路径共用同一个扫描码转换器
 #endif  // 结束当前条件编译范围

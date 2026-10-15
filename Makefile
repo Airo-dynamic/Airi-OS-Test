@@ -1,53 +1,69 @@
-# C 编译器默认名称；命令行 CC=路径可以覆盖此赋值
+# 交叉编译C和汇编的LLVM驱动
 CC := clang
-# ELF 链接器默认名称，工具脚本会传入实际路径
+# 把独立ELF对象链接成内核
 LD := ld.lld
-# 主机观察程序的编译器名称，与内核目标工具分开
+# 后续主机观察使用本机C编译器
 HOST_CC := cc
-# 变量尚未设置时采用 normal，命令行可选择独立故障目录
+# 当前构建变体，未指定时normal
 PROFILE ?= normal
-# 立即将本次 profile 展开为产物目录，防止不同版本共用对象
+# 当前变体产物目录
 OUT := build/$(PROFILE)
-# 加入自有启动校验和主函数，链接器才能取得新入口调用的定义
-SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c kernel/boot/info.c kernel/main.c
-# 将每个 .c 路径换成构建目录中的 .o，再加汇编入口对象
+# 已接入的内核C文件清单
+SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c kernel/boot/info.c kernel/main.c kernel/console/console.c kernel/arch/x86_64/input.c
+# 每个C文件映射到对象路径，再加入汇编入口对象
 OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
-# 编译 x86-64 ELF，选择 C11、优化及调试信息，并把常见警告作为错误。
-# 续行中的 freestanding/builtin/stack-protector 选项选择自有运行环境；pic/pie 关闭地址无关产物。
-# 最后一行禁用 red zone/SIMD，采用高地址代码模型，并生成 .d 头文件依赖。
+# 独立x86-64 ELF、C11和无宿主运行时等编译约束
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
           -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 为预处理器指定自有头和锁定协议头的搜索路径
+# 自有接口和协议头的包含目录
 CPPFLAGS := -Iinclude -Ithird_party
-ifeq ($(PROFILE),no-framebuffer) # 当 profile 名称是 no-framebuffer 时加入缺画布故障宏
-# 在预处理阶段定义故障宏，让适配层略过可选图形响应
+# 按PROFILE构建变体选择下面的故障或输出宏
+ifeq ($(PROFILE),no-framebuffer)
+# 在已有预处理参数后追加当前变体宏
 CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
-ifeq ($(PROFILE),missing-memory) # 缺地图 profile 采用下一项预处理定义
-# 使入口局部地图指针变空，验证必需信息错误路径
+# 结束本次PROFILE条件分支
+endif
+# 按PROFILE构建变体选择下面的故障或输出宏
+ifeq ($(PROFILE),missing-memory)
+# 在已有预处理参数后追加当前变体宏
 CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
-ifeq ($(PROFILE),edit-experiment) # 改动展示 profile 采用下面两条文字覆盖定义
-# 向编译器传入两个字符串宏；单引号保护里面的双引号，使它们成为 C 字面量。
+# 结束本次PROFILE条件分支
+endif
+# 按PROFILE构建变体选择下面的故障或输出宏
+ifeq ($(PROFILE),edit-experiment)
+# 在已有预处理参数后追加当前变体宏
 CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
             -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
+# 结束本次PROFILE条件分支
+endif
 
-.PHONY: all kernel image host-test clean # 这些名字表示动作而非同名文件，避免同名文件使动作被误判已完成
-all: image # 默认目标先取得 image，也就需要完成其 ELF 前置依赖
-kernel: $(OUT)/airios.elf # 请求 kernel 动作时只生成本 profile 的 ELF
-$(OUT)/%.o: %.c # 模式规则将任意匹配的 C 源文件编译为同路径对象文件
-	@mkdir -p $(dir $@) # 自动变量 $@ 是对象路径，dir 取父目录；@ 隐藏命令回显
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@ # $< 为第一个依赖源码，-c 只编译，-o 指定对象目标
-$(OUT)/%.o: %.S # 预处理汇编使用同一对象目录和编译驱动
-	@mkdir -p $(dir $@) # 自动变量 $@ 是对象路径，dir 取父目录；@ 隐藏命令回显
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@ # $< 为第一个依赖源码，-c 只编译，-o 指定对象目标
-$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld # 全部对象和链接脚本变化都会使 ELF 需要重新生成
-	# 按 x86-64 ELF 静态链接，不加入宿主启动库；最大页大小采用 4096 字节。
-	# 续行再禁用可执行栈，使用当前链接脚本，把全部对象写成此目标 ELF。
+# 这些名字是操作目标，即使存在同名文件也不判已完成
+.PHONY: all kernel image host-test clean
+# all为默认动作，依赖image，自身没有recipe。
+all: image
+# kernel为显式编译入口，ELF目标决定是否重建。
+kernel: $(OUT)/airios.elf
+# 声明本目标依赖哪些输入；源文件比对象新时重新执行recipe
+$(OUT)/%.o: %.c
+	# 先创建目标父目录；@隐藏命令回显，$(dir $@)取目标目录
+	@mkdir -p $(dir $@)
+	# 分别传预处理与编译参数；$<为首个源前提，$@为当前目标路径
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+# 声明本目标依赖哪些输入；源文件比对象新时重新执行recipe
+$(OUT)/%.o: %.S
+	# 先创建目标父目录；@隐藏命令回显，$(dir $@)取目标目录
+	@mkdir -p $(dir $@)
+	# 分别传预处理与编译参数；$<为首个源前提，$@为当前目标路径
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+# ELF任一对象或链接脚本更新时重新链接。
+$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld
+	# 独立静态链接，无宿主libc，链接脚本决定段与入口位置
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
 	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-image: $(OUT)/airios.elf # 先有当前 ELF，才执行下一行镜像打包
-	python3 scripts/image.py $(PROFILE) # 把 profile 作为独立脚本参数交给打包流程
--include $(OBJECTS:.o=.d) # 替换对象后缀读取头依赖文件；开头 - 允许首次尚无 .d
+# image是.PHONY动作，每次调用都运行镜像制作；依赖先更新ELF。
+image: $(OUT)/airios.elf
+	# 把当前PROFILE传给镜像脚本，复用已锁定固件与引导器
+	python3 scripts/image.py $(PROFILE)
+# 加载编译器生成的头文件依赖；缺失.d不会中断第一次构建
+-include $(OBJECTS:.o=.d)
