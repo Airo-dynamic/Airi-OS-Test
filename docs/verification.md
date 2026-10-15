@@ -1,5 +1,13 @@
 # 当前路线的验证
 
+2026-10-15继续完成K18–K23、L03和K24。P3内核已实际运行时钟IRQ、独立栈任务、ring3、用户指针拒绝、静态ELF、自有用户库、真实用户抢占、复制fork、事务exec和阻塞wait；K24验证RAM文件短读写、零洞、共享偏移、CLOEXEC和对象回收。`./airios test`通过六组ASan/UBSan主机检查、六种启动配置和三条真实输入；K24正文在新目录独立重建并启动。
+
+P3的隔离GUI合并通过六种图形启动、三条输入、84张宿主快照和58项对比，实际查看Day/Night guest画面，现有设计保留。完整日志及截图在artifacts/p3-graphics-regression，图形分支未修改。K24不改变呈现接口，其新增文件路径按串口验证。
+
+L03程序在Mac严格编译、Shell语法检查通过，非Linux运行返回77；本轮个人主机SSH255，Linux COW、exec/FD与GDB捕捉点仍未验证。当前磁盘、管道、异步队列和完整串口用户shell尚未完成。各检查点源哈希和证据在`.codex/teaching/validation/`，运行或覆盖通过不表示读者已经掌握。
+
+## P2历史验证
+
 2026-10-15新增K14–K17与L02。P2内核部分已在固定QEMU中运行：自有GDT/IDT/TSS、UD/GP恢复和未处理故障停止、usable物理页池、自有四级页表和CR3切换、WP/NX/未映射三种真实PF、64KiB小对象堆。物理页、映射和对象所有权分别核对，临时映射/对象演示结束后统计恢复。
 
 `./airios test`通过四组ASan/UBSan主机观察、五种带超时启动（含trap-fatal）和三条真实UART/PS2输入。K14–K17各自从正文在新目录重建、编译并启动，主线源码与23节点清单一致；新增教程旁注检查通过99%阈值，正文另作代码伴读与连续阅读。它们不证明读者已掌握。
@@ -8,7 +16,7 @@
 
 L02源在Mac以C11及严格警告编译通过，Mac运行返回77，Shell语法通过；个人主机SSH返回255，connection.log记录`Connection closed by UNKNOWN port 65535`，remote.json明确verified=false。Linux RSS、SIGSEGV和GDB停点均未验证。没有使用公司机替代，也不拿本地编译作为Linux结果。
 
-当前无用户态、进程、文件系统、磁盘或异步I/O实现，P3–P6继续推进。证据见`.codex/teaching/validation/K14.json`至`K17.json`和`L02.json`；本轮原始日志在artifacts与各隔离重建目录。图形回归摘要和Day/Night截图保存在artifacts/p2-graphics-regression。
+该P2快照当时尚无用户态、进程、文件系统、磁盘或异步I/O；后续进展以上文为准。证据见`.codex/teaching/validation/K14.json`至`K17.json`和`L02.json`；本轮原始日志在artifacts与各隔离重建目录。图形回归摘要和Day/Night截图保存在artifacts/p2-graphics-regression。
 
 ## P1与课程分流的历史验证
 
