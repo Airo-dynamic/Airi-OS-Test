@@ -1,0 +1,38 @@
+checkpoint: 'T01'
+baseline: baseline.yaml
+start: 'L01'
+current_operation: 从课程资料闭合02与K13的前置，将write/append累积成文件并向新目录重建
+already_explained:
+- concept: 模块路径与工程根目录
+  at: ../../../dev-log/01-tools.md#tool-paths
+  establishes: ROOT由__file__的实际父目录决定，Path的/拼接路径；调用位置与源码根目录可以不同
+- concept: 命令解析与完整进程参数
+  at: ../../../dev-log/core/13-commands.md#command-entry
+  establishes: argparse把动作和选项保存为Namespace，统一入口用参数列表调用已有构建与观察脚本
+first_use:
+- concept: 章节记录和可选集合
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-inputs
+  establishes: chapters是记录列表，requires保存身份，files记录累计路径摘要；owned集合相交时拒绝，共有资料不会替代源码编辑动作
+- concept: 递归依赖与共享节点
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-parents
+  establishes: nodes按身份查记录，递归各自保存name而共享三个容器；visiting发现环，visited使共享K11只应用一次
+- concept: 正则捕获、元组拆包和源码状态
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-edits
+  establishes: findall每项由mode/name/code组成，write替换与append连接完整字符串；state_for只构造内存文件映射
+- concept: 累计摘要与完整文件盘点
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-audit
+  establishes: 每节点重建摘要和命令列表分别对照声明，owned再与实际实现集合比较；字节相同不证明行为或解释正确
+- concept: 前态复制、目标保护和失败记录
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-replay
+  establishes: 浅复制保留旧字符串映射，拒绝已有目标与断链后才resolve；仅显式run执行命令，超时先写replay记录再失败，目录保留
+- concept: 纯资料接入与显式图形声明
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-materials
+  establishes: copytree忽略来源graphics.json并保留目标既有声明，ignore为None表示不设过滤；只有AIRI_TUTORIAL_GRAPHICS显式选择才裁剪并写图形清单，不扫描文件猜进度
+borrowed:
+- component: 参考工程提供的课程正文、说明和教学JSON
+  contract: 正文围栏提供源码文本，清单提供依赖和预期摘要；不复制参考工程终点实现目录
+feedback:
+- source: 独立完整阅读审查
+  observation: 原画像笼统承接Python容器和异常，未指明本次递归与文件状态的数据形状。
+  revision: 正文沿02排序和K13重建建立具体记录、共享容器、编辑动作、前态及失败输出，画像分别指向这些解释。
+not_inferred: 已解释、敲完或运行成功不证明理解；不设置答题门槛。
