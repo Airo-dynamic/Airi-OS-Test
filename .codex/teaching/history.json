@@ -209,6 +209,11 @@
       "id": "L05",
       "title": "L05 · pthread有界队列、futex与原子发布",
       "document": "dev-log/linux/05-threads.md"
+    },
+    {
+      "id": "L06",
+      "title": "L06 · epoll LT/ET、TCP背压与半关闭",
+      "document": "dev-log/linux/06-epoll.md"
     }
   ]
 }

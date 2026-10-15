@@ -1,0 +1,19 @@
+checkpoint: L06
+baseline: baseline.yaml
+start: L05
+current_operation: 私有TCP连接的LT/ET读尽、发送背压和半关闭
+already_explained:
+- concept: 就绪与完成不同
+  at: ../../../dev-log/core/32-user-async.md
+  establishes: CQ携带已接受请求的cookie与结果，缓冲区收取后才可复用
+first_use:
+- concept: LT与ET状态
+  at: ../../../dev-log/linux/06-epoll.md#epoll-lt-et
+  establishes: 三字节到达后只读一字节，没有新输入时LT重复而ET需主动排空
+- concept: TCP背压和关闭
+  at: ../../../dev-log/linux/06-epoll.md#epoll-pressure
+  establishes: send仅推进实际前缀、EAGAIN交回循环、只在待发时订阅可写、RDHUP仍需读到零
+not_assumed:
+- AiriOS已有TCP或Linux实验本轮已运行
+limits:
+- SSH255，Linux分支未编译与运行；单连接示例不承诺生产公平性
