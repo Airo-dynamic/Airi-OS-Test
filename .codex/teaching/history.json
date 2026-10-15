@@ -219,6 +219,11 @@
       "id": "L07",
       "title": "L07 · liburing批量提交、错误完成与缓冲寿命",
       "document": "dev-log/linux/07-uring.md"
+    },
+    {
+      "id": "K33",
+      "title": "K33 · 用户shell与完整存储I/O演示",
+      "document": "dev-log/core/33-shell-pipeline.md"
     }
   ]
 }

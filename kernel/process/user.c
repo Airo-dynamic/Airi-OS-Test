@@ -49,6 +49,8 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_shell_elf_start[], airi_shell_elf_end[]; // 真正用户shell，不是内核命令别名。
+extern const uint8_t airi_demo_elf_start[], airi_demo_elf_end[]; // 用户页分配与异步存储贯通演示。
 extern const uint8_t airi_async_elf_start[], airi_async_elf_end[]; // 用户注册、CQ等待与exec资源轮次。
 extern const uint8_t airi_waits_elf_start[], airi_waits_elf_end[]; // 真正阻塞与超时工作负载。
 extern const uint8_t airi_pipes_elf_start[], airi_pipes_elf_end[]; // 非阻塞管道用户程序。
@@ -58,6 +60,8 @@ extern const uint8_t airi_worker_elf_start[], airi_worker_elf_end[]; // exec目�
 extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控损坏输入，验证旧进程保持。
 struct executable { const char *name; const uint8_t *start, *end; }; // 初始映像目录尚不是通用文件系统。
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
+    {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
+    {"demo", airi_demo_elf_start, airi_demo_elf_end}, // 页、任务和设备完成串联。
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
     {"worker", airi_worker_elf_start, airi_worker_elf_end},
@@ -130,6 +134,24 @@ static long file_transfer(struct user_process *p, uint64_t fd, uint64_t address,
             return (long)bytes; // 返回逻辑进展。
         }
         return airi_fd_write(&p->files, (unsigned)fd, buffer, bytes, positioned, offset); // 满管道可返回EAGAIN。
+    }
+    if (airi_fd_input(&p->files, (unsigned)fd)) { // 只有shell拥有，内核监控台在launch返回前不再轮询UART。
+        if (positioned) // 字节流没有文件偏移。
+            return -29; // -ESPIPE，不消费字节。
+        if (!bytes) // 零长度读取不能登记永久等待，也不消费UART。
+            return 0; // 有效输入FD的空操作。
+        size_t received = 0; // 返回当前可取得的前缀，不等待填满用户请求。
+        while (received < bytes) { // bytes与整个用户输出范围已在上方验证。
+            int c = airi_arch_serial_read(); // 设备寄存器只在架构层。
+            if (c < 0) // 暂无字节和字符NUL不同。
+                break; // 让已有前缀先交给用户。
+            buffer[received++] = (uint8_t)c; // 固定内核副本不会越过256字节。
+        }
+        if (!received) // 空输入走同一个IO_READ持久等待机制。
+            return -11; // 由陷入分派登记等待，不让shell忙轮询。
+        if (!copy_user(p, buffer, address, received, true)) // 消费UART前已经完整验证用户范围。
+            airi_panic("validated UART output mapping changed"); // 内部错误不能静默丢字节。
+        return (long)received; // 实际取得的字节数。
     }
     long result = airi_fd_read(&p->files, (unsigned)fd, buffer, bytes, positioned, offset); // EOF和暂不可读分开。
     if (result > 0 && !copy_user(p, buffer, address, (size_t)result, true)) // 目标阻塞且单线程，已检查映射不应变化。
@@ -445,6 +467,7 @@ static long allocate_user(size_t bytes) { // 按页提供有界用户内存，�
         if (!owned_page(current, address + i * 4096ull, AIRI_VM_WRITE)) // 成功页面已在owned中登记。
             goto rollback; // 游标尚未前移。
     current->heap_next += count * 4096ull; // 全部成功后再发布新的末端。
+    airi_log("[USER_ALLOC] pid=%u address=0x%llx pages=%u zeroed=1", current->pid, (unsigned long long)address, count); // 只记录已完整提交的用户映射。
     return (long)address; // 当前没有逐对象free，进程结束统一回收。
 rollback: // 已有用户页面不受本次耗尽影响。
     while (current->count > before) { // 只处理新增的成功项。
@@ -713,6 +736,23 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         }
         f->rax = (uint64_t)result; // 用户看到的只是本次时刻数值。
     }
+    else if (f->rax == 30) { // 目录只返回有界文本，不暴露ELF或内核对象地址。
+        char names[256]; size_t used = 0; // 当前固定目录完整小于此上限。
+        for (unsigned i=0; i<sizeof(executables)/sizeof(executables[0]); ++i) { // 结果与exec使用同一真实注册表。
+            size_t n=airi_strlen(executables[i].name); // 名称包含内部演示目标，用户仍可选择尝试。
+            if (used+n+2>sizeof(names)) // 防止以后目录增长造成栈覆盖。
+                airi_panic("program catalog exceeds bounded ABI"); // 维护者必须扩大显式上限。
+            airi_memcpy(names+used,executables[i].name,n); used+=n; // 复制有效名称前缀。
+            names[used++]='\n'; // 每行一个名字，界面自己呈现。
+        }
+        names[used]=0; // 查询返回含NUL的完整文本，不返回截断目录。
+        if (f->rsi < used+1) // 小容量不能写一半。
+            f->rax=(uint64_t)-28ll; // -ENOSPC。
+        else if (!copy_user(current,names,f->rdi,used+1,true)) // 验证实际输出跨度。
+            f->rax=(uint64_t)-14ll; // -EFAULT。
+        else // 完整复制后才发布有效长度。
+            f->rax=used; // 不含末尾NUL，与strlen一致。
+    }
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。
@@ -737,6 +777,8 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
         return error; // 调用者可以继续命令，不停机。
     }
     airi_fd_init(&root->files); // 初始stdout/stderr归本次根进程持有。
+    if (name && airi_strlen(name)==2 && !airi_memcmp(name,"sh",2)) // 只有直接启动shell时接入UART输入。
+        airi_fd_attach_input(&root->files); // CLOEXEC使既有子程序FD0继续可用于普通文件。
     root->pid = next_pid++; // 完整准备后才取得运行身份。
     root->heap_next = USER_HEAP; // 动态用户页初始为空。
     int async_error = airi_async_open(root->pid); // 完整映像准备后才登记新进程资源上下文。
@@ -826,7 +868,9 @@ void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回�
 bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
     size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
     if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
-        airi_console_print(console, "programs: hello processes worker broken files storage recover pipes waits async async-reset"); // broken是明确损坏的演示输入。
+        airi_console_print(console,"programs: registered ELF images"); // 表头不硬编码另一套程序名。
+        for (unsigned i=0; i<sizeof(executables)/sizeof(executables[0]); ++i) // 与exec共享真实目录，不维护第二份静态名称。
+            airi_console_print(console, "%s", executables[i].name); // broken是明确损坏的演示输入。
         return true; // 已处理，不再交给图形扩展。
     }
     if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。
@@ -837,6 +881,12 @@ bool airi_user_command(struct airi_console *console, const char *command) { // �
         airi_console_print(console, "program not found: %s", name); // 给出当前名称。
         return true; // 请求已得到明确结果。
     }
+#ifdef AIRI_GRAPHICAL_CONSOLE // 当前图形终端尚未接入用户TTY，不能让窗口命令陷入不可见输入等待。
+    if (bytes==6 && !airi_memcmp(name,"sh",2)) { // 只限制需要交互输入的shell，其他程序仍可运行。
+        airi_console_print(console,"User shell uses UART: start ./airios run, then run sh."); // 给出实际可操作入口。
+        return true; // 图形桌面立即继续接收输入。
+    }
+#endif // 纯串口主线没有此限制。
     struct user_result result; // 子进程都结束后取得数值退出状态。
     int error = launch(image->start, (size_t)((uintptr_t)image->end - (uintptr_t)image->start), name, true, &result); // 同步执行并完整回收，不借回调局部对象给用户。
     if (error) // 例如坏ELF返回-8，不是PANIC。

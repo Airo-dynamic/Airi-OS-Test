@@ -1,3 +1,4 @@
+#include <airi/arch.h> // 用户终端只通过架构适配读取UART。
 #include <airi/kernel.h>  // 取得串口、日志、停机及基础函数的共同声明
 
 static inline void out8(uint16_t port, uint8_t value) {  // 本文件的八位设备写接口，port 为端口号而非内存地址
@@ -59,4 +60,8 @@ void airi_serial_write_bytes(const void *bytes, size_t count) { // 当前串口�
             putchar_serial('\r'); // 原始换行之前增加回车。
         putchar_serial((char)data[i]); // 包括零字节也真正交给UART。
     }
+}
+
+int airi_arch_serial_read(void) { // 不等待，不解码键盘，也不把NUL误判成无数据。
+    return (in8(0x3fd) & 1) ? in8(0x3f8) : -1; // 只在接收就绪时消费真实设备字节。
 }

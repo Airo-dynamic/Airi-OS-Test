@@ -47,4 +47,5 @@ long airi_io_free(uint64_t handle); // 旧句柄-9，BUSY-16。
 long airi_io_submit(unsigned operation, uint64_t handle, const struct airi_io_submission *submission); // 0仅接收，描述在返回前已复制。
 long airi_io_next(struct airi_io_completion *completion, unsigned wait); // 0不等，1阻塞；返回0仅表示交出一条CQ。
 long airi_io_state_get(struct airi_io_state *state); // 当前轮次与同PID退役ACTIVE的只读数值。
+long airi_programs(char *names, size_t capacity); // 真实初始ELF目录，每行名称，容量不足不截断。
 #endif // 结束包含保护。

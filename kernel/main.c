@@ -81,6 +81,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     if (airi_storage_count() >= 0 && !airi_block_readonly()) // 可写正常设备已完成用户异步生命周期。
         airi_log("[AIRI_P5_READY] wait=blocked sq=4 cq=4 registered=1 lifecycle=reclaimed"); // Linux实验实测另记，不由guest标记代替。
     airi_serial_write("airi> ");  // 输出首个串口提示符。
+    airi_log("[AIRI_P6_AVAILABLE] shell=sh demo=demo input=UART"); // 只声明入口可用，完整演示由实际shell测试验证。
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
         if (!key) {  // 没有新键时不处理命令和重画。

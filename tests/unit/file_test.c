@@ -78,6 +78,14 @@ int main(void) { // 独立进程，每次建立干净RAM目录。
     assert(airi_fd_pipe(&parent, ends, true) == -28 && ends[0] == 77 && ends[1] == 88 && airi_files_open_count() == 8); // 第五条失败不泄漏半个FD或对象。
     airi_fd_close_all(&parent, false); // 扫描全部表项，端点池也全部回收。
     assert(!airi_files_open_count()); // 后续程序可继续创建流。
+    airi_fd_init(&parent); airi_fd_attach_input(&parent); // 只给新shell根接入固定输入。
+    assert(airi_fd_input(&parent,0) && parent.entries[0].cloexec); // FD0与输出对象身份不同，exec时必须撤销。
+    airi_fd_clone(&child,&parent); // fork增加输入对象引用，但不复制设备。
+    airi_fd_close_all(&child,true); // 成功exec只关闭CLOEXEC输入，保留stdout/stderr。
+    assert(!airi_fd_input(&child,0) && airi_fd_input(&parent,0)); // 子撤销不影响父shell继续读。
+    airi_fd_close_all(&child,false); airi_fd_close_all(&parent,false); // 最后输入引用释放不能清空固定对象配置。
+    airi_fd_init(&parent); airi_fd_attach_input(&parent); // 再次启动shell可重新使用相同输入对象。
+    assert(airi_fd_input(&parent,0)); airi_fd_close_all(&parent,false); // 重复会话完整回收。
     puts("PASS RAM files/pipes: offsets, fork/exec references, sparse zero, short I/O, FIFO wrap, endpoint lifetime, exhaustion"); // 全部边界通过才发布。
     return 0; // 宿主测试成功。
 }

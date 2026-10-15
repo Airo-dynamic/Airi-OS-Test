@@ -1,0 +1,25 @@
+checkpoint: K33
+baseline: baseline.yaml
+start: K32 + L07
+current_operation: UART进入ring3 shell，fork/exec demo，页/FD/设备完成贯通并返回monitor
+already_explained:
+- concept: CQ等待与进程owner
+  at: ../../../dev-log/core/32-user-async.md#async-process-owner
+  establishes: fork新空owner、exec换epoch、退出ACTIVE排空，收取后才复用buffer
+- concept: 持久IO_READ等待
+  at: ../../../dev-log/core/29-wait-queues.md#wait-saved-request
+  establishes: 保存用户输出与frame，普通服务栈重查后写结果再唤醒
+first_use:
+- concept: UART单输入所有者
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-stdin
+  establishes: 只有根sh安装CLOEXEC FD0，monitor同步停在launch，不竞争UART
+- concept: 用户shell与子exec
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-user-parser
+  establishes: 父保留行与映像、子替换、父wait，长行不执行截断前缀
+- concept: 端到端数据寿命
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-pipeline
+  establishes: 用户页、RAM文件、注册副本和设备请求分别拥有字节，CQ后才复用/释放
+not_assumed:
+- shell有POSIX参数/管线语法、GUI窗口已有用户TTY、开发板或网络已实现
+limits:
+- 单UART独占、静态ELF、每进程单线程，实际限速证明一次交错，不要求快设备每次都阻塞

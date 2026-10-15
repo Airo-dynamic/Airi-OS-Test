@@ -8,6 +8,7 @@ struct airi_open_file { struct memory_file *node; struct memory_pipe *pipe; uint
 static struct memory_file nodes[NODE_COUNT]; // 初值零表示空目录槽。
 static struct airi_open_file opened[OPEN_COUNT]; // 引用数零表示空打开槽。
 static struct memory_pipe pipes[4]; // readers与writers都零表示未使用的管道。
+static struct airi_open_file terminal_input; // 与输出不同的固定对象，最后关闭也不清对象配置。
 static struct airi_open_file terminal; // 固定串口对象，不含RAM文件内容。
 static struct airi_open_file *get(const struct airi_fd_table *table, unsigned fd) { // 用户整数必须先做范围检查。
     return fd < AIRI_FD_COUNT ? table->entries[fd].file : NULL; // 不把FD转成内核指针。
@@ -23,6 +24,8 @@ void airi_files_init(void) { // 启动一次，不能在仍有FD时重置。
     airi_memset(pipes, 0, sizeof(pipes)); // 启动前没有端点或在途字节。
     airi_memset(opened, 0, sizeof(opened)); // 清空全局打开对象。
     airi_memset(&terminal, 0, sizeof(terminal)); // 固定对象没有自有节点。
+    airi_memset(&terminal_input, 0, sizeof(terminal_input)); // 启动时无输入引用。
+    terminal_input.flags = AIRI_OPEN_READ; // 只读，不能被当成stdout。
     terminal.flags = AIRI_OPEN_WRITE; // 当前只提供stdout/stderr。
     airi_memcpy(nodes[0].name, "/seed", 6); // 只读初始文件，字符串含终止零。
     airi_memcpy(nodes[0].data, "abcdef", 6); // 文件字节无需NUL。
@@ -30,7 +33,7 @@ void airi_files_init(void) { // 启动一次，不能在仍有FD时重置。
     nodes[0].readonly = true; // 模式请求不能让只读节点可写。
 }
 void airi_fd_init(struct airi_fd_table *table) { // 新会话的独立表，不复制旧进程编号。
-    airi_memset(table, 0, sizeof(*table)); // stdin暂未接入，槽0可用于普通文件。
+    airi_memset(table, 0, sizeof(*table)); // 普通根的槽0默认空，shell随后显式接入输入。
     table->entries[1].file = &terminal; // stdout引用固定设备对象。
     table->entries[2].file = &terminal; // stderr是另一个表项。
     terminal.references += 2; // 两个表项各持有一次引用。
@@ -46,7 +49,7 @@ long airi_fd_close(struct airi_fd_table *table, unsigned fd) { // 关闭表项�
     if (!file) // 无效或已关闭。
         return -9; // -EBADF。
     table->entries[fd] = (struct airi_fd_entry){0}; // 先撤掉进程引用。
-    if (--file->references == 0 && file != &terminal) { // 最后表项引用消失才关闭真实端点。
+    if (--file->references == 0 && file != &terminal && file != &terminal_input) { // 最后表项引用消失才关闭真实端点。
         if (file->pipe) { // 普通RAM文件没有管道对端状态。
             if (file->flags & AIRI_OPEN_READ) // 当前是只读端点打开对象。
                 --file->pipe->readers; // dup/fork共享对象，不能每关一个FD都减端点数。
@@ -245,4 +248,12 @@ long airi_fd_ready(const struct airi_fd_table *table, unsigned fd) { // 查询�
 bool airi_fd_nonblocking(const struct airi_fd_table *table, unsigned fd) { // 后续系统调用层决定遇EAGAIN如何处理。
     struct airi_open_file *file = get(table, fd); // 不直接解用户值。
     return file && (file->flags & AIRI_OPEN_NONBLOCK); // 不支持或无效对象不会被当成非阻塞流。
+}
+
+void airi_fd_attach_input(struct airi_fd_table *table) { // 调用者保证是刚初始化且槽零为空的新表。
+    table->entries[0] = (struct airi_fd_entry){.file=&terminal_input, .cloexec=true}; // exec子程序不能继承shell独占的UART输入。
+    ++terminal_input.references; // fork/close使用已有共享引用协议。
+}
+bool airi_fd_input(const struct airi_fd_table *table, unsigned fd) { // 只比较内核已验证表项身份。
+    return get(table, fd) == &terminal_input; // 不把用户整数当硬件地址。
 }

@@ -51,3 +51,13 @@ airi_waits_elf_end: /* 半开右端。 */
 airi_async_elf_start: /* 文件首字节。 */
 .incbin AIRI_ASYNC_ELF /* 本配置真实链接的用户程序。 */
 airi_async_elf_end: /* 文件半开右端。 */
+
+.section .rodata /* 新程序仍只是内核只读段中的输入文件。 */
+.global airi_shell_elf_start, airi_shell_elf_end /* shell装载边界。 */
+airi_shell_elf_start: /* 完整文件头起点。 */
+.incbin AIRI_SHELL_ELF /* 当前配置的真实用户shell。 */
+airi_shell_elf_end: /* 半开右端。 */
+.global airi_demo_elf_start, airi_demo_elf_end /* 贯通演示装载边界。 */
+airi_demo_elf_start: /* 完整ELF起点。 */
+.incbin AIRI_DEMO_ELF /* 当前配置的真实异步用户程序。 */
+airi_demo_elf_end: /* 半开右端。 */

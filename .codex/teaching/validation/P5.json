@@ -1,0 +1,24 @@
+{
+  "phase": "P5",
+  "date": "2026-10-16",
+  "kernel_checkpoint": "K32",
+  "kernel_commit": "e03c526",
+  "core": "8 ASan/UBSan host groups, 9 boot profiles, 3 console paths, 3 I/O session boots passed",
+  "graphics": "Merged unchanged gui into detached K32 worktree; 9 boots, 3 console paths, 3 I/O sessions, ui-test84 snapshots58 contrasts passed; day/night screenshots visually reviewed. Merge aborted and worktree removed.",
+  "evidence": [
+    "/tmp/airios-k32-tests.log",
+    "/tmp/airios-p5-gui-tests.log",
+    "/tmp/airios-p5-gui-ui.log",
+    "artifacts/p5-graphics-regression/day.png",
+    "artifacts/p5-graphics-regression/night.png"
+  ],
+  "linux": {
+    "L05": "SSH255, unverified Linux pthread/futex branch",
+    "L06": "SSH255, unverified Linux TCP/epoll branch",
+    "L07": "SSH255, unverified Linux/liburing branch"
+  },
+  "limits": [
+    "No Linux ABI compatibility, no SMP, no TCP in guest",
+    "Graphics terminal does not become a user TTY"
+  ]
+}

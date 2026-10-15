@@ -34,7 +34,7 @@ CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror
 CPPFLAGS := -Iinclude -Ithird_party
 # 只有显式图形配置需要前端头文件。
 ifneq ($(filter desktop-%,$(PROFILE)),)
-CPPFLAGS += -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
+CPPFLAGS += -DAIRI_GRAPHICAL_CONSOLE -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
 endif # 结束当前可选图形分支。
 # Make条件只在no-framebuffer配置加入下方测试宏。
 ifeq ($(CASE),no-framebuffer)
@@ -295,3 +295,22 @@ $(OUT)/user/async.o: labs/airios/async.c labs/airios/include/airi_libc.h include
 $(OUT)/user/async.elf: $(USER_COMMON) $(OUT)/user/async.o labs/airios/program.ld
 # 仍为无宿主libc的静态ELF。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/async.o -o $@
+
+# shell与贯通演示是独立的低地址用户ELF，不链接彼此main。
+$(OUT)/user/%.o: labs/airios/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+# 与既有libc模式规则路径不同，Make按存在的源选择。
+	@mkdir -p $(dir $@)
+# 复用整数用户ABI，不借宿主运行时。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 两个新程序各自链接自有入口与库。
+$(OUT)/user/sh.elf: $(USER_COMMON) $(OUT)/user/sh.o labs/airios/program.ld
+# 每个目标包含且只包含自己的main。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/sh.o -o $@
+# demo同样形成真正ELF，再作为初始装载输入。
+$(OUT)/user/demo.elf: $(USER_COMMON) $(OUT)/user/demo.o labs/airios/program.ld
+# 段权限与BSS由既有用户链接脚本定义。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/demo.o -o $@
+# 目标额外依赖保证.incbin永远读取本配置已完成ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/sh.elf $(OUT)/user/demo.elf
+# target-specific变量只对这个包装对象追加路径宏，单引号保护C字符串。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_SHELL_ELF='"$(OUT)/user/sh.elf"' -DAIRI_DEMO_ELF='"$(OUT)/user/demo.elf"'
