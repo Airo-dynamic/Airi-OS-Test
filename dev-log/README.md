@@ -23,7 +23,7 @@
 ## 在参考工程中查阅和导出
 
 ```sh
-./airios learn list # 默认列出 main 的 18 个节点。
+./airios learn list # 默认列出main当前已发布节点。
 ./airios learn list --track core # 只显示内核课程及其前置。
 ./airios learn show K11 # 阅读这一检查点的完整正文。
 ./airios learn progress --record 02 # 记录自己的主线停留位置。
@@ -35,7 +35,7 @@
 
 ## 组合可选图形停点
 
-main 有 18 个节点：00–10、K11–K13、L01、T01–T03。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
+main 的基础18节点之后已追加 K14–K17 和 L02，共23节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
 
 图形的运行前置另行声明：运行需主线到 K11，G24 的 guest 接入需 K13。合并 gui 后出现独立的 graphics.json，learn 才增加图形节点；未合并时，主线列表、导出和快照只处理 main。
 
@@ -48,3 +48,5 @@ main 有 18 个节点：00–10、K11–K13、L01、T01–T03。gui 从共同的
 组合会闭合所选检查点的前置，只应用一次共享基础。G13 的图形文件不会把 K13 的内核退回 K11；HISTORY 中的图形检查点也包含其需要的主线基础。图形进度不推进或重置内核位置，G11–G23 的宿主结果也不代表 guest 已经显示图形。
 
 [当前验证](../docs/verification.md)记录实际运行和未验证平台；[系统实践地图](../docs/system-practice.md)说明这些机制怎样回到 BOSS、Taishan 和以前的网络库。
+
+完成 K13 和 L01 后，从 [K14 异常入口](core/14-exceptions.md) 连续到 [K17 内核堆](core/17-kernel-heap.md)，再读 [L02 Linux 内存](linux/02-memory.md)。源码与教程每节都有独立停点，自己的 day2 目录仍按03开始，不需要导入新内核成品。
