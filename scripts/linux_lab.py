@@ -9,7 +9,7 @@ from tools import ROOT  # 共享 ROOT 指向项目根目录，后续路径不依
 
 parser=argparse.ArgumentParser()  # 主机参数解析器提供--host选项与用法提示。
 parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')  # 个人Linux主机可以显式替换，不涉及公司机器。
-parser.add_argument('--phase', choices=('p1', 'p2'), default='p1') # 实验来源与远端目录使用同一阶段名。
+parser.add_argument('--phase', choices=('p1', 'p2', 'p3'), default='p1') # 实验来源与远端目录使用同一阶段名。
 args=parser.parse_args()  # 把进程参数转为Namespace，后续通过 args.host 取得目标主机字符串。
 if args.host.startswith('-') or any(c.isspace() for c in args.host):  # 禁止选项形状和空白，避免host被外部工具误解析；生成器逐字符检查空白。
     raise RuntimeError('Invalid SSH host')  # 无效目标在启动SSH之前拒绝。
@@ -24,7 +24,7 @@ connection=subprocess.run(ssh+[f'mkdir -p {shlex.quote(remote)}'],capture_output
 if connection.returncode: # 未连接就不复制也不声称程序运行。
     (dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'connection failed','exit':connection.returncode},indent=2)+'\n') # 明确本轮未验证。
     raise RuntimeError(f'Linux SSH failed ({connection.returncode}); see {dest}/connection.log') # 路径和失败状态交回统一入口。  # 本地参数列表启动SSH，远端命令文本中的目录由quote保护。
-names = ('ordinary.c','raw_start.S','run.sh') if args.phase == 'p1' else ('memory.c','run.sh') # 只选择本阶段已写出的程序。
+names = ('ordinary.c','raw_start.S','run.sh') if args.phase == 'p1' else ('memory.c','run.sh') if args.phase == 'p2' else ('process.c','run.sh') # 只选择本阶段已写出的程序。
 sources=[ROOT/'labs/linux'/args.phase/name for name in names]  # 列表推导按所选阶段名称构成Path对象。
 subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp安静且非交互传输，连接上限同SSH。
                 *[str(p) for p in sources],f'{args.host}:{remote}/'],check=True)  # 列表内*展开本阶段路径字符串，最后一项是远端目标。

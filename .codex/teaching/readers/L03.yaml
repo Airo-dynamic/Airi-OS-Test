@@ -1,0 +1,23 @@
+checkpoint: L03
+baseline: baseline.yaml
+start: K23 + L02
+current_operation: Linux父子私有内存、失败和成功exec、继承FD及共享偏移
+already_explained:
+- concept: 自有exec事务和PID
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 先准备新根再替换用户现场，保持PID，成功不回原调用
+first_use:
+- concept: 私有语义与COW观察
+  at: ../../../dev-log/linux/03-process.md#linux-fork-memory
+  establishes: 父子修改分离，累计缺页差值不能精确推出复制页数
+- concept: FD和打开文件描述
+  at: ../../../dev-log/linux/03-process.md#linux-fd-inheritance
+  establishes: 表项复制、共享偏移、CLOEXEC按FD关闭、wait编码分开
+- concept: 成功exec捕捉点
+  at: ../../../dev-log/linux/03-process.md#linux-exec-gdb
+  establishes: 动态装载器入口与初始栈区分，只有实际命中才记录完成
+not_assumed:
+- Linux全部exec失败可返回原映像、完整线程fork或存储持久性
+limits:
+- 本轮SSH255，Linux运行和GDB未验证
+- 已解释记录不表示读者掌握
