@@ -134,6 +134,11 @@
       "id": "K20",
       "title": "K20 · ring3系统调用与用户故障隔离",
       "document": "dev-log/core/20-user-boundary.md"
+    },
+    {
+      "id": "K21",
+      "title": "K21 · 装载静态ELF并运行自己的用户C库",
+      "document": "dev-log/core/21-user-elf.md"
     }
   ]
 }

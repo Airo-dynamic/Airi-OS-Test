@@ -1,3 +1,4 @@
+#include <airi/elf.h> // 对独立静态ELF先校验再装载。
 #include <airi/user.h> // 用户陷入和演示入口。
 #include <airi/memory.h> // 物理页、内核区域与长期内核根。
 #include <airi/vm.h> // 用户根借用高半区，低半区单独拥有。
@@ -9,12 +10,13 @@
 static struct { // 当前检查点同一时刻只有一个用户上下文。
     struct airi_address_space space; // 自有根与低半区表，借用长期内核映射。
     struct airi_kernel_region stack; // TSS.RSP0指向该内核栈的高端。
-    uint64_t owned[2]; // 代码页与用户栈数据页由本对象持有。
+    uint64_t owned[64]; // 有界用户数据页所有权，含ELF各段与初始用户栈。
     uint64_t fault_error; // 保留用户硬件PF的实际错误位以验证supervisor保护。
     unsigned count, pid, user_ticks; // 数据页数量、用户身份与真实用户态IRQ数。
     bool running; // 只有CPU正在运行本用户或处理其陷入时为真。
     struct airi_trap_frame *frame; // 当前内核栈上完整的用户返回现场。
 } process; // 不依赖内核堆扩容，不把它宣称为通用进程表。
+extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 独立用户ELF的只读输入边界。
 static unsigned next_pid = 1; // 两次顺序运行得到不同身份。
 static struct airi_trap_frame *kernel_return; // int129保存启动任务继续执行所需的完整现场。
 extern const uint8_t airi_user_probe_start[], airi_user_probe_end[]; // 链接进只读段的受控位置无关映像。
@@ -106,6 +108,84 @@ static void cleanup(void) { // 必须已经回到启动栈和长期内核根。
     airi_memset(&process, 0, sizeof(process)); // 不留下可重复释放的根或句柄。
     kernel_return = NULL; // 原现场已返回，下一次必须重新登记。
 }
+static void initial_frame(uint64_t entry, const char *name) { // 输入页已完整映射并清零，最后才发布首次返回现场。
+    uint64_t stack_pointer = USER_STACK + 4096 - 16; // 旧受控汇编映像不读取argc，保持原布局。
+    if (name) { // C程序使用本项目最小argc/argv栈协议。
+        size_t bytes = airi_strlen(name) + 1; // 包含用户字符串的终止零。
+        if (bytes > 64) // 当前程序名是固定短字面量，不支持无界参数。
+            airi_panic("initial program name exceeds stack budget"); // 不覆盖用户启动布局。
+        uint64_t physical; // 当前根未激活，通过软件翻译找到用户栈数据页。
+        if (!airi_vm_lookup(&process.space, USER_STACK, &physical, NULL)) // 栈必须已建立。
+            airi_panic("initial user stack mapping is missing"); // 不猜测owned数组中的位置。
+        uint8_t *alias = airi_memory_direct(physical); // 通过内核HHDM填写尚未运行的用户栈。
+        size_t name_offset = 4096 - bytes; // 字符串放在栈页高端。
+        airi_memcpy(alias + name_offset, name, bytes); // 用户只得到自己的字符串副本。
+        size_t words_offset = (name_offset & ~(size_t)15) - 4 * sizeof(uint64_t); // 四个64位槽，入口RSP仍16字节对齐。
+        uint64_t *words = (uint64_t *)(alias + words_offset); // 已对齐的栈内数组。
+        words[0] = 1; // argc目前固定一个程序名。
+        words[1] = USER_STACK + name_offset; // argv[0]必须是用户VA，不是HHDM指针。
+        words[2] = 0; // argv[1]结束指针数组。
+        words[3] = 0; // 空环境，当前没有完整ELF辅助向量。
+        stack_pointer = USER_STACK + words_offset; // CPU初始RSP指向argc槽。
+    }
+    process.pid = next_pid++; // 资源和布局完成后才取得身份。
+    process.frame = (void *)(uintptr_t)(KERNEL_STACK + 4 * 4096 - sizeof(struct airi_trap_frame)); // 内核栈顶部预制首次iretq现场。
+    airi_memset(process.frame, 0, sizeof(*process.frame)); // 首次没有旧GPR。
+    process.frame->rip = entry; // ELF入口或已知汇编入口。
+    process.frame->cs = 27; // 用户代码段与RPL3。
+    process.frame->ss = 35; // 用户数据段与RPL3。
+    process.frame->rsp = stack_pointer; // 使用刚准备的用户布局。
+    process.frame->rflags = 0x202; // 用户IF开启，IOPL为零。
+}
+static bool owned_page(uint64_t address, unsigned flags) { // 一次只建立一页，失败页面仍可由统一cleanup找到。
+    if (process.count == 64) // 包括初始栈在内的全部数据页预算。
+        return false; // 不越过所有权数组。
+    uint64_t physical = airi_memory_take_page(); // 取得真正归本上下文持有的物理页。
+    if (!physical) // 耗尽时没有需要登记的页。
+        return false; // 调用方回滚已有部分。
+    process.owned[process.count++] = physical; // 先登记，映射失败也不会泄漏本次物理页。
+    airi_memset(airi_memory_direct(physical), 0, 4096); // 文件尾部与BSS默认都从零开始。
+    return airi_vm_map(&process.space, address, physical, flags | AIRI_VM_USER); // 所有低半区叶子必须明确USER。
+}
+static bool prepare_elf(const uint8_t *image, size_t bytes) { // 当前还没有exec，先在空上下文中完成事务装载。
+    struct airi_elf_view view; // 只借输入ELF直到复制结束。
+    const char *error = airi_elf_inspect(image, bytes, &view); // 在任何资源分配前校验整个输入。
+    if (error) { // 损坏格式不能触发后续内存写入。
+        airi_log("[ELF_REJECTED] %s", error); // 给出精确范围/权限原因。
+        return false; // 旧输出和当前空上下文都未改变。
+    }
+    if (!airi_memory_region_create(&process.stack, KERNEL_STACK, 4)) // 内核陷入栈先完成，再借高半区。
+        return false; // 区域接口已回滚失败。
+    if (!airi_memory_user_space(&process.space)) // 创建独立低半区。
+        goto failed; // 后续失败均收回所有已持有资源。
+    for (unsigned i = 0; i < view.count; ++i) { // 每段独立赋予对应权限。
+        const struct airi_elf_segment *segment = &view.segments[i]; // 元数据已经过统一校验。
+        unsigned flags = ((segment->flags & 2) ? AIRI_VM_WRITE : 0) | ((segment->flags & 1) ? AIRI_VM_EXEC : 0); // ELF PF标志转换成本内核权限枚举。
+        uint64_t first = segment->address & ~4095ull; // 覆盖段首所在页。
+        uint64_t end = (segment->address + segment->memory_bytes + 4095) & ~4095ull; // 包含完整BSS跨度。
+        for (uint64_t address = first; address < end; address += 4096) // 所有页面先清零再接入。
+            if (!owned_page(address, flags)) // 物理耗尽或映射失败都终止本次装载。
+                goto failed; // 清理根/表后再归还数据页。
+        for (uint64_t done = 0; done < segment->file_bytes;) { // 只复制filesz字节，memsz剩余继续保持零。
+            uint64_t physical; // lookup结果包含当前页内偏移。
+            if (!airi_vm_lookup(&process.space, segment->address + done, &physical, NULL)) // 已映射跨度必须可查询。
+                goto failed; // 内部装载状态不一致也不运行。
+            uint64_t part = 4096 - ((segment->address + done) & 4095); // 当前页内可复制长度。
+            if (part > segment->file_bytes - done) // 不从文件右端外复制字节。
+                part = segment->file_bytes - done; // 最后一次缩到实际剩余。
+            airi_memcpy(airi_memory_direct(physical), view.image + segment->offset + done, (size_t)part); // 内核控制的物理别名可初始化最终只读/可执行页。
+            done += part; // 下一次继续剩余文件内容。
+        }
+    }
+    if (!owned_page(USER_STACK, AIRI_VM_WRITE)) // 栈单独RW/NX，不采用ELF可执行栈请求。
+        goto failed; // 失败仍统一回滚。
+    initial_frame(view.entry, "hello"); // 用户_start接收最小argc/argv协议。
+    airi_log("[ELF_LOAD] entry=0x%llx segments=%u data_pages=%u argc=1", (unsigned long long)view.entry, view.count, process.count); // 不含页表与内核栈的用户数据页数量。
+    return true; // 还未切CR3，运行入口统一由int129交接。
+failed: // 长期根仍活动，用户空间从未开始执行。
+    cleanup(); // 页表、用户数据和内核栈全部回收。
+    return false; // 不提供部分映像。
+}
 static bool prepare(const uint8_t *image, size_t bytes) { // 本节是受控位置无关字节映像，下一节再解析独立ELF。
     if (!bytes || bytes > 4096 || !airi_memory_region_create(&process.stack, KERNEL_STACK, 4)) // 内核栈先存在，用户根才能借到它的高半区链接。
         return false; // 没有完整栈就不克隆根。
@@ -121,27 +201,21 @@ static bool prepare(const uint8_t *image, size_t bytes) { // 本节是受控位�
     airi_memcpy(airi_memory_direct(process.owned[0]), image, bytes); // 复制受控程序，内核原始字节本身从不执行。
     if (!airi_vm_map(&process.space, USER_CODE, process.owned[0], AIRI_VM_USER | AIRI_VM_EXEC) || !airi_vm_map(&process.space, USER_STACK, process.owned[1], AIRI_VM_USER | AIRI_VM_WRITE)) // 用户代码RX，栈RW/NX。
         goto failed; // 页表与数据分别由cleanup回收。
-    process.pid = next_pid++; // 准备完成才分配运行身份。
-    process.frame = (void *)(uintptr_t)(KERNEL_STACK + 4 * 4096 - sizeof(struct airi_trap_frame)); // 初次iretq现场位于本内核栈顶下方。
-    airi_memset(process.frame, 0, sizeof(*process.frame)); // 首次没有旧寄存器值。
-    process.frame->rip = USER_CODE; // 处理器将从低半区用户代码取指。
-    process.frame->cs = 27; // GDT的ring3代码选择子24加RPL3。
-    process.frame->ss = 35; // GDT的ring3数据选择子32加RPL3。
-    process.frame->rsp = USER_STACK + 4096 - 16; // 初始用户栈保持16字节对齐。
-    process.frame->rflags = 0x202; // 必需bit1加IF，IOPL仍为0，用户不能cli。
+    initial_frame(USER_CODE, NULL); // 保留K20受控汇编布局，用于故障回归。
     return true; // 还没有切根和进入用户执行。
 failed: // 当前仍在长期根和启动栈，半成品都可安全释放。
     cleanup(); // 拆用户表、归还数据、最后解除内核栈。
     return false; // 不运行部分准备的映像。
 }
-static void run_one(const uint8_t *image, size_t bytes, int expected) { // 同一启动调用链顺序运行四个隔离演示。
+static void run_one(const uint8_t *image, size_t bytes, int expected, bool elf, bool require_ticks) { // 同一启动调用链顺序运行隔离演示与独立用户ELF。
     struct airi_memory_stats before, after; // 统计包含页表和两种栈的整个生命周期。
     airi_memory_snapshot(&before); // 准备之前基准。
-    if (!prepare(image, bytes)) // 失败已完整回滚。
+    bool prepared = elf ? prepare_elf(image, bytes) : prepare(image, bytes); // 两种输入通过各自明确装载边界。
+    if (!prepared) // 失败已完整回滚。
         airi_panic("cannot prepare user demonstration"); // 不把半成品交给iretq。
     long code; // int129恢复到启动现场时由RAX交回结束原因。
     __asm__ volatile("int $0x81" : "=a"(code) :: "memory", "cc"); // DPL0门保存当前完整现场，再切到受控用户现场。
-    if (code != expected || (!expected && process.user_ticks < 2) || (expected == -142 && process.fault_error != 5)) // 正常程序必须真实运行并被用户态IRQ打断。
+    if (code != expected || (require_ticks && process.user_ticks < 2) || (expected == -142 && process.fault_error != 5)) // 正常程序必须真实运行并被用户态IRQ打断。
         airi_panic("user context ended with unexpected result"); // 用户GP与正常退出分别验证。
     cleanup(); // 已经回启动栈，才允许归还用户内核栈。
     airi_memory_snapshot(&after); // 取得本轮结束后的真实空闲数量。
@@ -149,10 +223,11 @@ static void run_one(const uint8_t *image, size_t bytes, int expected) { // 同�
         airi_panic("user context leaked owned memory"); // 不让隔离演示留下隐藏成本。
 }
 void airi_user_demo(void) { // 当前只验证边界，不提供shell启动和完整进程调度。
-    run_one(airi_user_probe_start, (size_t)((uintptr_t)airi_user_probe_end - (uintptr_t)airi_user_probe_start), 0); // 用户输出、非法指针和真实IRQ后正常退出。
-    run_one(airi_user_bad_start, (size_t)((uintptr_t)airi_user_bad_end - (uintptr_t)airi_user_bad_start), -141); // CPL3执行cli得到GP13，仅结束该用户。
-    run_one(airi_user_load_bad_start, (size_t)((uintptr_t)airi_user_load_bad_end - (uintptr_t)airi_user_load_bad_start), -142); // 真实user读内核PTE得到PF error=5。
-    run_one(airi_user_rsp_bad_start, (size_t)((uintptr_t)airi_user_rsp_bad_end - (uintptr_t)airi_user_rsp_bad_start), -22); // 在内核iretq之前拒绝不规范RSP。
+    run_one(airi_user_probe_start, (size_t)((uintptr_t)airi_user_probe_end - (uintptr_t)airi_user_probe_start), 0, false, true); // 用户输出、非法指针和真实IRQ后正常退出。
+    run_one(airi_user_bad_start, (size_t)((uintptr_t)airi_user_bad_end - (uintptr_t)airi_user_bad_start), -141, false, false); // CPL3执行cli得到GP13，仅结束该用户。
+    run_one(airi_user_load_bad_start, (size_t)((uintptr_t)airi_user_load_bad_end - (uintptr_t)airi_user_load_bad_start), -142, false, false); // 真实user读内核PTE得到PF error=5。
+    run_one(airi_user_rsp_bad_start, (size_t)((uintptr_t)airi_user_rsp_bad_end - (uintptr_t)airi_user_rsp_bad_start), -22, false, false); // 在内核iretq之前拒绝不规范RSP。
+    run_one(airi_hello_elf_start, (size_t)((uintptr_t)airi_hello_elf_end - (uintptr_t)airi_hello_elf_start), 0, true, false); // 真正解析静态ELF、构造用户栈并运行C与自有libc。
     airi_log("[USER_DEMO_OK] ring=3 syscall=int80 bad_pointers=2 user_gp=13 user_pf=14 bad_rsp=rejected reclaimed=1"); // 内核恢复后继续串口，不宣称ELF/fork已经完成。
 }
 

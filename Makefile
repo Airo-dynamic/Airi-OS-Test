@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -25,7 +25,7 @@ endif # 结束当前可选图形分支。
 # 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
 CASE := $(patsubst desktop-%,%,$(PROFILE))
 # patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o $(OUT)/kernel/arch/x86_64/switch.o $(OUT)/labs/airios/probe.o
+OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o $(OUT)/kernel/arch/x86_64/switch.o $(OUT)/labs/airios/probe.o $(OUT)/labs/airios/images.o
 # 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
@@ -122,6 +122,12 @@ host-test:
 	    kernel/mm/heap.c kernel/lib/base.c -o build/tests/heap_test
 # 交错分配与归还时检查所有活对象内容和最终容量。
 	./build/tests/heap_test
+# 解析器在独立小端字节夹具中核对正常与损坏ELF，不执行输入指令。
+	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
+	    -fsanitize=address,undefined -Iinclude tests/unit/elf_test.c \
+	    kernel/process/elf.c kernel/lib/base.c -o build/tests/elf_test
+# 失败不得写出半份view，也不得越界读取映像。
+	./build/tests/elf_test
 # 清理仅删除可重建产物，保留运行证据artifacts。
 clean:
 # 调用shutil删除build；ignore_errors允许尚不存在目录。
@@ -155,3 +161,36 @@ lab-boot-info:
 	    labs/host/boot/boot_info_probe.c kernel/boot/info.c -o build/labs/boot-info
 # 打印启动合同的正常与独立失败原因。
 	./build/labs/boot-info
+
+# 用户C使用自己的低地址模型、入口和库；绝不沿用内核高地址链接脚本。
+USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -mcmodel=small
+# 每个配置拥有独立用户对象，避免跨配置复用旧二进制。
+USER_OBJECTS := $(OUT)/user/start.o $(OUT)/user/hello.o $(OUT)/user/bytes.o $(OUT)/user/syscall.o
+# 入口汇编与内核汇编分别形成对象，符号_start不在同一个链接目标中冲突。
+$(OUT)/user/start.o: labs/airios/start.S
+# 先建立独立用户产物目录。
+	@mkdir -p $(dir $@)
+# 当前交叉编译器不链接宿主运行时。
+	$(CC) $(USER_FLAGS) -c $< -o $@
+# 用户C程序只读取自有用户库声明。
+$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h
+# 先建立输出目录。
+	@mkdir -p $(dir $@)
+# 编译为用户模型对象。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 用户库的字节实现与系统调用实现共用这一规则。
+$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h
+# 输出目录与当前配置绑定。
+	@mkdir -p $(dir $@)
+# 所有用户库均使用同样的freestanding约束。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 用户独立静态ELF是嵌入输入，不是内核的直接链接对象。
+$(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
+# 用户只链接自己的_start、main和libc子集，无宿主依赖。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
+# 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf
+# 建立包装对象目录。
+	@mkdir -p $(dir $@)
+# 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -c $< -o $@

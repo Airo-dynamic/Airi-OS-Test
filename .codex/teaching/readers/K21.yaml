@@ -1,0 +1,29 @@
+checkpoint: K21
+baseline: baseline.yaml
+start: K20
+current_operation: 校验静态ELF、映射段、复制文件与清BSS，构造用户argc/argv后运行独立C和libc
+already_explained:
+- concept: ring3系统调用和安全返回
+  at: ../../../dev-log/core/20-user-boundary.md#safe-user-return
+  establishes: TSS内核栈、低半区USER、返回标志检查，回启动栈后回收
+first_use:
+- concept: 程序头和文件/内存跨度
+  at: ../../../dev-log/core/21-user-elf.md#elf-file-memory
+  establishes: LOAD的filesz复制、memsz剩余为零，p_paddr不支配用户物理页
+- concept: 有界解析与原输出保持
+  at: ../../../dev-log/core/21-user-elf.md#elf-validation
+  establishes: 先完整校验后发布view，减法检查避免范围回绕
+- concept: 独立用户运行库
+  at: ../../../dev-log/core/21-user-elf.md#user-libc-subset
+  establishes: 用户字节函数与内核分开链接，自有int80包装保留负错误
+- concept: 用户_start和最小初始栈
+  at: ../../../dev-log/core/21-user-elf.md#user-c-entry
+  establishes: argc/argv以用户地址传递，call前16字节对齐，没有完整auxv
+- concept: 两次链接和ELF字节包装
+  at: ../../../dev-log/core/21-user-elf.md#independent-user-build
+  establishes: 用户独立静态ELF先完成，再incbin为内核输入，不混合符号
+not_assumed:
+- fork/exec/wait、多用户轮转、COW、动态链接或Linux ABI兼容
+limits:
+- 当前程序固定低256MiB、最多63段数据页和一页初始栈
+- Linux/GDB远端本轮未验证，运行不记录为读者掌握
