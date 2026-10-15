@@ -110,3 +110,67 @@ void u_frame(struct ui_rect r, uint32_t color) {  // 以一像素厚边围住传
     u_rect(r.x, r.y, 1, r.h, color);  // 左边覆盖r.h个像素
     u_rect(r.x + r.w - 1, r.y, 1, r.h, color);  // 右边位于半开右边前一列
 }
+#include "../assets/font-atlas.h"  // 读取主机生成的八套字形度量和覆盖率
+static void blend(int x, int y, uint32_t rgb, unsigned alpha) {  // 将0至255覆盖率的前景混入原像素
+    if (!alpha || !u_inside(clip, x, y))  // 零覆盖率和裁剪外像素不需要读背景
+        return;  // 保持原像素不变
+    if (alpha == 255) {  // 完整覆盖可以直接使用既有写入路径
+        u_rect(x, y, 1, 1, rgb);  // 写前景而不读取背景
+        return;  // 当前像素已经处理完
+    }
+    unsigned bytes = fb->bpp / 8;  // 与矩形相同，24位用三字节，32位用四字节
+    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)fb->virtual_address +  // 将借用的数值地址还原成字节指针
+                          (uint64_t)y * fb->pitch + (uint64_t)x * bytes;  // 按实际行距定位待混合像素
+    uint32_t old = 0;  // 从零开始恢复设备布局中的原像素数值
+    for (unsigned k = 0; k < bytes; ++k)  // 读取当前像素各字节，不读取行尾填充
+        old |= (uint32_t)p[k] << (k * 8);  // 提升到32位后按小端位置组合字节
+    const unsigned shifts[] = {fb->red_shift, fb->green_shift, fb->blue_shift};  // 当前设备的红绿蓝最低位
+    const unsigned sizes[] = {fb->red_size, fb->green_size, fb->blue_size};  // 与最低位按同下标对应的位宽
+    unsigned channels[3];  // 保存混合后的三个八位通道
+    for (unsigned k = 0; k < 3; ++k) {  // 每个通道独立混合，避免颜色位之间串入
+        unsigned maximum = (1u << sizes[k]) - 1;  // 当前设备通道的最大值，例如五位为31
+        unsigned before = ((old >> shifts[k]) & maximum) * 255u / maximum;  // 从设备位域还原成背景八位通道
+        unsigned after = (rgb >> ((2 - k) * 8)) & 255u;  // 从0xRRGGBB取得前景八位通道
+        channels[k] = (after * alpha + before * (255 - alpha) + 127) / 255;  // 覆盖率加权，加127使结果就近取整
+    }
+    uint32_t mixed = (channels[0] << 16) | (channels[1] << 8) | channels[2];  // 把三个八位结果组回RGB数值
+    uint32_t color = native(mixed);  // 再编码成当前设备真正的位域排列
+    for (unsigned k = 0; k < bytes; ++k)  // 将完整混合结果写回同一个像素
+        p[k] = (uint8_t)(color >> (k * 8));  // 保持与矩形写入相同的小端字节次序
+}
+void u_text(int x, int y, const char *s, enum ui_font font, uint32_t color) {  // 将字符串叠到已经铺好的背景
+    int origin = x;  // 换行时回到此次文字的起始列
+    while (*s) {     // 遇到NUL结束，不读取字符串之后的内存
+        unsigned char code = (unsigned char)*s;  // 按0至255读取当前字节，避免有符号char成为负下标
+        ++s;  // 当前字节已经取出，指向下一个字符
+        if (code == '\n') {  // 换行只改变下一字形的原点
+            x = origin;  // 回到本段文字起始列
+            y += font == U_CODE ? 24 : 20;  // 代码文字用24像素行距，其余用20像素
+            continue;  // 换行不取覆盖率数组
+        }
+        if (code < 32 || code > 126)  // 固定图集只有可打印ASCII
+            code = '?';  // 对未收录的字节使用同一问号字形
+        const struct u_glyph *g = &u_glyphs[font][code - 32];  // 二维下标先选字体，再将ASCII32映到第0项
+        if ((int64_t)x > (int64_t)clip.x + clip.w) {  // 当前行原点已超过右界，64位计算避免坐标相加溢出
+            while (*s && *s != '\n')  // 只跳过本行余下字节，遇NUL或换行停止
+                ++s;  // 当前行余下字符仍向右，无需继续读取字形覆盖率
+            continue;  // 保留换行给外层下一轮处理，下一行仍回到origin
+        }
+        for (unsigned row = 0; row < g->h; ++row)  // 按字形局部行遍历包围盒
+            for (unsigned col = 0; col < g->w; ++col) {  // 按字形局部列遍历覆盖率
+                unsigned alpha = u_coverage[g->offset + row * g->w + col];  // 大数组偏移加局部行列位置
+                blend(x + g->x + (int)col, y + g->y + (int)row, color, alpha);  // 原点加字形偏移才是屏幕位置
+            }
+        x += g->advance;  // 下一字符按推进间距开始，不按包围盒宽度开始
+    }
+}
+int u_text_width(const char *s, enum ui_font font) {  // 返回单行字符串的推进距离，单位为软件像素
+    int width = 0;     // 尚未处理任何字形时宽度为零
+    for (; *s; ++s) {  // 初始指针已由调用者给出，每轮走到下一字节
+        unsigned char code = (unsigned char)*s;  // 与绘制保持相同的无符号编码范围
+        if (code < 32 || code > 126)  // 宽度计算也只能访问已收录字形
+            code = '?';  // 替代规则与绘制一致，避免布局和外观不符
+        width += u_glyphs[font][code - 32].advance;  // 累加原点之间的距离，空格也有advance
+    }
+    return width;  // 调用者用总推进距离进行居中或对齐
+}

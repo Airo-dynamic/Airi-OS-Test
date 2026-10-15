@@ -1,0 +1,64 @@
+checkpoint: G12
+baseline: baseline.yaml
+start: G11
+current_operation: 从锁定字体生成八套覆盖率并对比同一字符串
+already_explained:
+- concept: 像素布局与设备编码
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-pitch
+  establishes: 读写背景仍用实际pitch及1至8位通道，主机数组与guest映射由各调用者持有
+- concept: 配置嵌套数据与摘要下载
+  at: ../../../dev-log/02-dependencies.md#config-values
+  establishes: JSON对象转字典、数组转列表；download只发布相同SHA输入
+first_use:
+- concept: 字形、字号与字重轴
+  at: ../../../dev-log/graphics/12-fonts.md#glyph-model
+  establishes: TTF轮廓在主机光栅化为覆盖率，字号不等于包围盒高度
+- concept: 三层图集容器
+  at: ../../../dev-log/graphics/12-fonts.md#atlas-shape
+  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同
+- concept: 枚举与数组顺序
+  at: ../../../dev-log/graphics/12-fonts.md#code-frontend-include-render-h-1
+  establishes: 八套字体下标同时对齐faces和u_glyphs，Medium实际14px/500
+- concept: 解包、enumerate与字重选择
+  at: ../../../dev-log/graphics/12-fonts.md#code-scripts-font_atlas-py-1
+  establishes: 下标决定轴值，文件名与字号来自二元组；Weight/Width实际顺序
+- concept: 覆盖率混合和advance
+  at: ../../../dev-log/graphics/12-fonts.md#alpha-blend
+  establishes: 先画背景，再混合字形；推进距离不是包围盒宽，单行width不测多行
+- concept: 生成与运行的环境边界
+  at: ../../../dev-log/graphics/12-fonts.md#code-scripts-font_atlas-py-1
+  establishes: 主机Pillow固定12.3.0，生成数组后guest不运行Python，TTF/OFL是声明外部输入
+borrowed:
+- component: 锁定Plex字体、OFL许可与Pillow12.3.0
+  contract: 仅主机生成覆盖率；四份外部字节逐个SHA核对，禁止借用最终图集代替生成
+feedback:
+- source: 用户要求的微语法就近说明与主线连续性
+  observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
+  revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长
+not_inferred: 解释存在与运行成功不证明真实读者已掌握；画像引用须与本章实际表达式核对
+source_reading:
+- concept: 字形、字号与字重轴
+  at: ../../../dev-log/graphics/12-fonts.md#glyph-model
+  establishes: TTF轮廓在主机光栅化为覆盖率，字号不等于包围盒高度
+  status: 本章首次就地说明；不推断已掌握
+- concept: 三层图集容器
+  at: ../../../dev-log/graphics/12-fonts.md#atlas-shape
+  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同
+  status: 本章首次就地说明；不推断已掌握
+- concept: 枚举与数组顺序
+  at: ../../../dev-log/graphics/12-fonts.md#code-frontend-include-render-h-1
+  establishes: 八套字体下标同时对齐faces和u_glyphs，Medium实际14px/500
+  status: 本章首次就地说明；不推断已掌握
+- concept: 解包、enumerate与字重选择
+  at: ../../../dev-log/graphics/12-fonts.md#code-scripts-font_atlas-py-1
+  establishes: 下标决定轴值，文件名与字号来自二元组；Weight/Width实际顺序
+  status: 本章首次就地说明；不推断已掌握
+- concept: 覆盖率混合和advance
+  at: ../../../dev-log/graphics/12-fonts.md#alpha-blend
+  establishes: 先画背景，再混合字形；推进距离不是包围盒宽，单行width不测多行
+  status: 本章首次就地说明；不推断已掌握
+- concept: 生成与运行的环境边界
+  at: ../../../dev-log/graphics/12-fonts.md#code-scripts-font_atlas-py-1
+  establishes: 主机Pillow固定12.3.0，生成数组后guest不运行Python，TTF/OFL是声明外部输入
+  status: 本章首次就地说明；不推断已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

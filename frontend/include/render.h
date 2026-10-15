@@ -14,4 +14,16 @@ void u_rect(int, int, int, int, uint32_t);  // 按左上、宽高及0xRRGGBB填�
 void u_line(int, int, int, int, uint32_t);  // 用整数误差将含两端点的线段变成像素
 void u_frame(struct ui_rect, uint32_t);     // 用四条一像素宽矩形绘制边框
 bool u_inside(struct ui_rect, int, int);    // 判断整屏坐标是否在半开矩形内
+enum ui_font {  // 枚举下标与生成器faces的顺序一一对应
+    U_SMALL,  // Plex Sans 12px、字重400，用于次要信息
+    U_BODY,   // Plex Sans 14px、字重400，用于正文
+    U_LABEL,  // Plex Sans 16px、字重500，用于标签
+    U_TITLE,  // Plex Sans 22px、字重500，用于标题
+    U_MONO,   // Plex Mono 14px常规字重，用于终端
+    U_CODE,   // Plex Mono 16px常规字重，用于代码
+    U_MEDIUM,  // Plex Sans 14px、字重500，用于紧凑按钮
+    U_DISPLAY  // Plex Sans 32px、字重300，用于大读数
+};
+void u_text(int, int, const char *, enum ui_font, uint32_t);  // 用度量与覆盖率绘制可打印ASCII文字
+int u_text_width(const char *, enum ui_font);  // 累加单行字形advance供文字布局
 #endif  // 结束包含保护
