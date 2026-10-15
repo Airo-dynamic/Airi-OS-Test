@@ -114,3 +114,68 @@ void ui_editor_draw(struct ui_desktop *s, struct ui_rect r) {  // 将文档字�
                   right);  // 把当前光标行列与文档字节数写到状态栏右侧
 }
 
+unsigned ui_editor_position(const struct ui_desktop *s, struct ui_rect r, int x, int y) {  // 只把同一画布的点换成文档字节间隙，不执行按钮或修改状态。
+    int tree = r.w >= 800 ? 190 : 0;  // r已是内容矩形；是否有项目栏按绘图使用的这份宽度判断。
+    struct ui_rect text = {  // 与Editor字形裁剪共用正文左缘、起点和右下边界。
+        r.x + tree + 61, r.y + 88 + (s->find ? 44 : 0),  // 正文先扣项目栏、行号和一像素边缘，查找展开再下移44像素。
+        r.w - tree - 72, r.h - 118 - (s->find ? 44 : 0)  // 宽度扣行号与边距，高度扣前88与底30像素。
+    };
+    if (text.w <= 0 || text.h <= 0)  // 极小内容矩形没有可见正文，不能换算行列。
+        return s->cursor;  // 保留当前合法间隙，不产生负尺寸转换后的大下标。
+    if (x < text.x)  // 拖到行号栏或按钮左侧时，定位到当前可见文字左缘。
+        x = text.x;  // 当前事件只改变本函数的坐标副本。
+    if (x >= text.x + text.w)  // 拖出右边时，最后可见列由正文裁剪右界决定。
+        x = text.x + text.w - 1;  // 半开右边不属于正文，收回到最后一个允许像素。
+    if (y < text.y)  // 拖到Save等工具栏上方时，只定位到正文顶行。
+        y = text.y;  // 不把这个点重新送进工具栏点击分派。
+    if (y >= text.y + text.h)  // 拖出正文底部时仍使用最后可见文字行。
+        y = text.y + text.h - 1;  // 同样收回到半开底边之前。
+    unsigned target = (unsigned)(y - text.y) / 24 + s->editor_scroll;  // 可见行加已卷走行数，得到文档目标行。
+    unsigned col = (unsigned)(x - text.x) / 10 + s->editor_column_scroll;  // 可见列加水平滚动，得到文档目标列。
+    unsigned pos = 0;  // 从文档首字节扫描，不能把屏幕列直接当全文偏移。
+    for (unsigned line = 0; line < target && s->editor[pos]; ++line) {  // 逐行跨过换行，NUL阻止读过文尾。
+        while (s->editor[pos] && s->editor[pos] != '\n')  // 先找到当前逻辑行的换行或文尾。
+            ++pos;  // 当前字节存在，扫描位置可以前进一格。
+        if (s->editor[pos])  // 确实停在换行时才跨到下一行。
+            ++pos;  // 换行也占一个文档字节。
+    }
+    while (col && s->editor[pos] && s->editor[pos] != '\n') {  // 短行把目标列限制在本行末间隙。
+        --col;  // 消费一个待前进列，不使用递减后的值作数组下标。
+        ++pos;  // 一个ASCII列对应一个文档字节。
+    }
+    return pos;  // 调用者决定怎样使用这个间隙；此函数不保存、不改选区。
+}
+
+void ui_editor_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // 将 Editor 内容区屏幕坐标转换为工具栏动作或文档字节间隙。
+    (void)twice;  // 统一点击接口保留双击参数；这个应用当前只使用点击位置。
+    if (y < r.y + 44) {  // 内容顶部44像素属于工具栏，先处理按钮而不选中文件行。
+        if (x < r.x + 84)  // Editor 工具栏最左按钮保存当前文档。
+            ui_key(s, UI_SAVE_KEY, false);  // 送入已实现的保存事件，不重新写一套保存规则。
+        else if (x < r.x + 162)  // 继续向右命中查找按钮。
+            ui_key(s, UI_FIND_KEY, false);  // 显示查找字段并将键盘焦点转向它。
+        else if (x < r.x + 242)  // 工具栏下一块命中撤销按钮。
+            ui_key(s, UI_UNDO, false);  // 使用同一份 undo 状态切换前后文本。
+        else if (x > r.x + r.w - 108)  // 内容最右108像素命中 Run。
+            ui_key(s, UI_RUN_KEY, false);  // 请求执行当前文档；参考服务仍会明确报告未连接。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    int tree = r.w >= 800 ? 190 : 0;  // 宽视图保留190像素文件树，窄视图不显示树。
+    if (tree && x < r.x + tree && y >= r.y + 132) {  // 文件树存在且命中其行区域时，按树中的记录打开。
+        unsigned row = (unsigned)(y - r.y - 132) / 30;  // 扣掉树表头，按30像素一行得到快照行号。
+        if (row < s->file_count)  // 打开前确认下标在有效快照范围内。
+            ui_open_document(s, row);  // 树直接使用快照顺序，与 Files 排序行的转换不同。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (s->find && y >= r.y + 85 && y < r.y + 120) {  // 查找栏开启时，命中它不应改变正文光标。
+        s->focus = UI_FOCUS_FIND;  // 后续字符修改查找文本。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    int top = r.y + 88 + (s->find ? 44 : 0);  // 当前正文起点与绘图相同，查找栏额外占44像素。
+    if (y >= top && y < r.y + r.h - 30) {     // 普通点击必须在正文高度内，才改变文档位置。
+        s->cursor = ui_editor_position(s, r, x, y);  // 复用只读定位器，坐标夹取与行列扫描只产生间隙。
+        s->anchor = s->cursor;  // 普通点击从同一间隙重新建立可能的选择起点。
+        s->selection = false;   // 当前只是定位，持续拖动层随后决定选区。
+    }
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

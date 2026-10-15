@@ -14,7 +14,10 @@ void ui_app_toolbar(struct ui_rect r, const char *label);  // 在应用内容顶
 void ui_app_status(struct ui_rect r, const char *left, const char *right);  // 在应用内容底部绘制27像素状态栏
 void ui_terminal_draw(struct ui_desktop *, struct ui_rect);  // 把console逻辑行拆成窗口显示行并绘制输入
 void ui_files_draw(struct ui_desktop *, struct ui_rect);     // 读取目录快照和排序索引，画路径、文件行和状态
-void ui_editor_draw(struct ui_desktop *, struct ui_rect);    // 将文档字节偏移换成行列，画文字、选区和光标
+void ui_files_click(struct ui_desktop *, struct ui_rect, int, int, bool);  // 按整屏x/y取得筛选、工具栏或可见文件行；twice为双击标记
+void ui_editor_draw(struct ui_desktop *, struct ui_rect);  // 将文档字节偏移换成行列，画文字、选区和光标
+unsigned ui_editor_position(const struct ui_desktop *, struct ui_rect, int, int);  // 只将内容矩形中的屏幕点夹到正文并返回字节间隙，供点击和续拖共用。
+void ui_editor_click(struct ui_desktop *, struct ui_rect, int, int, bool);  // 按当前正文几何将整屏x/y换成文档间隙，或分派工具栏动作
 void ui_tasks_draw(struct ui_desktop *, struct ui_rect);     // 绘制任务快照、CPU曲线和内存条
 void ui_system_draw(struct ui_desktop *, struct ui_rect);    // 按当前页显示同一启动信息的内存、设备或日志
 void ui_settings_draw(struct ui_desktop *, struct ui_rect);  // 按页面绘制当前会话配色、密度和接口说明

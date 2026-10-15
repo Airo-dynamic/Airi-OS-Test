@@ -1,0 +1,57 @@
+checkpoint: G20
+baseline: baseline.yaml
+start: G19
+current_operation: 双击实际排序中的main.lua，按下拖出Editor选区，释放停止延续
+already_explained:
+- concept: 可见行到原快照下标
+  at: ../../../dev-log/graphics/16-files-editor-view.md#file-indices
+  establishes: ui_file_order产生可见行到files下标的表，目录记录不搬动；打开函数接收快照下标，再用记录id调用服务。
+- concept: 正文间隙与选区两端
+  at: ../../../dev-log/graphics/16-files-editor-view.md#cursor-gap
+  establishes: cursor和anchor保存文档字节间隙，半开范围决定选中字节；换行与滚动使它们和屏幕坐标分别表示。
+first_use:
+- concept: 屏幕坐标经可见行与快照映射得到服务id
+  at: ../../../dev-log/graphics/20-pointer-routing.md#pointer-routing
+  establishes: Files扣除body表头后按行高求视口行，加scroll得到全列表行，再经ui_file_order取快照下标交给ui_open_document；读取才使用记录id。
+- concept: 按下、移动与释放跨事件持有选择
+  at: ../../../dev-log/graphics/20-pointer-routing.md#drag-state
+  establishes: phase=1保存anchor；phase=0续接cursor；phase=2清UI_DRAG_SELECT。body从当前rect通过u_window_body得到。
+- concept: 正文位置反向转换与短行截断
+  at: ../../../dev-log/graphics/20-pointer-routing.md#code-frontend-apps-editor-c-1
+  establishes: 项目栏仅在body宽度>=800时扣190px；正文左缘另扣61px，列除10、行除24并加滚动，扫描换行/NUL，短行限制到行末间隙。
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/20-pointer-routing.md#code-frontend-apps-internal-h-1
+  establishes: Files/Editor click首次接收当前body和同一画布的整屏x/y；双击只是事件标记。
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+borrowed:
+- component: G12生成的八套字体数据
+  usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 屏幕坐标经可见行与快照映射得到服务id
+  at: ../../../dev-log/graphics/20-pointer-routing.md#pointer-routing
+  establishes: Files扣除body表头后按行高求视口行，加scroll得到全列表行，再经ui_file_order取快照下标交给ui_open_document；读取才使用记录id。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 按下、移动与释放跨事件持有选择
+  at: ../../../dev-log/graphics/20-pointer-routing.md#drag-state
+  establishes: phase=1保存anchor；phase=0续接cursor；phase=2清UI_DRAG_SELECT。body从当前rect通过u_window_body得到。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 正文位置反向转换与短行截断
+  at: ../../../dev-log/graphics/20-pointer-routing.md#code-frontend-apps-editor-c-1
+  establishes: 项目栏仅在body宽度>=800时扣190px；正文左缘另扣61px，列除10、行除24并加滚动，扫描换行/NUL，短行限制到行末间隙。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/20-pointer-routing.md#code-frontend-apps-internal-h-1
+  establishes: Files/Editor click首次接收当前body和同一画布的整屏x/y；双击只是事件标记。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

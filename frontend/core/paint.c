@@ -1,6 +1,8 @@
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
 static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
+static const char *icons[] = {"Terminal", "Files",    "Editor", "Tasks",  // 侧栏悬停名称按相同应用顺序排
+                              "System",   "Settings", "Viewer"};  // 继续应用枚举4到6的侧栏名称，同一编号显示同一应用
 static void monitor(struct ui_desktop *s) {  // 共享资源仪表，全部数值来自同一次backend快照
     int x = s->width - UI_MONITOR_W, left = x + 24, width = UI_MONITOR_W - 48;  // 单一内边距对齐标题、数值与坐标轴
     char value[96];  // 临时格式化数值，不持有另一个统计状态
@@ -94,6 +96,10 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_icon(18, y, (int)i, s->active == (int)i ? U_TEXT : U_MUTED);  // 按应用编号画左侧图标，活动项使用主要色
         if (s->windows[i].open)  // 已打开应用即使最小化也保留侧栏打开标记
             u_rect(25, y + 25, 6, 2, U_ACCENT);  // 用会话强调色写矩形，起点(25,y + 25)，尺寸6×2像素
+        if (u_inside((struct ui_rect){0, y - 8, 56, 38}, s->mouse_x, s->mouse_y)) {  // 鼠标落在当前应用侧栏行的半开矩形时显示其名称提示
+            u_rect(60, y, 100, 28, U_RAISED);  // 用选中背景色写矩形，起点(60,y)，尺寸100×28像素
+            u_text(70, y + 5, icons[i], U_BODY, U_TEXT);  // 在整屏列70、整屏y=y + 5显示当前应用悬停名称
+        }
     }
     int right = s->monitor && s->width >= UI_MONITOR_MIN ? 268 : 0;  // 资源栏开启且屏幕够宽才预留268像素，否则窗口可用至右边
     unsigned first = 0;  // 默认从最底层窗口开始绘制，后面找可遮挡底层的最大化窗口
@@ -161,6 +167,15 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
     }
     if (right)  // 资源栏占用宽度非零时才绘制它，本轮窗口已为其留空间
         monitor(s);  // 资源栏启用时读取同次统计，显示当前可用数据或未采集状态
+    if (s->mouse_x < UI_DOCK && s->mouse_y >= 50) {  // 鼠标在应用侧栏区域时再按行距换算应用id
+        int app = (s->mouse_y - 50) / 54;      // 先去侧栏顶边50像素再除行距54，得到候选应用编号
+        if (app >= 0 && app < UI_APP_COUNT) {  // 悬停换算的应用编号必须落在0到6才取名称
+            int y = 58 + app * 54;  // 候选应用名称提示与它的侧栏图标使用同一个行位置
+            u_rect(60, y, 110, 30, U_RAISED);  // 用选中背景色写矩形，起点(60,y)，尺寸110×30像素
+            u_frame((struct ui_rect){60, y, 110, 30}, U_EDGE);  // 沿当前显式矩形的四边画一像素边框
+            u_text(70, y + 6, icons[app], U_BODY, U_TEXT);      // 在整屏列70、整屏y=y + 6显示命中的应用名称
+        }
+    }
     u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
     u_rect(0, s->height - UI_BOTTOM, s->width, 30, U_PANEL);  // 用工具栏底色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×30像素
     u_rect(0, s->height - UI_BOTTOM, s->width, 1, U_EDGE);  // 用分隔线色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×1像素

@@ -109,3 +109,101 @@ void ui_files_draw(struct ui_desktop *s, struct ui_rect r) {  // 读取目录快
     }
 }
 
+void ui_files_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // s 是当前桌面，r 是 Files 内容矩形，x/y 是屏幕坐标，twice 表示双击。
+    if (y < r.y + 44) {  // 内容顶部44像素属于工具栏，先处理按钮而不选中文件行。
+        if (x < r.x + 60) {  // 工具栏左端60像素以内命中 Up。
+            char *p = s->directory;  // p 借用目录字符串数组，后续写入直接改变当前目录。
+            unsigned n = (unsigned)airi_strlen(p);  // 目录字节数变成数组下标；现有128字节容量保证可放入 unsigned。
+            while (n && p[n - 1] != '/')  // 先确认 n 非零，再检查末字节，避免 n-1 下溢和越界。
+                --n;  // 向前寻找最后一个斜杠，跳过末级目录名。
+            if (n > 1)  // 最后一个斜杠不在根目录开头时，删除这一级。
+                p[n - 1] = 0;  // 用 NUL 截断到父目录，字符串剩余字节不再参与路径。
+            else  // 当前路径已在根目录，保留开头斜杠
+                p[1] = 0;  // 保留开头的 /，把根目录表示为单字符字符串。
+            ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        } else if (x > r.x + r.w - 116) {  // 从内容右缘向左116像素以内命中刷新按钮。
+            s->service_state = UI_NORMAL;  // 恢复普通查询状态，再由刷新回调决定实际结果。
+            ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        } else if (x > r.x + r.w - 210)  // 继续向左的按钮区用于新建目录。
+            ui_app_dialog(s, UI_DIALOG_NEW_DIR, 0, "New folder", "Create a folder in the current directory.",  // 准备目录确认框；目标 id=0 表示本次创建尚无已有文件身份。
+                          "new-folder");  // 给输入框填入初始名称，确认后才创建。
+        else if (x > r.x + r.w - 304)  // 再向左的按钮区用于新建普通文件。
+            ui_app_dialog(s, UI_DIALOG_NEW_FILE, 0, "New file", "Create a text document in the current directory.",  // 建立文件创建确认框，复用当前目录作为操作目标。
+                          "untitled.lua");  // 初始文件名由用户继续编辑或确认。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    int side = r.w >= 800 ? 176 : 0, xx = r.x + side + 16;  // 宽窗口预留176像素侧栏；xx 是主内容左边界加16像素内边距。
+    if (s->service_state == UI_ERROR &&  // 仅在服务失败界面检测重试按钮。
+        u_inside((struct ui_rect){xx + 72, r.y + 277, 92, 32}, x, y)) {  // 复合字面量创建92×32按钮矩形，检查屏幕点是否落入。
+        s->service_state = UI_NORMAL;  // 恢复普通查询状态，再由刷新回调决定实际结果。
+        ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (side && x < r.x + side) {  // 侧栏实际存在且点落在其宽度内时，按快捷目录处理。
+        if (y < r.y + 128)  // 侧栏第一项对应主目录。
+            airi_snprintf(s->directory, 128, "/home/airi");  // 写入固定目录；128同时限制可写容量与终止字节。
+        else if (y < r.y + 172)  // 侧栏第二项对应项目目录。
+            airi_snprintf(s->directory, 128, "/home/airi/projects");  // 切回参考项目目录，后续刷新读取这里的记录。
+        else if (y < r.y + 210)  // 侧栏第三项对应程序目录。
+            airi_snprintf(s->directory, 128, "/bin");  // 切到参考服务中的 /bin，不是访问宿主磁盘。
+        else {  // 侧栏其余位置切到系统存储页，不改变当前目录
+            ui_open(s, UI_SYSTEM);  // 打开并置顶系统窗口，继续使用这份桌面状态。
+            s->windows[UI_SYSTEM].tab = 2;  // 选择系统窗口中的存储页签，下标从零开始。
+        }
+        ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y >= r.y + 58 && y < r.y + 90) {  // 内容顶部58..89像素属于文件筛选输入框。
+        s->focus = UI_FOCUS_FILTER;  // 后续键入先交给当前应用的筛选字段。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y >= r.y + 106 && y < r.y + 134) {  // 106..133像素属于目录表头。
+        s->sort = !s->sort;  // 逻辑非把排序方向在0与1之间切换。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y > r.y + r.h - 76 && y < r.y + r.h - 28 && x >= xx + 426 && s->file_clipboard >= 0) {  // 底部粘贴按钮还要求剪贴板保存有效文件 id；-1 表示空。
+        ui_command(s, s->file_cut ? UI_MOVE_FILE : UI_COPY_FILE, s->file_clipboard, s->directory,  // 剪切选移动、复制选拷贝；传入稳定文件 id 与目标目录。
+                   "");  // 此动作不需要额外文本输入，传入空字符串。
+        if (s->dialog == UI_DIALOG_NONE && s->file_cut)  // 只有操作没有打开错误框且是剪切，才消费待移动的身份。
+            s->file_clipboard = -1;  // 清空文件剪贴板，避免同一移动被重复提交。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y > r.y + r.h - 76 && y < r.y + r.h - 28 && s->file_count) {  // 底部文件操作要求快照至少有一条记录。
+        struct ui_file *f = &s->files[s->selection_file];  // 按快照下标借用选中记录，f->id 才是服务操作身份。
+        if (x < xx + 85)  // 底部第一个按钮打开选中文档。
+            ui_open_document(s, s->selection_file);  // 文档打开接口接收快照下标，在内部取出文件 id。
+        else if (x < xx + 180)  // 第二个按钮准备重命名。
+            ui_app_dialog(s, UI_DIALOG_RENAME, f->id, "Rename file", "Change the selected item's name.", f->name);  // 确认框保存 id，初始输入为旧名，不受随后列表排序影响。
+        else if (x < xx + 270)  // 第三个按钮准备删除。
+            ui_app_dialog(s, UI_DIALOG_DELETE, f->id, "Delete item",  // 记录待删除文件 id，实际删除等待确认。
+                          "Delete the selected item?", "");  // 说明删除范围是参考工作区，确认框无需名称输入。
+        else if (x < xx + 338) {  // 底部复制按钮仅登记身份，暂不复制内容。
+            s->file_clipboard = f->id;  // 文件剪贴板保存稳定 id，不保存可见行号。
+            s->file_cut = false;  // 后续粘贴对这份身份执行复制。
+        } else if (x < xx + 416) {  // 底部剪切按钮登记同一身份并改变粘贴动作。
+            s->file_clipboard = f->id;  // 文件剪贴板保存稳定 id，不保存可见行号。
+            s->file_cut = true;  // 后续粘贴执行移动，成功才清空身份。
+        }
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y >= r.y + 138) {  // 从列表首行顶部开始把垂直距离转换为行号。
+        unsigned row = (unsigned)(y - r.y - 138) / (s->density ? 28 : 36) +  // 距离除以当前28或36像素行高，先得到视口内行号。
+                       s->windows[UI_FILES_APP].scroll,  // 加上已卷走行数，得到筛选后的全列表行号。
+                 shown = 0;  // shown 只统计未被筛选掉的记录。
+        unsigned order[UI_FILES];  // 数组保存排序后的快照下标，不复制文件记录。
+        unsigned count = ui_file_order(s, order);  // 取得当前排序顺序及有效项数，读取只限到 count。
+        for (unsigned k = 0; k < count; ++k) {     // 按排序位置逐项检查，k 不是服务 id。
+            unsigned i = order[k];  // 从排序位置取回原快照下标。
+            if (!ui_app_match(s->files[i].name, s->filter[UI_FILES_APP]))  // 名称不匹配筛选时，这条记录不占可见行。
+                continue;  // 跳过当前不适用项，继续检查下一项。
+            if (shown++ == row) {  // 先比较当前可见行，再递增计数；命中时 i 就是原记录下标。
+                s->selection_file = i;  // 持久选择保存快照下标，重绘时仍能取得同一记录。
+                if (twice)  // 仅双击才立即打开，普通点击只改变选择。
+                    ui_open_document(s, i);  // 以命中快照下标读取对应文件，进入 Editor 或 Viewer。
+                break;  // 当前匹配已完成，停止这一层循环或分支。
+            }
+        }
+    }
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

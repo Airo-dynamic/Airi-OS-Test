@@ -43,8 +43,9 @@ void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) 
     s->backend = b;  // 把回调表和上下文复制进桌面，服务数据仍归服务拥有
     c->extension = appearance;  // 安装同步命令扩展；console 不包含主题或窗口类型。
     c->extension_context = s;   // 桌面和 console 都由平台持有，须覆盖后续输入调用。
-    s->console = c;     // 桌面借用同一console状态，Terminal不另复制日志
-    s->active = -1;     // 没有活动窗口，-1哨兵不能拿去索引应用数组
+    s->console = c;  // 桌面借用同一console状态，Terminal不另复制日志
+    s->active = -1;  // 没有活动窗口，-1哨兵不能拿去索引应用数组
+    s->drag = UI_DRAG_NONE;  // 当前没有进行窗口或选区拖动
     s->editor_id = -1;  // 编辑器尚未绑定任何服务文件身份
     s->file_clipboard = -1;  // 文件剪贴板没有服务id，不能发起复制或移动
     s->width = 1280;  // 绘图前暂用1280像素默认画布宽度
