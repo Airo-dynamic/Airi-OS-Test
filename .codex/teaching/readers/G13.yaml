@@ -1,0 +1,55 @@
+checkpoint: G13
+baseline: baseline.yaml
+start: G12
+current_operation: 同样按钮内容与几何生成Day和Night两图
+already_explained:
+- concept: 背景、覆盖率与字体
+  at: ../../../dev-log/graphics/12-fonts.md#alpha-blend
+  establishes: 图元铺背景后读取已有像素混合；枚举下标与生成的八套字体相同
+- concept: 半开裁剪与数组借用
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-canvas
+  establishes: 矩形尺寸与可写范围分开，描述和数组在绘图期间有效
+first_use:
+- concept: 角色编号与24位RGB
+  at: ../../../dev-log/graphics/13-themed-controls.md#color-roles
+  establishes: 角色从0x1000000开始，普通RGB与混合结果不会再次映射；21列二维调色板
+- concept: 绘图主题与会话状态
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-frontend-render-draw-c-1
+  establishes: 此处只保存当前调色板下标；观察程序不创建未来桌面状态
+- concept: 4×4采样与八倍坐标
+  at: ../../../dev-log/graphics/13-themed-controls.md#round-coverage
+  establishes: radius2角像素有6个样本，alpha96，镜像复用同一覆盖率
+- concept: 状态位、优先级与文字位置
+  at: ../../../dev-log/graphics/13-themed-controls.md#control-state
+  establishes: 1|8=9，禁用覆盖按下，18是文字占位而非Medium字号
+- concept: 绘图和动作的边界
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-labs-tutorial-controls-c-1
+  establishes: 观察显式传状态；u_button不读取鼠标、不执行应用动作
+borrowed: []
+feedback:
+- source: 用户要求的微语法就近说明与主线连续性
+  observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
+  revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长
+not_inferred: 解释存在与运行成功不证明真实读者已掌握；画像引用须与本章实际表达式核对
+source_reading:
+- concept: 角色编号与24位RGB
+  at: ../../../dev-log/graphics/13-themed-controls.md#color-roles
+  establishes: 角色从0x1000000开始，普通RGB与混合结果不会再次映射；21列二维调色板
+  status: 本章首次就地说明；不推断已掌握
+- concept: 绘图主题与会话状态
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-frontend-render-draw-c-1
+  establishes: 此处只保存当前调色板下标；观察程序不创建未来桌面状态
+  status: 本章首次就地说明；不推断已掌握
+- concept: 4×4采样与八倍坐标
+  at: ../../../dev-log/graphics/13-themed-controls.md#round-coverage
+  establishes: radius2角像素有6个样本，alpha96，镜像复用同一覆盖率
+  status: 本章首次就地说明；不推断已掌握
+- concept: 状态位、优先级与文字位置
+  at: ../../../dev-log/graphics/13-themed-controls.md#control-state
+  establishes: 1|8=9，禁用覆盖按下，18是文字占位而非Medium字号
+  status: 本章首次就地说明；不推断已掌握
+- concept: 绘图和动作的边界
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-labs-tutorial-controls-c-1
+  establishes: 观察显式传状态；u_button不读取鼠标、不执行应用动作
+  status: 本章首次就地说明；不推断已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
