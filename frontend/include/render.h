@@ -72,7 +72,8 @@ enum ui_control_state {  // 不同状态占不同二进制位，可以按位或�
 void u_theme(unsigned);      // 选择本轮绘图调色板，不拥有应用的会话数据
 uint32_t u_color(uint32_t);  // 角色解析成RGB，0至0xffffff的真实RGB原样通过
 void u_round(struct ui_rect, int, uint32_t);  // 圆角边缘按4×4样本混合，仍遵守裁剪
-void u_control(struct ui_rect, const char *, unsigned);   // 按调用者明确给出的状态绘制按钮，不执行动作
+void u_control(struct ui_rect, const char *, unsigned);  // 按调用者明确给出的状态绘制按钮，不执行动作
+void u_interaction(int, int, bool, bool);  // 本次绘制区域的指针位置、按压与响应许可
 void u_button(struct ui_rect, const char *, bool, bool);  // 将selected与disabled转换为共同状态表
 static inline struct ui_rect u_window_body(struct ui_rect r) {  // 由外框得到标题下方的应用矩形
     return (struct ui_rect){r.x + 1, r.y + UI_TITLE_H + 1, r.w - 2, r.h - UI_TITLE_H - 2};  // 左右各去一像素，顶部去48像素标题及一像素边框

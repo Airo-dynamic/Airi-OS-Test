@@ -1,6 +1,10 @@
 #include "internal.h"  // 取得应用内部绘图、命中与对话框的共同声明。
 #include "../apps/internal.h"  // 借用Editor正文定位器，续拖不调用它的完整按钮分派。
 void ui_pointer(struct ui_desktop *s, int x, int y, int phase) {  // phase=0移动、1按下、2释放、3双击；x/y 在桌面屏幕坐标中。
+    if (phase == 1 || phase == 3)  // 按下或双击事件开始按压反馈
+        s->pointer_down = true;  // 保存按压状态，下一帧按钮可显示U_DOWN
+    if (phase == 2)  // 释放无论命中哪里都应结束按压
+        s->pointer_down = false;  // 下一帧不再保留旧按压反馈
     s->mouse_x = x;  // 保存当前鼠标横坐标，绘图可以显示指针。
     s->mouse_y = y;  // 保存当前鼠标纵坐标。
     if (phase == 0 && s->drag == UI_DRAG_SELECT) {  // 选择已在按下时开始，移动只续接文字间隙。

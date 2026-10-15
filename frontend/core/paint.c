@@ -73,6 +73,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
     u_begin(f);  // 借用本次画布描述，建立颜色布局与整屏裁剪
     u_theme(s->theme);  // 按会话模式选整套调色板，颜色角色与业务状态分离
     u_rect(0, 0, s->width, s->height, U_BG);  // 用画布背景色写矩形，起点(0,0)，尺寸s->width×s->height像素
+    u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, !s->dialog);  // 桌面区的指针反馈
     u_text(86, s->height - 117, "AiriOS", U_TITLE, U_MUTED);  // 空桌面仅保留轻量产品标识
     u_rect(0, 0, s->width, UI_TOP, U_PANEL);  // 系统顶栏先铺满36像素高度，身份片随后覆盖左端
     u_plate((struct ui_rect){0, 0, 140, UI_TOP}, U_CHROME);  // 系统入口使用唯一品牌身份片
@@ -143,6 +144,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         if (plate_width > available)  // 窄窗口的标题可用范围优先于理想字宽。
             plate_width = available;  // 不把身份片铺进最小化、最大化和关闭按钮区。
         u_plate((struct ui_rect){r.x + 8, r.y + 7, plate_width, UI_TITLE_H - 14}, U_CHROME);  // 用实际字体推进量承载完整应用身份。
+        u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, focused && !s->dialog && !s->launcher);  // 只有最前窗口可响应悬停
         u_icon(r.x + 18, r.y + 14, (int)app, U_INK);   // 应用图标处于独立身份栏
         u_rect(r.x + 53, r.y + 12, 1, 24, U_CONTROL);  // 图标与标题使用一致的分隔尺度
         u_clip((struct ui_rect){r.x + 62, r.y + 1, r.w - 170, UI_TITLE_H - 2});  // 长文件名不会覆盖系统按钮
@@ -165,8 +167,10 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
         u_line(r.x + r.w - 10, r.y + r.h - 4, r.x + r.w - 4, r.y + r.h - 10, U_EDGE);  // 用分隔线色连接像素端点(r.x + r.w - 10,r.y + r.h - 4)到(r.x + r.w - 4,r.y + r.h - 10)
     }
-    if (right)  // 资源栏占用宽度非零时才绘制它，本轮窗口已为其留空间
-        monitor(s);  // 资源栏启用时读取同次统计，显示当前可用数据或未采集状态
+    if (right) {  // 资源区是桌面的一部分，不继承刚绘完窗口的hover许可。
+        u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, !s->dialog);  // 无模态框时资源按钮独立允许响应，active可为-1。
+        monitor(s);  // 按同次资源快照绘图，按钮随后使用这份桌面许可。
+    }
     if (s->mouse_x < UI_DOCK && s->mouse_y >= 50) {  // 鼠标在应用侧栏区域时再按行距换算应用id
         int app = (s->mouse_y - 50) / 54;      // 先去侧栏顶边50像素再除行距54，得到候选应用编号
         if (app >= 0 && app < UI_APP_COUNT) {  // 悬停换算的应用编号必须落在0到6才取名称
@@ -209,6 +213,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_round(d, 2, U_CONTROL);  // 弹窗使用独立清晰边界
         u_round((struct ui_rect){d.x + 1, d.y + 1, d.w - 2, d.h - 2}, 1, U_SURFACE);  // 中性内容表面
         if (s->dialog == UI_DIALOG_ERROR) u_rect(d.x + 1, d.y + 1, 3, d.h - 2, U_RED);  // 错误沿左缘标明，正文仍完整可读
+        u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, true);  // 弹窗是唯一可操作层
         u_rect(d.x + 24, d.y + 49, d.w - 48, 1, U_EDGE);  // 标题与说明之间轻分隔
         u_text(d.x + 24, d.y + 20, s->dialog_title, U_LABEL, s->dialog == UI_DIALOG_ERROR ? U_RED : U_TEXT);  // 在整屏x=d.x + 24、整屏y=d.y + 20显示对话框标题
         /* Wrap body on words without breaking paths outside their containing dialog. */

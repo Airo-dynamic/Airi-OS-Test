@@ -98,8 +98,9 @@ struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状�
     int mouse_x;  // 当前鼠标屏幕横坐标。
     int mouse_y;  // 当前鼠标屏幕纵坐标。
     int drag;     // 当前跨事件拖动种类，-1表示无。
-    int drag_x;     // 移窗时按下点距窗口左边的偏移。
-    int drag_y;     // 移窗时按下点距窗口顶部的偏移。
+    int drag_x;  // 移窗时按下点距窗口左边的偏移。
+    int drag_y;  // 移窗时按下点距窗口顶部的偏移。
+    bool pointer_down;  // 鼠标按压状态仅用于绘图反馈
     bool monitor;   // 右侧状态监视区是否展开。
     bool launcher;  // 应用启动菜单是否展开。
     bool find;      // Editor查找栏是否展开。

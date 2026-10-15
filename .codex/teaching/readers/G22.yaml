@@ -1,0 +1,57 @@
+checkpoint: G22
+baseline: baseline.yaml
+start: G21
+current_operation: 同一Save底面比较normal/hot/down/up，检查禁用、遮挡以及hover不产生文档动作
+already_explained:
+- concept: 移动只改变窗口几何，下一帧与命中读取相同rect
+  at: ../../../dev-log/graphics/21-window-actions.md#window-actions
+  establishes: 标题按下保存鼠标距左上偏移，移动减该偏移；右下角动作改变宽高并保持最小尺寸；释放结束动作。
+- concept: 超宽本行与后续显式换行
+  at: ../../../dev-log/graphics/12-fonts.md#alpha-blend
+  establishes: u_text原点越过右界只跳过本行余下字节，保留换行给外层；WWWWWWWWW\nO的第二行仍回origin，不是自动折行或停止整串。
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+first_use:
+- concept: 鼠标位置、动作与按压反馈分别持有
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#feedback-events
+  establishes: 无持续拖动的phase=0只移动；已有拖动时更新几何或选区而不保存。phase1/3置pointer_down；phase2无论命中哪里清它。保存动作来自输入分派，不来自u_button。
+- concept: 响应许可与位组合
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#interaction-region
+  establishes: u_interaction给当前绘图区域借用整屏指针、down及enabled；仅active且无覆盖层窗口允许HOT，DOWN叠加且外观优先；INACTIVE覆盖交互。
+- concept: 同一像素比较与遮挡观察
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#feedback-observation
+  establishes: Save内部采样远离字形和圆角；hover不改文档，手动down只观察外观，真实释放恢复hot；禁用及被覆盖区域不响应同一指针。
+- concept: 资源区重新建立桌面反馈许可
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#interaction-region
+  establishes: 窗口结束后资源区重新u_interaction；关闭Settings使active=-1且Editor仍开，资源按钮hover变化但仅真实按下打开Tasks。
+borrowed:
+- component: G12生成的八套字体数据
+  usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 鼠标位置、动作与按压反馈分别持有
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#feedback-events
+  establishes: 无持续拖动的phase=0只移动；已有拖动时更新几何或选区而不保存。phase1/3置pointer_down；phase2无论命中哪里清它。保存动作来自输入分派，不来自u_button。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 响应许可与位组合
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#interaction-region
+  establishes: u_interaction给当前绘图区域借用整屏指针、down及enabled；仅active且无覆盖层窗口允许HOT，DOWN叠加且外观优先；INACTIVE覆盖交互。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 同一像素比较与遮挡观察
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#feedback-observation
+  establishes: Save内部采样远离字形和圆角；hover不改文档，手动down只观察外观，真实释放恢复hot；禁用及被覆盖区域不响应同一指针。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 资源区重新建立桌面反馈许可
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#interaction-region
+  establishes: 窗口结束后资源区重新u_interaction；关闭Settings使active=-1且Editor仍开，资源按钮hover变化但仅真实按下打开Tasks。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

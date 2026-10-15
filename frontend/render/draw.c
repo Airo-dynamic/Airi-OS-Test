@@ -3,6 +3,8 @@
 static const struct airi_framebuffer *fb;  // 借用本次调用者持有的描述，不拥有像素内存
 static bool standard;  // 三个8位通道是否恰好组成0xRRGGBB
 static struct ui_rect clip;  // 所有图元共同使用的当前可写范围
+static int pointer_x, pointer_y;  // 当前绘制区域借用的整屏指针坐标
+static bool pointer_down, interactive;  // 按压状态与当前区域是否有资格显示反馈
 static unsigned theme;  // 当前绘图使用的调色板下标，单线程调用期间由u_theme设置
 static const uint32_t palettes[2][U_COLOR_END - U_BG] = {  // 两行按ui_color角色顺序保存颜色
     {0x0d131c, 0x172130, 0x192330, 0x3b2c38, 0x46566b,  // 夜间：背景、框架、内容、选中和分隔
@@ -261,7 +263,12 @@ void u_button(struct ui_rect r, const char *label, bool selected, bool disabled)
     unsigned state = selected ? U_SELECTED : U_NORMAL;  // 当前应用选择转换成第0位
     if (disabled)  // 调用者明确报告此动作不可用
         state |= U_INACTIVE;  // 按位或加入禁用位，保留已有选择位
-    u_control(r, label, state);  // 当前只绘制明确状态，不读取鼠标或执行动作
+    if (interactive && u_inside(r, pointer_x, pointer_y)) {  // 只有允许响应且指针在按钮半开矩形内时加入反馈
+        state |= U_HOT;    // 按位或加入悬停位，不改变已有选择或禁用位
+        if (pointer_down)  // 指针在此按钮内且鼠标仍按着
+            state |= U_DOWN;  // 本帧加入按压反馈，服务动作仍由输入分派执行
+    }
+    u_control(r, label, state);  // 只把组合状态转换成像素，不调用任何应用或服务
 }
 
 int u_label_width(const char *s) {  // 身份标签使用Medium推进量，每个字符另加两像素，测量与绘图一致。
@@ -288,4 +295,11 @@ void u_brand(int x, int y) {  // 两条斜边和悬浮横梁组成原创A形标�
         u_line(x + 10 + i, y, x + 20 + i, y + 20, U_INK);  // 右侧下降边
     }
     u_rect(x + 7, y + 13, 10, 3, U_PINK);  // 粉色横梁只承担产品身份
+}
+
+void u_interaction(int x, int y, bool down, bool enabled) {  // 每个绘制区域显式设置它可以响应的指针状态
+    pointer_x = x;  // 下一次按钮绘制用这个整屏横坐标命中
+    pointer_y = y;  // 纵坐标与按钮矩形采用同一整屏坐标系
+    pointer_down = down;    // 当前按压由事件入口保存，绘图不产生按下事件
+    interactive = enabled;  // 底层窗口或被对话框遮挡的区域关闭反馈
 }
