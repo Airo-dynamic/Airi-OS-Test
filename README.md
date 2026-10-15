@@ -2,7 +2,7 @@
 
 AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于理解和开发 BOSS、Taishan 这类系统。教程从空目录逐步写出内核、构建、验证与平台适配。内核和 Linux 对照是必修主线，图形工作站在独立的 gui 分支中推进。
 
-从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)：00–02 的实现字节保持不变，正文只作必要澄清。K14–K17 完成异常与内存，K18–K23 完成时钟、任务、用户态、静态ELF和最小fork/exec/wait；K24已进入RAM文件与FD读写。L01–L03提供Linux入口、内存和进程对照，远端仍因SSH255未验证。磁盘与异步I/O继续按后续检查点推进。
+从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)：00–02 的实现字节保持不变，正文只作必要澄清。K14–K17 完成异常与内存，K18–K23 完成时钟、任务、用户态、静态ELF和最小fork/exec/wait；K24–K28已完成RAM文件与FD、非阻塞管道、VirtIO块设备、同步追加日志和跨QEMU恢复。L01–L04提供Linux入口、内存、进程和存储对照，远端仍因SSH255未验证。阻塞、就绪等待与异步I/O继续按后续检查点推进。
 
 ## 默认从串口运行
 
@@ -15,7 +15,7 @@ AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于�
 ./airios test
 ```
 
-run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files。按 Ctrl-A 后按 X 退出 QEMU。test 检查基础库、启动合同、六种带超时的启动，以及真实 UART/PS/2 输入。
+run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run storage/run recover。按 Ctrl-A 后按 X 退出 QEMU。test 检查基础库、启动合同、九种带超时的启动、真实 UART/PS/2 输入，以及双QEMU存储恢复。
 
 主机需要 Python 3.12+、LLVM/LLD、GNU Make、QEMU、xorriso 和 mtools。macOS 可执行 `brew install llvm lld qemu xorriso mtools make`。虚拟机固定为 q35、单 CPU、256 MiB 和 OVMF UEFI，Apple Silicon 使用 TCG。工具选择、外部来源与依赖校验由教程 00–02 展开。
 
@@ -23,7 +23,7 @@ run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、d
 
 | 分支 | 检查点 | 内容与运行条件 |
 | --- | --- | --- |
-| main | 31 个：00–10、K11–K24、L01–L03、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
+| main | 36 个：00–10、K11–K28、L01–L04、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
 | gui | 15 个：G11–G24、G26 | 从 main 的 00 根提交分叉，只增加图形自己的路径；合入任一现有 main 阶段均不覆盖主线文件 |
 
 合入源码与开始运行是两件事。图形代码可以先合入较早的 main 检查点，运行需主线到 K11；G24 的 guest 接入需 K13。G11–G23 先提供宿主观察，G26 提供完整图形检查。默认构建继续选择串口实现，不读取字体，也不链接 Cocoa。
