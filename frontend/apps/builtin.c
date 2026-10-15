@@ -19,6 +19,9 @@ void ui_apps_draw(struct ui_desktop *s, enum ui_app app, struct ui_rect r) {  //
     case UI_SETTINGS:  // 应用身份为设置时进入对应分支。
         ui_settings_draw(s, r);  // 用当前桌面和内容矩形绘制设置。
         break;  // 当前匹配已完成，停止这一层循环或分支。
+    case UI_VIEWER:  // 应用身份为曲线时进入对应分支。
+        ui_viewer_draw(s, r);  // 用当前桌面和内容矩形绘制曲线。
+        break;  // 当前匹配已完成，停止这一层循环或分支。
     default:  // 未知应用编号不绘制内容；窗口框仍由外层处理
         break;  // 当前匹配已完成，停止这一层循环或分支。
     }

@@ -1,24 +1,29 @@
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
 
-void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下标打开目录或读取文档，成功才切换编辑身份
+void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下标选择目录、CSV或文档，成功后切换对应查询或视图
     if (index >= s->file_count)  // 快照下标必须落在这次查询的有效前缀
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // index不在有效快照内，不读取服务记录也不改变当前视图
     struct ui_file *f = &s->files[index];  // 借用快照第index项，后面用其服务id而非下标读取
     if (f->directory) {  // 目录项改变当前目录，不当成文字文档读取
         airi_snprintf(s->directory, 128, "%s", f->path);  // 用目录记录的完整路径替换当前查询目录
-        ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        ui_refresh(s);  // 按新的directory重新查询文件，同时刷新已有任务与资源快照
+        return;  // 目录查询已刷新，结束目录路径，不继续把它当CSV或文档读取
+    }
+    size_t name_len = airi_strlen(f->name);  // 测量名称长度，以便在不越界的前提下检查后缀
+    if (name_len >= 4 && !airi_memcmp(f->name + name_len - 4, ".csv", 4)) {  // 先保证至少4字节，再比较尾部.csv决定进入曲线解析
+        ui_open_series(s, f);  // 使用该文件的服务id读取并解析曲线，成功才发布数组
+        return;  // CSV读取与校验已完成或报告失败，结束曲线路径，不覆盖Editor正文
     }
     if (s->dirty) {  // 当前文档未保存时先阻止另一个文档覆盖编辑数组
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unsaved changes",  // 保存文字"Unsaved changes"的种类、目标和说明，最后绘图且优先接收后续事件
                       "Save or discard the current document before opening another file.", "");  // 说明未保存正文阻止新文档覆盖，最后空串表示此错误框没有名称初值
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 当前Editor有未保存修改，保留其文字和身份并结束本次打开
     }
     if (!s->backend.read ||  // 先检查读取函数地址是否存在，短路或保证缺回调时不调用空函数指针
         !s->backend.read(s->backend.context, f->id, s->editor, sizeof(s->editor))) {  // 按服务id读取文档，缺回调或失败时保留原文并显示原因
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unable to open file",  // 保存文字"Unable to open file"的种类、目标和说明，最后绘图且优先接收后续事件
                       "The file service did not return the document.", "");  // 说明读取服务失败，错误框无需名称字段，原编辑正文保持完整
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 完整读取失败，错误框已设置，保留当前文档身份和保存点
     }
     s->editor_id = f->id;  // 读取成功后才让编辑器绑定新文件的服务身份
     airi_snprintf(s->editor_name, 64, "%s", f->name);  // 完整读取成功后复制文件名作为Editor身份说明，服务id另存于editor_id

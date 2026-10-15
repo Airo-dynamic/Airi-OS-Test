@@ -6,19 +6,21 @@ static struct ui_desktop desktop;    // 主机观察拥有整份静态桌面，�
 static struct airi_console console;  // 主机观察拥有同一console输入输出状态
 int main(int argc, char **argv) {    // 在主机准备输入、运行当前观察并以退出码报告结果
     struct ui_backend backend;     // 观察程序持有回调合同副本，初始化后才可调用
-    ui_fixture_backend(&backend);  // 重置当前主机参考服务并填入回调表，本次实参取自当前桌面状态
+    ui_fixture_backend(&backend);  // 把服务回调写入本观察程序的 backend 结构，并重置参考静态记录
     airi_console_init(&console, backend.boot);  // 观察console与System借用同一参考启动结构，日志和面板来源一致
-    ui_init(&desktop, backend, &console);  // 清桌面状态，绑定服务和console并打开默认应用，本次实参取自当前桌面状态
+    ui_init(&desktop, backend, &console);  // 同一desktop借用console并复制后端合同，后续每次操作都修改这份状态
     int app = argc > 1 ? atoi(argv[1]) : UI_TERMINAL;  // 有参数时把十进制字符串变成应用编号，否则生成Terminal
     if (app < 0 || app >= UI_APP_COUNT)  // 检查转换结果的数组边界后才索引窗口
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
+    if (app == UI_VIEWER)  // 图片进程需要自己加载数据，不能借用另一个进程的数组
+        ui_open_document(&desktop, 1);  // 本参考快照第1项是series.csv，成功解析后发布六个点
     ui_open(&desktop, (enum ui_app)app);    // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
     desktop.windows[app].maximized = true;  // 观察程序先把目标窗口设为最大化，绘图据此计算实际矩形
     struct airi_framebuffer fb = {  // 当前操作使用的airi_framebuffer记录布局
         .virtual_address = (uintptr_t)pixels, .width = 1280, .height = 800,  // 设置像素数组的主机虚拟地址、软件画布像素宽度、软件画布像素高度
         .pitch = 1280 * 4, .bpp = 32, .red_size = 8, .red_shift = 16,  // 设置每行实际字节跨度、每像素位数、红色通道位数、红色通道最低位位置
         .green_size = 8, .green_shift = 8, .blue_size = 8};  // 设置绿色通道位数、绿色通道最低位位置、蓝色通道位数
-    ui_draw(&desktop, &fb);  // 按当前窗口次序绘制整帧，本次实参取自当前桌面状态
+    ui_draw(&desktop, &fb);  // 按窗口层次画整帧，并将对话框留在最后，本次实参取自当前桌面状态
     FILE *file = fopen("build/desktop.ppm", "wb");  // 以二进制写并截断旧内容打开本次桌面PPM文件
     if (!file)  // 打开PPM输出失败时不继续写文件
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过

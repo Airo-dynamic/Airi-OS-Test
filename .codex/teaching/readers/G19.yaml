@@ -1,0 +1,57 @@
+checkpoint: G19
+baseline: baseline.yaml
+start: G18
+current_operation: 从series.csv提交六点曲线，再用重复时间输入观察旧曲线保留
+already_explained:
+- concept: 服务记录与按id完整读取
+  at: ../../../dev-log/graphics/14-services.md#service-callbacks
+  establishes: read按会话内文件id将完整NUL正文复制进调用者数组，容量不足不写输出；CSV解析在复制完成后进行。
+- concept: 错误反馈独立复制
+  at: ../../../dev-log/graphics/17-editing.md#dialog-lifetime
+  establishes: ui_app_dialog将标题和原因复制进desktop，局部csv或错误数组退出后仍可显示提示。
+first_use:
+- concept: 字符转整数与临时数组整份提交
+  at: ../../../dev-log/graphics/19-series.md#csv-conversion
+  establishes: 0,12中value先为1，再乘10加2；标题跳过而不检查列名；时间严格递增，失败不覆盖旧曲线。
+- concept: 真实时间间隔与整数像素
+  at: ../../../dev-log/graphics/19-series.md#series-scaling
+  establishes: 横轴按相对首点的时间差/duration，纵轴value/max；中间乘法先uint64_t；单点duration与max至少1避免零除。
+- concept: 文件保存与解析失败的两个边界
+  at: ../../../dev-log/graphics/19-series.md#code-labs-tutorial-series-c-1
+  establishes: 服务能保存重复时间CSV，解析器拒绝；失败后旧六点数组逐字节不变。数值观察与图片程序各有自己的进程内参考服务。
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/19-series.md#code-frontend-apps-internal-h-1
+  establishes: Viewer绘图与ui_open_series在读取CSV后首次参与分派，解析失败保留旧数组。
+- concept: 末R的字形覆盖率与背景核对
+  at: ../../../dev-log/graphics/19-series.md#code-labs-tutorial-series-c-1
+  establishes: 沿DATA VIEWER实际推进定位R，逐像素以INK和CHROME混合核对；不能仅证明字母写出而忽略跨出身份片。
+borrowed:
+- component: G12生成的八套字体数据
+  usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 字符转整数与临时数组整份提交
+  at: ../../../dev-log/graphics/19-series.md#csv-conversion
+  establishes: 0,12中value先为1，再乘10加2；标题跳过而不检查列名；时间严格递增，失败不覆盖旧曲线。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 真实时间间隔与整数像素
+  at: ../../../dev-log/graphics/19-series.md#series-scaling
+  establishes: 横轴按相对首点的时间差/duration，纵轴value/max；中间乘法先uint64_t；单点duration与max至少1避免零除。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 文件保存与解析失败的两个边界
+  at: ../../../dev-log/graphics/19-series.md#code-labs-tutorial-series-c-1
+  establishes: 服务能保存重复时间CSV，解析器拒绝；失败后旧六点数组逐字节不变。数值观察与图片程序各有自己的进程内参考服务。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/19-series.md#code-frontend-apps-internal-h-1
+  establishes: Viewer绘图与ui_open_series在读取CSV后首次参与分派，解析失败保留旧数组。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 末R的字形覆盖率与背景核对
+  at: ../../../dev-log/graphics/19-series.md#code-labs-tutorial-series-c-1
+  establishes: 沿DATA VIEWER实际推进定位R，逐像素以INK和CHROME混合核对；不能仅证明字母写出而忽略跨出身份片。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

@@ -135,6 +135,10 @@ struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状�
     struct ui_stats stats;  // 与任务快照同时取得的汇总。
     unsigned theme;    // 桌面自己持有的日夜模式，文本会话不依赖此字段。
     unsigned density;  // Files/Tasks列表行高，0为36像素、1为28像素；相应绘图和列表命中共用。
+    unsigned series_count;  // 已成功解析的曲线点数，失败保留旧值。
+    unsigned series_values[60];  // 各点纵轴整数值，与times同下标配对。
+    unsigned series_times[60];   // 各点横轴秒数，按当前CSV合同递增。
+    char series_name[64];  // 最近成功解析的数据文件名。
 };
 void ui_init(struct ui_desktop *, struct ui_backend, struct airi_console *);  // 初始化桌面，复制服务表并借用命令对象。
 void ui_open(struct ui_desktop *, enum ui_app);  // 打开、解除最小化并置顶指定应用。
@@ -147,7 +151,7 @@ void ui_fixture_backend(struct ui_backend *);  // 为主机观察填入会话内
 
 void u_icon(int, int, int, uint32_t);  // 在给定坐标以类型和颜色绘制小图标。
 unsigned ui_file_order(const struct ui_desktop *, unsigned *);  // 把当前文件排序位置写成快照下标数组并返回数量。
-void ui_open_document(struct ui_desktop *, unsigned);  // 接收快照下标，按服务id读取普通文档并打开Editor。
+void ui_open_document(struct ui_desktop *, unsigned);  // 接收快照下标，读取id对应内容并选择Editor或Viewer。
 void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应用身份分派内容绘图，rect已扣除标题栏。
 void ui_apps_click(struct ui_desktop *, enum ui_app, struct ui_rect, int, int, bool);  // 将内容矩形、屏幕点与双击状态交给具体应用。
 #endif  // 结束完整桌面接口的重复包含保护
