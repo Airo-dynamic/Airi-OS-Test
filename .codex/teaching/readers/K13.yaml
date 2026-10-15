@@ -1,0 +1,35 @@
+checkpoint: 'K13'
+baseline: baseline.yaml
+start: 'K12'
+current_operation: 用doctor检查工具与ELF，再通过统一入口运行和验证同一串口内核
+already_explained:
+- concept: 工具选择与Make参数
+  at: ../../../dev-log/01-tools.md#code-scripts-tools-py-3
+  establishes: make_command返回带工具覆盖的待执行参数列表，并允许GNU Make从gmake回退make
+- concept: 子进程、参数列表与退出码
+  at: ../../../dev-log/00-first-tool.md#process-arguments
+  establishes: sys.argv保存入口参数，列表保留每项边界，非零退出经异常交回父进程
+- concept: 启动检查和真实输入观察
+  at: ../../../dev-log/core/12-boot-tests.md#console-observation
+  establishes: 观察函数等待本次完整状态与结果，失败和成功均回收本轮QEMU
+first_use:
+- concept: 编译数据库与独立ELF检查
+  at: ../../../dev-log/core/13-commands.md#command-entry
+  establishes: Make的-Bn打印编译命令，shlex.split恢复参数边界；数据库保存源码工作目录与参数，ELF检查读取当前机器类型、依赖和符号
+- concept: 实际工具探测与输出收集
+  at: ../../../dev-log/core/13-commands.md#toolchain-doctor
+  establishes: capture_output分开取得两种输出流，text转成字符串；GNU Make沿用既有选择，环境检查还要实际构建kernel
+- concept: argparse参数形状与条件导入
+  at: ../../../dev-log/core/13-commands.md#cli-arguments
+  establishes: 位置参数和带值选项保存为Namespace属性，store_true默认False；只执行所选分支中的import，再调用已有构建和观察函数
+- concept: shell命令替换与进程替换
+  at: ../../../dev-log/core/13-commands.md#command-shell
+  establishes: 命令替换取得入口目录，exec以Python替换shell，带双引号的$@逐项转交原参数及退出状态
+borrowed:
+- component: argparse、clangd与LLVM检查工具
+  contract: argparse解析主机入口参数，clangd读取编译数据库，LLVM工具报告当前ELF；内核执行仍由QEMU观察
+feedback:
+- source: 2026-10-15独立教程审查
+  observation: 命令入口缺少具体参数与运行过程，doctor的GNU Make查找偏离01的回退规则。
+  revision: 沿run和test解释分派、条件导入和主机进程；doctor复用make_command的首项路径，末尾继续必修Linux集合。
+not_inferred: 已解释、敲完和运行成功不证明学习者掌握。

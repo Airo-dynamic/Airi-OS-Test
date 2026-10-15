@@ -1,0 +1,26 @@
+# 编译、镜像和平台程序可由源码重建。
+build/
+# 运行日志、图片和验证报告不成为源码输入。
+artifacts/
+# 已校验引导器checkout属于下载依赖。
+third_party/limine/
+# 下载的压缩包缓存不手敲或跟踪。
+third_party/*.tar.gz
+# 固定校验的固件镜像保留本地缓存。
+third_party/firmware/
+# macOS目录显示元数据与实现无关。
+.DS_Store
+# Python缓存由解释器自动生成。
+__pycache__/
+# 普通Linux程序编译产物不替代C源码。
+labs/linux/p1/ordinary
+# 自定义入口程序同样只跟踪汇编源码。
+labs/linux/p1/raw
+# 远端实验输出可再生，实际证据单独归档。
+labs/linux/p1/artifacts/
+# 完整快照由固定main导出，不回装进入来源树。
+HISTORY/
+# 作者技能链接不属于学习者构建输入。
+.codex/skills/
+# 同一技能的Agent本机入口也不打包。
+.agents/skills/

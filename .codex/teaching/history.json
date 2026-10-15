@@ -69,6 +69,11 @@
       "id": "K12",
       "title": "K12 · 用完成标记核对真实启动与输入",
       "document": "dev-log/core/12-boot-tests.md"
+    },
+    {
+      "id": "K13",
+      "title": "K13 · 把已有构建、运行与观察收拢为统一入口",
+      "document": "dev-log/core/13-commands.md"
     }
   ]
 }

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu  # -e使非零简单命令停止，-u拒绝读取未定义变量。
+task_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)  # $0是入口路径；dirname取目录；清空CDPATH避免cd额外输出；&&成功才pwd。
+exec python3 "$task_root/scripts/manage.py" "$@"  # 替换shell；双引号$@逐项保留原参数，退出状态直接来自Python。

@@ -1,0 +1,2 @@
+CompileFlags:  # clangd编译参数设置对象。
+  CompilationDatabase: build/normal  # 读取manage导出的普通配置命令数据库。
