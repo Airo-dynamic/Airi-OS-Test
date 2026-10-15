@@ -21,3 +21,9 @@ airi_worker_elf_end: /* 输入长度不包括后续损坏夹具。 */
 airi_broken_elf_start: /* 只有魔数与少量标识，不足64字节头。 */
 .byte 0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0 /* 解析器必须拒绝，不能改掉旧进程。 */
 airi_broken_elf_end: /* 失败输入恰好八字节。 */
+
+.section .rodata /* 文件工作负载只在内核中保留映像字节。 */
+.global airi_files_elf_start, airi_files_elf_end /* 用户空间由装载器另建。 */
+airi_files_elf_start: /* 映像首地址。 */
+.incbin AIRI_FILES_ELF /* 使用本配置实际链接的用户ELF。 */
+airi_files_elf_end: /* 映像右端，不把后续字节算入文件。 */

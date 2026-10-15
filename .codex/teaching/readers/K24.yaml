@@ -1,0 +1,26 @@
+checkpoint: K24
+baseline: baseline.yaml
+start: K23 + L03
+current_operation: 用户files程序短读写与零洞，子exec继承FD，父观察共享偏移
+already_explained:
+- concept: exec事务和内核栈转移
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 先准备映像再提交，旧空间清理不能释放转移资源
+- concept: Linux FD表项和打开对象
+  at: ../../../dev-log/linux/03-process.md#linux-fd-inheritance
+  establishes: fork表项共享偏移，CLOEXEC按FD生效，Linux运行仍未验证
+first_use:
+- concept: RAM名字、打开对象、FD表和引用
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: open独立偏移，dup/fork加引用，exec转移，exit立即关FD
+- concept: 短I/O、显式偏移与零洞
+  at: ../../../dev-log/core/24-files.md#file-transfer
+  establishes: 实际返回数消费偏移，pread不改共享位置，失败truncate不修改文件
+- concept: 输出范围与副作用顺序
+  at: ../../../dev-log/core/24-files.md#file-user-boundary
+  establishes: 完整验证用户输出后才读取推进偏移，第四参数使用R10
+not_assumed:
+- Linux VFS全部语义、页缓存、磁盘持久化、目录树或完整POSIX
+limits:
+- RAM文件重启丢失，平坦名字和固定容量
+- 同步副本不保留用户buffer，不代表异步缓冲生命周期已实现

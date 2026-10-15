@@ -17,4 +17,16 @@ void *airi_alloc(size_t bytes); // 零填充页申请，失败NULL，进程结�
 uint64_t airi_ticks(void); // 实际时钟事件计数。
 void airi_yield(void); // 主动交接，不等同于时钟抢占。
 long airi_exec(const char *name); // 成功替换映像不返回；失败保留旧PID和调用链，返回负错误。
+#define AIRI_READ 1u // 以下标志只属于自有open ABI。
+#define AIRI_WRITE 2u // 写访问。
+#define AIRI_CREATE 4u // 名字不存在时创建。
+#define AIRI_TRUNCATE 8u // 清空可写文件。
+#define AIRI_CLOEXEC 16u // 成功exec关闭此表项。
+long airi_open(const char *path, unsigned flags); // 平坦绝对名字，返回FD或负错误。
+long airi_close(unsigned fd); // 关闭不删除名字。
+long airi_dup(unsigned fd, unsigned cloexec); // 与源共享偏移。
+long airi_seek(unsigned fd, uint64_t offset); // 只支持绝对定位。
+long airi_read(unsigned fd, void *buffer, size_t bytes); // EOF为0，短读是实际完成数。
+long airi_pread(unsigned fd, void *buffer, size_t bytes, uint64_t offset); // 不移动共享偏移。
+long airi_pwrite(unsigned fd, const void *buffer, size_t bytes, uint64_t offset); // 第四参数R10。
 #endif // 结束包含保护。

@@ -1,3 +1,4 @@
+#include <airi/file.h> // 每进程FD表共享打开文件对象。
 #include <airi/console.h> // 内核命令消费服务结果，不依赖主题和绘图。
 #include <airi/elf.h> // 独立用户ELF检查器。
 #include <airi/user.h> // 完整陷入与安全用户返回。
@@ -13,6 +14,7 @@
 enum user_state { USER_UNUSED, USER_RUNNABLE, USER_RUNNING, USER_WAITING, USER_ZOMBIE, USER_REAP_PENDING }; // 退出与回收是两个不同状态。
 struct user_page { uint64_t address, physical; unsigned flags; }; // fork需要把同一VA映射到另一个物理页。
 struct user_process { // 所有权和调度状态由内核持有，用户只能看到PID。
+    struct airi_fd_table files; // exec转移表项，fork增加同一打开对象的引用。
     struct airi_address_space space; // 根和低半区表自有，高半区借用。
     struct airi_kernel_region stack; // 不能在仍使用它的C调用中释放。
     struct user_page owned[64]; // 所有用户数据页，含代码、静态数据、堆页和栈。
@@ -37,13 +39,15 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_files_elf_start[], airi_files_elf_end[]; // 内存文件用户工作负载。
 extern const uint8_t airi_worker_elf_start[], airi_worker_elf_end[]; // exec目标是另一个独立静态ELF。
 extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控损坏输入，验证旧进程保持。
 struct executable { const char *name; const uint8_t *start, *end; }; // 初始映像目录尚不是通用文件系统。
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
-    {"worker", airi_worker_elf_start, airi_worker_elf_end}, // 替换成功后从自己的_start开始。
+    {"worker", airi_worker_elf_start, airi_worker_elf_end},
+    {"files", airi_files_elf_start, airi_files_elf_end}, // 真实用户FD演示。
     {"broken", airi_broken_elf_start, airi_broken_elf_end}, // 用于完整的坏ELF失败演示。
 };
 static const struct executable *find_program(const char *name) { // 输入是内核已复制的短NUL字符串。
@@ -92,6 +96,7 @@ static bool copy_user(struct user_process *p, void *buffer, uint64_t address, si
     return true; // 同步结束，不借出buffer指针。
 }
 static void cleanup(struct user_process *p) { // 目标根必须不活动，而且当前不能使用目标内核栈。
+    airi_fd_close_all(&p->files, false); // 回滚或已退出空表均安全，不能遗留全局引用。
     if (p->space.root && !airi_vm_destroy(&p->space)) // 先解除并归还自有页表，不动借用的内核表。
         airi_panic("cannot destroy inactive user tables"); // 不能归还仍被活动根引用的数据页。
     while (p->count) // 用户代码与用户栈数据页分别归还。
@@ -247,6 +252,7 @@ static struct airi_trap_frame *schedule(enum schedule_reason reason) { // 内核
 }
 static struct airi_trap_frame *exit_current(int code) { // CPU还在当前进程内核栈上，先结束身份而不释放栈。
     struct user_process *p = current; // 当前退出者的稳定控制块。
+    airi_fd_close_all(&p->files, false); // exit立即释放文件，僵尸只保留等待状态与待回收内存。
     p->exit_code = code; // 保存给父进程wait读取。
     p->state = USER_ZOMBIE; // 不再运行，但资源和状态尚存在。
     if (p->pid == root_pid) // 整个会话的结果以最初根用户为准。
@@ -277,6 +283,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
             goto failed; // 回滚全部子资源，不改变父页面。
         airi_memcpy(airi_memory_direct(child->owned[child->count - 1].physical), airi_memory_direct(page->physical), 4096); // 复制完整页内容，父子以后写入互不影响。
     }
+    airi_fd_clone(&child->files, &parent->files); // 页复制全部成功后再取得FD引用，失败cleanup仍能撤销。
     child->initial = *parent_frame; // 用户RIP/RSP和寄存器从同一次fork返回点继续。
     child->initial.rax = 0; // 子分支看到fork返回0。
     child->pid = next_pid++; // 全部内存成功后才分配PID。
@@ -374,6 +381,9 @@ static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用�
     airi_memset(&old.stack, 0, sizeof(old.stack)); // old清理者不再拥有这组栈，不能重复释放。
     next.frame = f; // 真实返回现场仍在同一内核栈上，不能留下指向next.initial局部对象的指针。
     *f = next.initial; // 事务提交时才覆盖旧用户RIP/RSP和寄存器。
+    next.files = old.files; // 文件表所有权从旧映像转到新映像，偏移和普通FD继续存在。
+    airi_memset(&old.files, 0, sizeof(old.files)); // cleanup旧映像不能重复关闭已转移引用。
+    airi_fd_close_all(&next.files, true); // 只有成功提交才关闭CLOEXEC，失败exec不影响原表。
     next.state = USER_RUNNING; // 此身份继续运行，但从新_start开始。
     *current = next; // 把新所有权发布到原进程槽，PID不变。
     if (!airi_vm_activate(&current->space)) // 新根已借到当前内核栈及内核映射。
@@ -415,18 +425,31 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         airi_log("[USER_FAULT] pid=%u vector=%llu error=0x%llx rip=0x%llx cr2=0x%llx", current->pid, (unsigned long long)f->vector, (unsigned long long)f->error, (unsigned long long)f->rip, (unsigned long long)(f->vector == 14 ? airi_trap_fault_address() : 0)); // PF才读取本次CR2。
         return exit_current(-(128 + (int)f->vector)); // 自有故障编码，不宣称Linux信号ABI。
     }
-    if (f->rax == 1) { // 有界同步write，仍只支持stdout/stderr。
-        char buffer[256]; // 同步内核副本不保存用户借用。
-        if (f->rdi != 1 && f->rdi != 2) // 通用FD表在文件阶段接入。
-            f->rax = (uint64_t)-9ll; // -EBADF。
-        else if (f->rdx > sizeof(buffer)) // 拒绝覆盖内核栈的巨大长度。
-            f->rax = (uint64_t)-22ll; // -EINVAL。
-        else if (!copy_user(current, buffer, f->rsi, (size_t)f->rdx, false)) // 完整检查所有用户输入页。
-            f->rax = (uint64_t)-14ll; // -EFAULT。
-        else { // 用户内容已复制进本内核调用。
-            airi_serial_write_bytes(buffer, (size_t)f->rdx); // 按逻辑长度发送。
-            f->rax = f->rdx; // 返回已完成长度。
+    if (f->rax == 1 || f->rax == 10 || f->rax == 15 || f->rax == 16) { // write/read/pread/pwrite共享检查与副本边界。
+        char buffer[256]; // 内核只在本次同步调用持有副本。
+        bool write = f->rax == 1 || f->rax == 16; // 用户到文件为写，文件到用户为读。
+        bool positioned = f->rax == 15 || f->rax == 16; // 显式偏移来自第四参数R10。
+        size_t bytes = (size_t)f->rdx; // 请求长度先有界再校验跨度。
+        long result; // 自有ABI直接返回负错误或实际字节数。
+        if (f->rdi >= AIRI_FD_COUNT) // 全64位FD必须先验证，不能截断高位后访问另一个编号。
+            result = -9; // -EBADF。
+        else if (bytes > sizeof(buffer)) // 不允许覆盖内核栈。
+            result = -22; // -EINVAL。
+        else if (!user_access(current, f->rsi, bytes, !write)) // read必须先验证整个输出区，失败不能消费偏移。
+            result = -14; // -EFAULT。
+        else if (write) { // 输入完整有效后才能发生文件或串口副作用。
+            copy_user(current, buffer, f->rsi, bytes, false); // 复制当前进程的输入字节。
+            if (!positioned && airi_fd_console(&current->files, (unsigned)f->rdi)) { // 被dup的终端FD也可发送。
+                airi_serial_write_bytes(buffer, bytes); // 同步设备适配，不借出用户指针。
+                result = (long)bytes; // 返回逻辑字节数。
+            } else // RAM文件或不支持的定位设备操作。
+                result = airi_fd_write(&current->files, (unsigned)f->rdi, buffer, bytes, positioned, f->r10); // 文件层维护共享偏移。
+        } else { // 内核副本先承接实际读取结果。
+            result = airi_fd_read(&current->files, (unsigned)f->rdi, buffer, bytes, positioned, f->r10); // EOF为0，错误为负。
+            if (result > 0 && !copy_user(current, buffer, f->rsi, (size_t)result, true)) // 前置完整检查后映射不能变化。
+                airi_panic("validated file output mapping changed"); // 不吞内部错误。
         }
+        f->rax = (uint64_t)result; // 调用者必须按实际完成数推进。
     } else if (f->rax == 2) // 退出后不再恢复此用户指令。
         return exit_current((int)(f->rdi & 255)); // 普通退出码0–255。
     else if (f->rax == 3) // getpid查询当前身份。
@@ -446,6 +469,24 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         return wait_current(f); // 结果恢复到父同一次调用之后。
     else if (f->rax == 9) // 申请零填充用户页。
         f->rax = (uint64_t)allocate_user((size_t)f->rdi); // 不成功不前移堆游标。
+    else if (f->rax == 11) { // open只消费内核持有的短路径副本。
+        char path[32]; // 与平坦目录名容量一致。
+        bool copied = false; // 必须看到终止零才可交给文件层。
+        for (size_t i = 0; i < sizeof(path); ++i) { // 逐字节检查，不能strlen用户指针。
+            if (!copy_user(current, &path[i], f->rdi + i, 1, false)) // 未映射或内核地址拒绝。
+                break; // 不发生创建或截断。
+            if (!path[i]) { // 有界NUL字符串完成。
+                copied = true; // 副本可在当前内核调用中使用。
+                break; // 不额外读取终止零后面的用户页。
+            }
+        }
+        f->rax = copied && f->rsi <= 31 ? (uint64_t)airi_fd_open(&current->files, path, (unsigned)f->rsi) : (uint64_t)-14ll; // 错误路径不变更文件。
+    } else if (f->rax == 12) // close撤销当前表项引用。
+        f->rax = (f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_close(&current->files, (unsigned)f->rdi) : (uint64_t)-9ll); // 不删除文件内容。
+    else if (f->rax == 13) // dup共享打开对象，标志放在新表项。
+        f->rax = (f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_dup(&current->files, (unsigned)f->rdi, f->rsi != 0) : (uint64_t)-9ll); // 单CPU内核中同步加引用。
+    else if (f->rax == 14) // 仅绝对定位，不实现Linux全部whence。
+        f->rax = (f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_seek(&current->files, (unsigned)f->rdi, f->rsi) : (uint64_t)-9ll); // 共享打开对象的偏移随之变化。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     return airi_user_resume(f); // 普通调用继续同一用户，仍检查RSP与标志。
@@ -462,10 +503,11 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     int error = elf ? prepare_elf(root, image, bytes, name, true) : (prepare_flat(root, image, bytes) ? 0 : -12); // ELF保留格式与资源错误之别。
     if (error) { // 失败构造也必须完整恢复资源。
         airi_memory_snapshot(&after); // 不能只看错误码忽略泄漏。
-        if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 半份新映像不应改变空闲数量。
+        if (before.pages_free != after.pages_free || before.heap_free != after.heap_free || airi_files_open_count()) // 半份新映像不应改变空闲数量。
             airi_panic("failed user launch leaked resources"); // 内部错误与普通坏文件分开。
         return error; // 调用者可以继续命令，不停机。
     }
+    airi_fd_init(&root->files); // 初始stdout/stderr归本次根进程持有。
     root->pid = next_pid++; // 完整准备后才取得运行身份。
     root->heap_next = USER_HEAP; // 动态用户页初始为空。
     place_frame(root); // 寄存器值进入本进程真实内核栈。
@@ -484,7 +526,7 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     current = NULL; // 不保留已清掉的身份指针。
     kernel_return = NULL; // 下次会话重新登记。
     airi_memory_snapshot(&after); // 全部页和栈回收后验证。
-    if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 用户程序退出码可以任意，但内核资源必须恢复。
+    if (before.pages_free != after.pages_free || before.heap_free != after.heap_free || airi_files_open_count()) // 用户程序退出码可以任意，但内核资源必须恢复。
         airi_panic("user process session leaked memory"); // 不把泄漏当成应用错误跳过。
     return 0; // 表示已完整启动与收拢，程序结果另在result.code。
 }
@@ -496,19 +538,21 @@ static void run_one(const uint8_t *image, size_t bytes, const char *name, int ex
         airi_log("[PROCESS_DEMO_OK] fork=copy exec=transaction wait=blocked timer_switches=%u wait_blocks=%u reclaimed=1", result.switches, result.blocks); // 计数来自真实IRQ与状态转换。
 }
 void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回归。
+    airi_files_init(); // 用户会话开始前创建只读seed与空RAM目录，仅启动一次。
     run_one(airi_user_probe_start, (size_t)((uintptr_t)airi_user_probe_end - (uintptr_t)airi_user_probe_start), NULL, 0, false, true, false); // 原有非法指针与用户IRQ验证。
     run_one(airi_user_bad_start, (size_t)((uintptr_t)airi_user_bad_end - (uintptr_t)airi_user_bad_start), NULL, -141, false, false, false); // 用户cli只杀当前身份。
     run_one(airi_user_load_bad_start, (size_t)((uintptr_t)airi_user_load_bad_end - (uintptr_t)airi_user_load_bad_start), NULL, -142, false, false, false); // USER保护PF。
     run_one(airi_user_rsp_bad_start, (size_t)((uintptr_t)airi_user_rsp_bad_end - (uintptr_t)airi_user_rsp_bad_start), NULL, -22, false, false, false); // 坏返回栈不击穿内核。
     run_one(airi_hello_elf_start, (size_t)((uintptr_t)airi_hello_elf_end - (uintptr_t)airi_hello_elf_start), "hello", 0, true, false, false); // 独立C和自有用户库。
     run_one(airi_process_elf_start, (size_t)((uintptr_t)airi_process_elf_end - (uintptr_t)airi_process_elf_start), "processes", 0, true, false, true); // 真实多进程复制、抢占、阻塞与回收。
+    run_one(airi_files_elf_start, (size_t)((uintptr_t)airi_files_elf_end - (uintptr_t)airi_files_elf_start), "files", 0, true, false, false); // 文件内容、共享偏移与exec引用回收。
     airi_log("[USER_DEMO_OK] ring=3 syscall=int80 bad_pointers=2 user_gp=13 user_pf=14 bad_rsp=rejected reclaimed=1"); // 完整会话结束，仍回串口命令。
 }
 
 bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
     size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
     if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
-        airi_console_print(console, "programs: hello processes worker broken"); // broken是明确损坏的演示输入。
+        airi_console_print(console, "programs: hello processes worker broken files"); // broken是明确损坏的演示输入。
         return true; // 已处理，不再交给图形扩展。
     }
     if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。

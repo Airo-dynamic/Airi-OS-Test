@@ -36,3 +36,30 @@ void airi_yield(void) { // 可主动让出，但抢占工作负载不使用它�
 long airi_exec(const char *name) { // 成功进入新_start，只有失败才返回这条旧调用链。
     return call3(7, (uintptr_t)name, 0, 0); // 当前只传程序名，argv由内核建立单项。
 }
+
+static long call4(long number, uint64_t first, uint64_t second, uint64_t third, uint64_t fourth) { // 前三参数与call3相同，显式偏移需要第四槽。
+    register uint64_t r10 __asm__("r10") = fourth; // C寄存器变量固定到自有ABI的R10。
+    __asm__ volatile("int $0x80" : "+a"(number) : "D"(first), "S"(second), "d"(third), "r"(r10) : "memory", "cc"); // 陷入现场完整保存R10。
+    return number; // 负错误保持原样。
+}
+long airi_open(const char *path, unsigned flags) { // 路径由内核有界复制。
+    return call3(11, (uintptr_t)path, flags, 0); // FD是当前进程的编号。
+}
+long airi_close(unsigned fd) { // 释放一个表项引用。
+    return call3(12, fd, 0, 0); // 已关闭再关闭为-9。
+}
+long airi_dup(unsigned fd, unsigned cloexec) { // 不重新open文件。
+    return call3(13, fd, cloexec, 0); // 新表项的标志独立。
+}
+long airi_seek(unsigned fd, uint64_t offset) { // 自有接口没有whence参数。
+    return call3(14, fd, offset, 0); // 返回绝对偏移。
+}
+long airi_read(unsigned fd, void *buffer, size_t bytes) { // 同步读至当前用户可写范围。
+    return call3(10, fd, (uintptr_t)buffer, bytes); // 返回数不能直接假定等于bytes。
+}
+long airi_pread(unsigned fd, void *buffer, size_t bytes, uint64_t offset) { // 显式偏移不修改共享打开位置。
+    return call4(15, fd, (uintptr_t)buffer, bytes, offset); // R10传偏移，不借用用户栈参数布局。
+}
+long airi_pwrite(unsigned fd, const void *buffer, size_t bytes, uint64_t offset) { // 与pread使用同一第四参数约定。
+    return call4(16, fd, (uintptr_t)buffer, bytes, offset); // 写也可能短于请求。
+}

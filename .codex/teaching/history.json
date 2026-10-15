@@ -154,6 +154,11 @@
       "id": "L03",
       "title": "L03 · Linux进程替换、COW与FD继承",
       "document": "dev-log/linux/03-process.md"
+    },
+    {
+      "id": "K24",
+      "title": "K24 · RAM文件、FD引用与显式偏移读写",
+      "document": "dev-log/core/24-files.md"
     }
   ]
 }

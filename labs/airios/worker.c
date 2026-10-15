@@ -13,5 +13,12 @@ int main(int argc, char **argv) { // exec成功应从_start重建argc/argv，而
     page[0] = 7; // 新映像拥有自己的可写页。
     zeroed[sizeof(zeroed) - 1] = 9; // BSS尾页也可写。
     airi_puts("[EXEC_WORKER_OK] argv=worker heap=zeroed bss=new\n"); // 真实来自新ELF的用户输出。
+    char inherited[2]; // files工作负载把只读seed保留在FD0，普通worker没有FD0。
+    long inherited_bytes = airi_read(0, inherited, 2); // 成功exec后的新程序消费同一打开对象。
+    if (inherited_bytes != -9) { // 只有明确继承文件的调用才做这组检查。
+        if (inherited_bytes != 2 || memcmp(inherited, "cd", 2) || airi_read(3, inherited, 1) != -9) // CLOEXEC表项已关闭，普通偏移继续。
+            return 24; // 父亲期望23，因此错误不能被吞掉。
+        airi_puts("[FD_EXEC_OK] inherited=0 closed=3 offset=4\n"); // 来自新ELF中的真实读结果。
+    }
     return 23; // 父进程应仍通过原孩子PID取得这个状态。
 }
