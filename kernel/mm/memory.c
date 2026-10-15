@@ -164,3 +164,46 @@ void airi_memory_snapshot(struct airi_memory_stats *stats) { // 目前单核不�
     stats->heap_bytes = heap.bytes; // 已映射的总backing字节。
     stats->heap_free = airi_heap_free_bytes(&heap); // 空闲对象payload，不包含块头。
 }
+
+bool airi_memory_region_create(struct airi_kernel_region *region, uint64_t address, unsigned count) { // 调用者清零句柄并保证没有并发操作这个对象。
+    if (!region || region->count || !count || count > AIRI_REGION_PAGES || address % AIRI_PAGE_SIZE || address < 0xffff800000000000ull || address > UINT64_MAX - count * AIRI_PAGE_SIZE) // 只接受新的有界内核范围。
+        return false; // 参数错误不改变任何页或映射。
+    for (unsigned i = 0; i < count; ++i) // 先验证整个范围没有被其他服务映射。
+        if (airi_vm_lookup(&kernel_space, address + i * AIRI_PAGE_SIZE, NULL, NULL)) // 覆盖已有对象会破坏所有权。
+            return false; // 尚未借出页面，可以原样拒绝。
+    region->virtual_address = address; // 保存本次区域的虚拟位置。
+    while (region->count < count) { // 每成功一页才增加持有数量。
+        uint64_t physical = airi_page_alloc(&pages); // 数据页的所有权先归本次创建操作。
+        if (!physical) // 页池耗尽，没有本次页可归还。
+            break; // 统一回滚已经成功的页面。
+        if (!airi_vm_map(&kernel_space, address + region->count * AIRI_PAGE_SIZE, physical, AIRI_VM_WRITE)) { // 映射为supervisor读写NX。
+            airi_page_free(&pages, physical); // 本次数据页未接入，立即归还。
+            break; // 之前已经接入的页面由统一出口解除。
+        }
+        region->physical[region->count++] = physical; // 记录物理地址后才增加有效数量。
+    }
+    if (region->count != count) { // 不提供只建成一部分的区域。
+        if (region->count && !airi_memory_region_free(region)) // 只有实际持有页时才回滚；内部映射必须仍匹配句柄。
+            airi_panic("cannot roll back partial kernel region"); // 不清掉无法归还的所有权记录后假装无泄漏。
+        airi_memset(region, 0, sizeof(*region)); // 失败句柄恢复无所有权状态。
+        return false; // 调用者没有取得可访问区域。
+    }
+    airi_memset((void *)(uintptr_t)address, 0, count * AIRI_PAGE_SIZE); // 完整映射后清除旧页面内容。
+    return true; // 句柄拥有数据页及对应映射，不能复制出第二个释放者。
+}
+bool airi_memory_region_free(struct airi_kernel_region *region) { // 调用前必须离开该区域，包括不能还在它的任务栈上执行。
+    if (!region || !region->count || region->count > AIRI_REGION_PAGES) // 空句柄和损坏容量不能参与回收。
+        return false; // 不猜测曾经持有的页面。
+    for (unsigned i = 0; i < region->count; ++i) { // 先完整验证所有映射仍对应句柄记录。
+        uint64_t physical; // 保存软件翻译结果。
+        if (!airi_vm_lookup(&kernel_space, region->virtual_address + i * AIRI_PAGE_SIZE, &physical, NULL) || physical != region->physical[i]) // 不归还已被别处替换的范围。
+            return false; // 验证失败不拆任何映射。
+    }
+    while (region->count) { // 由末尾逆序解除映射。
+        --region->count; // 当前槽位仍有真实页面所有权。
+        if (!airi_vm_unmap(&kernel_space, region->virtual_address + region->count * AIRI_PAGE_SIZE) || !airi_page_free(&pages, region->physical[region->count])) // 先断链接和失效，之后才归还数据页。
+            airi_panic("kernel region ownership changed during release"); // 内部不变量破坏时不继续双重释放。
+    }
+    airi_memset(region, 0, sizeof(*region)); // 成功后句柄不能再次释放同一组页面。
+    return true; // 当前没有遗留的数据页借用。
+}

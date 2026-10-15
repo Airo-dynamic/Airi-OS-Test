@@ -1,0 +1,29 @@
+checkpoint: K19
+baseline: baseline.yaml
+start: K18
+current_operation: 两个内核任务在独立栈上主动交接，启动任务回收，坏栈由DF独立栈报告
+already_explained:
+- concept: 页映射和归还顺序
+  at: ../../../dev-log/core/16-virtual-memory.md#lookup-unmap
+  establishes: 先断链接和失效，再归还数据与空表
+- concept: 中断现场与时钟
+  at: ../../../dev-log/core/18-timer.md#timer-entry
+  establishes: IRQ保存完整现场，但本阶段只计数不调度
+first_use:
+- concept: 内核区域所有权句柄
+  at: ../../../dev-log/core/19-kernel-tasks.md#stack-region-owner
+  establishes: 明确持有物理页与映射，借用结束前不能释放，失败回滚已成功部分
+- concept: 主动切栈和普通C ABI
+  at: ../../../dev-log/core/19-kernel-tasks.md#switch-call-abi
+  establishes: call已保存返回地址，六个callee-saved寄存器加RSP恢复另一调用链
+- concept: 首次任务栈和状态机
+  at: ../../../dev-log/core/19-kernel-tasks.md#task-first-stack
+  establishes: 预制返回入口和对齐，DONE不可再调度，启动任务在别的栈上回收
+- concept: 保护页与双重故障IST
+  at: ../../../dev-log/core/19-kernel-tasks.md#guard-double-fault
+  establishes: 坏内核栈无法压PF现场，需要DF独立栈报告；故障演示停止
+not_assumed:
+- 用户态、进程地址空间、抢占调度、阻塞等待、ELF
+limits:
+- 只有一次启动演示，不提供可反复创建的完整线程API
+- 运行不记录为读者掌握

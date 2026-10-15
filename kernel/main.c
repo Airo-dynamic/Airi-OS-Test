@@ -1,3 +1,4 @@
+#include <airi/task.h> // 两个独立栈内核任务主动交接并回收。
 #include <airi/timer.h> // 内存建立后开始真实设备中断。
 #include <airi/memory.h> // 通过内存服务建立页池、页表、堆并查询快照。
 #include <airi/trap.h> // 安装异常表并演示处理器现场。
@@ -38,6 +39,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
     airi_memory_init(info); // 只借出完整 usable 页，并在真实 RAM 演示写入与归还。
     airi_timer_demo(); // 从PIT/PIC收到真实IRQ0，hlt后恢复到正常上下文。
+    airi_task_demo(); // 当前只在正常内核上下文主动切换，IRQ不抢占内核任务。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
     console.read_memory = airi_memory_snapshot; // 文本查询只读取数值，不持有分配器内部对象。
     bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。

@@ -124,6 +124,11 @@
       "id": "K18",
       "title": "K18 · 用真实时钟IRQ唤醒CPU",
       "document": "dev-log/core/18-timer.md"
+    },
+    {
+      "id": "K19",
+      "title": "K19 · 两个任务沿各自的栈暂停和继续",
+      "document": "dev-log/core/19-kernel-tasks.md"
     }
   ]
 }
