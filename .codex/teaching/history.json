@@ -9,6 +9,11 @@
       "id": "00",
       "title": "00 · 从空目录找到并运行一个程序",
       "document": "dev-log/00-first-tool.md"
+    },
+    {
+      "id": "01",
+      "title": "01 · 让构建使用正确的一份工具",
+      "document": "dev-log/01-tools.md"
     }
   ]
 }

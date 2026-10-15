@@ -1,0 +1,28 @@
+checkpoint: '01'
+baseline: baseline.yaml
+start: '00'
+current_operation: 为内核与主机观察分别选出工具
+already_explained:
+- concept: 进程、环境变量和搜索结果
+  at: ../../../dev-log/00-first-tool.md#tool-process
+  establishes: 可执行文件与一次运行不同；PATH 搜索返回路径字符串或 None；异常把失败交回入口
+first_use:
+- concept: 路径对象与交叉工具
+  at: ../../../dev-log/01-tools.md#tool-paths
+  establishes: ROOT 从源码位置取得；Path 的 / 拼接路径；LLVM 工具为 guest 生成代码，HOST_CC 构建主机程序
+borrowed:
+- component: GNU Make 与 LLVM/宿主编译器
+  contract: 本章仅选工具并组参数；目标内核编译与主机编译分开
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 路径库、查找策略和 Make 参数需要连接到同一次工具选择。
+  revision: 沿选择内核编译器解释 ROOT、显式覆盖、Homebrew、PATH 与返回的参数列表。
+- source: 本轮独立连续复敲
+  observation: 旧画像错误声称本章有工具规格字典，实际只有环境映射与路径候选
+  revision: 改为本章实际的 os.environ 和 Homebrew 前缀元组，正文与实现保持一致
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 路径对象、候选元组和环境覆盖
+  at: ../../../dev-log/01-tools.md#code-scripts-tools-py-2
+  establishes: Path 的 / 拼出候选路径；os.environ 按变量名提供主机环境字符串，候选元组列出两个 Homebrew 安装前缀；显式环境覆盖无效时失败，不自动改选其他工具
+  status: 本版就地解释；不推断读者已掌握

@@ -15,12 +15,30 @@
         "python3 scripts/probe.py  # 执行脚本默认的 python3 查找和版本探测\nif python3 scripts/probe.py airi_no_such_tool; then exit 1; fi  # 故障应返回非零；若意外成功，then 以 1 中止此组观察"
       ],
       "reader": ".codex/teaching/readers/00.yaml"
+    },
+    {
+      "id": "01",
+      "track": "core",
+      "title": "01 · 让构建使用正确的一份工具",
+      "document": "dev-log/01-tools.md",
+      "requires": [
+        "00"
+      ],
+      "files": {
+        "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+        "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+      },
+      "commands": [
+        "PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开\nfrom tools import tool, make_command  # 分别取得可执行路径和完整的 Make 参数列表\nprint(tool('cc'))  # 打印实际找到的主机编译器路径，尚未运行编译器\nprint(make_command(target='kernel'))  # 打印内核构建参数，当前未启动 Make\nPY\nif AIRI_CLANG='' PYTHONPATH=scripts python3 -c 'from tools import tool; tool(\"clang\", \"llvm\")'; then exit 1; fi  # 显式空路径必须失败；若意外返回成功则以非零中止"
+      ],
+      "reader": ".codex/teaching/readers/01.yaml"
     }
   ],
   "owned": [
-    "scripts/probe.py"
+    "scripts/probe.py",
+    "scripts/tools.py"
   ],
   "endpoints": [
-    "00"
+    "01"
   ]
 }
