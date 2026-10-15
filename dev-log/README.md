@@ -35,7 +35,7 @@
 
 ## 组合可选图形停点
 
-main 的基础18节点之后已追加 K14–K28 和 L02–L04，共36节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
+main 的基础18节点之后已追加 K14–K33 和 L02–L08，共45节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
 
 图形的运行前置另行声明：运行需主线到 K11，G24 的 guest 接入需 K13。合并 gui 后出现独立的 graphics.json，learn 才增加图形节点；未合并时，主线列表、导出和快照只处理 main。
 
@@ -49,4 +49,6 @@ main 的基础18节点之后已追加 K14–K28 和 L02–L04，共36节点。gu
 
 [当前验证](../docs/verification.md)记录实际运行和未验证平台；[系统实践地图](../docs/system-practice.md)说明这些机制怎样回到 BOSS、Taishan 和以前的网络库。
 
-完成 K13 和 L01 后，从 [K14 异常入口](core/14-exceptions.md) 连续到 [K17 内核堆](core/17-kernel-heap.md)，再读 [L02 Linux 内存](linux/02-memory.md)。K18–K23继续用户进程，K24–K28完成FD、管道和存储，L03–L04补进程与Linux文件对照。源码与教程每节都有独立停点，自己的 day2 目录仍按03开始，不需要导入新内核成品。
+完成 K13 和 L01 后，从 [K14 异常入口](core/14-exceptions.md) 连续到 [K17 内核堆](core/17-kernel-heap.md)，再读 [L02 Linux 内存](linux/02-memory.md)。K18–K23继续用户进程，K24–K28完成FD、管道和存储，K29–K33继续等待、异步与用户shell；L03–L08补进程、Linux文件、线程、epoll和io_uring对照。源码与教程每节都有独立停点，自己的 day2 目录仍按03开始，不需要导入新内核成品。
+
+[首轮完整演示](core/33-shell-pipeline.md)与[知识地图](../docs/knowledge-map.md)可用于回查整条路径，Linux实际环境限制见[Linux集合](linux/README.md)。

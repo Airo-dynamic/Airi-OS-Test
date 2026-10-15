@@ -1,0 +1,65 @@
+{
+  "phase": "P6",
+  "date": "2026-10-16",
+  "kernel_checkpoint": "K33",
+  "kernel_commit": "06b810c",
+  "linux_checkpoint": "L08",
+  "core": {
+    "host_ASan_UBSan_groups": 8,
+    "boot_profiles": 9,
+    "console_paths": 3,
+    "user_shell_boots": 1,
+    "storage_io_session_boots": 3,
+    "passed": true
+  },
+  "isolated_reconstruction": {
+    "directory": "/tmp/airios-k33-followalong",
+    "build": true,
+    "boot": true,
+    "real_shell_io_demo": true
+  },
+  "graphics": {
+    "gui_commit": "1dcf1920185fc14bfad2e96e82794b8ca42dc6f0",
+    "boot_profiles": 9,
+    "console_paths": 3,
+    "storage_io_session_boots": 3,
+    "ui_snapshots": 84,
+    "contrast_combinations": 58,
+    "graphical_run_sh_returns_with_UART_instruction": true,
+    "Day_Night_images_visually_reviewed": true,
+    "passed": true
+  },
+  "routes": {
+    "main": 45,
+    "graphics": 15,
+    "dependency_closed_pairs": 675,
+    "newer_main_bytes_never_rolled_back": true,
+    "early_graphics_may_require_K11_K13": true,
+    "day_00_02_fixed": true,
+    "snapshots_generated": 45,
+    "edited_HISTORY_rejected": true,
+    "existing_learner_directory_unchanged": true
+  },
+  "teaching": {
+    "checkpoints": 45,
+    "owned_implementation_files": 125,
+    "comment_blocks": 405,
+    "blocks_below_0_99": 0,
+    "links": 123
+  },
+  "linux": "L01-L08 full Linux branches not compiled or run. Personal SSH255; Mac rejection paths/shell syntax only. No performance measurements or Linux success claimed.",
+  "logs": [
+    "/tmp/airios-k33-tests.log",
+    "/tmp/airios-k33-isolated-run.log",
+    "/tmp/airios-p6-gui-tests.log",
+    "/tmp/airios-p6-gui-ui.log",
+    "/tmp/airios-p6-graphical-shell-guard.log",
+    "/tmp/airios-final-route-check.log",
+    "/tmp/airios-final-snapshots.log"
+  ],
+  "limits": [
+    "No graphical user TTY, WebUI, board port or independent AiriBoot loader implemented",
+    "Single CPU, nonpreemptible kernel, static ELF, bounded copied buffers, one hardware request in flight",
+    "Crash model and QEMU process restart are not host power loss"
+  ]
+}

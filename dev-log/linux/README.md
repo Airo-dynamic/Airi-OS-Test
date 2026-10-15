@@ -1,13 +1,20 @@
 # Linux对照：把内核机制接回实际开发
 
-Linux实验与内核实现共同构成主线。自制内核让机制可见，Linux实验提供实际工作中的接口、错误与观察工具；两者结论分别标明环境。
+Linux实验与自制内核共同构成主线。以下各章提供完整源码、执行脚本、观察命令和错误出口，没有图形前置。每个阶段在个人x86-64 Linux主机airi@ssh.airi-dynamic.top的AiriOS-labs下使用独立目录。
 
-当前已提供[L01 · 程序入口、函数调用与系统调用](01-entry.md)，从K13继续，无图形前置。`./airios linux-lab`在个人x86-64 Linux主机的独立目录构建两个程序，`./airios kernel-debug`用同一主机的GDB观察本机QEMU。远端需已有SSH访问与编译、ELF检查和调试工具；具体要求及输出路径在L01相应操作前说明。
+| 章节 | 观察的问题 | 命令phase |
+| --- | --- | --- |
+| [L01 · 程序入口](01-entry.md) | 普通C与无libc、ELF、_start、寄存器与退出 | p1 |
+| [L02 · 虚拟与驻留](02-memory.md) | mmap、触页、RSS、mprotect与故障 | p2 |
+| [L03 · 进程替换](03-process.md) | COW、fork/exec/wait、FD与CLOEXEC | p3 |
+| [L04 · 存储与同步](04-storage.md) | 向量短I/O、页缓存、直接I/O、预分配、同步替换 | p4 |
+| [L05 · 线程和futex](05-threads.md) | 有界队列、条件谓词、原子发布与比较入睡 | p5-threads |
+| [L06 · TCP就绪](06-epoll.md) | epoll LT/ET、排空、背压与半关闭 | p5-epoll |
+| [L07 · io_uring完成](07-uring.md) | 部分提交、cookie、短读、错误CQ与缓冲寿命 | p5-uring |
+| [L08 · 同负载对照](08-comparison.md) | 同一TCP回显的同步、epoll与io_uring等待位置 | p6 |
 
-2026-10-15的作者运行在SSH阶段返回255，本版尚无远端程序与GDB停点证据。P1旧记录的连接失败可能只在终端；当前执行器在连接前即记录verified=false，连接失败保存connection.log；已进入实验或调试会话后的输出才会写入对应记录；判断本次结果时还要区分复用目录里的旧文件。当前状态见[验证说明](../../docs/verification.md)。
+例如执行 `./airios linux-lab --phase p5-epoll`。GDB与内核停点操作在L01–L03，`./airios kernel-debug`使用同一主机观察本机QEMU。各章给出具体依赖包名；缺库、权限拒绝和超时都不发布成功。
 
-[L02 · 虚拟范围、驻留和权限](02-memory.md)已提供完整mmap/mprotect/故障子进程程序与GDB操作；`./airios linux-lab --phase p2`选择独立目录，本轮仍因SSH255未验证Linux运行。后续与内核阶段同期提供完整程序、命令和解释，范围见[系统实践地图](../../docs/system-practice.md)：内存与缺页、文件和向量I/O、同步与原子替换、线程等待、epoll与io_uring。当前已提供L01、L02与L03的实现，不把这些计划实验列为已交付。
+2026-10-15至16的本轮个人SSH均返回255，错误为Connection closed by UNKNOWN port 65535。只读检查确认连接经cloudflared access ssh代理，未修改认证、网络或系统策略。Linux分支编译、程序、GDB/strace及文件系统能力尚未验证。Mac对环境拒绝分支的编译与返回77不能替代Linux运行，guest通过也不能替代Linux。每阶段remote.json在连接前撤销旧成功，connection.log保存实际失败；判断新运行时还需区分旧目录残留文件。
 
-[L03 · 进程替换、COW与FD继承](03-process.md)从K23继续，观察同一PID换映像、共享打开文件偏移及CLOEXEC；本轮远端仍为SSH255未验证。
-
-[L04 · 向量I/O、文件缓存、直接I/O与同步替换](04-storage.md)从K27继续。Linux分支、strace和FS能力本轮仍因SSH255未验证；Mac只编译拒绝分支，不能替代Linux编译。
+[验证记录](../../docs/verification.md)、[系统实践地图](../../docs/system-practice.md)与[知识地图](../../docs/knowledge-map.md)分别说明实际证据、项目问题和未覆盖范围。

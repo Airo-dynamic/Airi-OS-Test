@@ -35,7 +35,8 @@ K11 把文本会话与显示实现分开，默认构建只链接串口实现。K
 - [K30 · 块设备begin/poll与所有权](30-block-begin-poll.md)
 - [K31 · 有界SQ/CQ、注册缓冲与晚完成](31-async-queues.md)
 - [K32 · 用户异步I/O与进程资源轮次](32-user-async.md)
-- [后续阶段 · 块设备、日志与等待](next.md)
+- [K33 · 用户shell与完整存储I/O演示](33-shell-pipeline.md)
+- [首轮完成与可选扩展](next.md)
 
 K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接到当前终端，按 Ctrl-A 后按 X 退出；后者使用独立 QEMU 进程、日志和截止时间，检查启动与输入。默认构建只需主线源码、工具和引导材料。
 

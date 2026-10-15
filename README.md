@@ -2,7 +2,7 @@
 
 AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于理解和开发 BOSS、Taishan 这类系统。教程从空目录逐步写出内核、构建、验证与平台适配。内核和 Linux 对照是必修主线，图形工作站在独立的 gui 分支中推进。
 
-从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)：00–02 的实现字节保持不变，正文只作必要澄清。K14–K17 完成异常与内存，K18–K23 完成时钟、任务、用户态、静态ELF和最小fork/exec/wait；K24–K28已完成RAM文件与FD、非阻塞管道、VirtIO块设备、同步追加日志和跨QEMU恢复。L01–L04提供Linux入口、内存、进程和存储对照，远端仍因SSH255未验证。阻塞、就绪等待与异步I/O继续按后续检查点推进。
+从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)，00–02 的实现字节保持不变。K14–K17 完成异常与内存，K18–K23 完成用户进程，K24–K28 完成文件、管道、VirtIO 与日志，K29–K32 完成阻塞等待和有界异步 I/O；[K33](dev-log/core/33-shell-pipeline.md) 用真实用户态 shell 串起分配、文件、任务切换、设备完成与继续运行。L01–L08 提供同期 Linux 对照，当前个人主机 SSH255，Linux 实际运行仍未验证。
 
 ## 默认从串口运行
 
@@ -15,7 +15,7 @@ AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于�
 ./airios test
 ```
 
-run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run storage/run recover。按 Ctrl-A 后按 X 退出 QEMU。test 检查基础库、启动合同、九种带超时的启动、真实 UART/PS/2 输入，以及双QEMU存储恢复。
+run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run waits/run async/run storage/run recover。输入 run sh 进入用户态 shell，再输入 programs、demo、storage、recover、exit。按 Ctrl-A 后按 X 退出 QEMU。test 运行八组 ASan/UBSan 主机检查、九种带超时启动、三条 UART/PS/2 输入路径、一组真实用户 shell 会话与三次存储/I/O 会话启动（含跨 QEMU 恢复和真实限速）。
 
 主机需要 Python 3.12+、LLVM/LLD、GNU Make、QEMU、xorriso 和 mtools。macOS 可执行 `brew install llvm lld qemu xorriso mtools make`。虚拟机固定为 q35、单 CPU、256 MiB 和 OVMF UEFI，Apple Silicon 使用 TCG。工具选择、外部来源与依赖校验由教程 00–02 展开。
 
@@ -23,7 +23,7 @@ run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、d
 
 | 分支 | 检查点 | 内容与运行条件 |
 | --- | --- | --- |
-| main | 36 个：00–10、K11–K28、L01–L04、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
+| main | 45 个：00–10、K11–K33、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
 | gui | 15 个：G11–G24、G26 | 从 main 的 00 根提交分叉，只增加图形自己的路径；合入任一现有 main 阶段均不覆盖主线文件 |
 
 合入源码与开始运行是两件事。图形代码可以先合入较早的 main 检查点，运行需主线到 K11；G24 的 guest 接入需 K13。G11–G23 先提供宿主观察，G26 提供完整图形检查。默认构建继续选择串口实现，不读取字体，也不链接 Cocoa。
@@ -44,12 +44,12 @@ git merge origin/gui # 只加入支线拥有的图形实现与资料。
 ./airios test --graphics # 完成 G26 后执行完整图形回归。
 ```
 
-ui-preview 是 macOS 原生参考窗口。Files/Editor 使用参考进程的会话内存文件，退出后重置；Run 报告执行服务未接入。guest 图形读取真实启动信息和文本控制台，F1–F4 切换视图，theme day/theme night 由图形消费者处理。串口命令没有主题功能。
+ui-preview 是 macOS 原生参考窗口。Files/Editor 使用参考进程的会话内存文件，退出后重置；Run 报告执行服务未接入。guest 图形读取真实启动信息和文本控制台，F1–F4 切换视图，theme day/theme night 由图形消费者处理。串口命令没有主题功能。图形 Terminal 当前没有用户 TTY；run sh 会提示从串口入口运行，避免窗口等待未接入的输入。
 
 ## Linux 对照与检查点导出
 
 ```sh
-./airios linux-lab
+./airios linux-lab --phase p5-threads # p1/p2/p3/p4/p5-threads/p5-epoll/p5-uring/p6分别保存证据。
 ./airios kernel-debug
 ./airios learn list
 ./airios learn export K13 /tmp/airios-core-reference
@@ -68,6 +68,6 @@ Linux/GDB 默认只连接个人主机 airi@ssh.airi-dynamic.top。运行证据�
 
 组合只应用一次共享基础，图形停点不会把主线文件退回旧版。snapshots 在 HISTORY 中生成独立检查点目录；有图形清单时也生成包含所需主线基础的图形快照。已有导出目录不覆盖，HISTORY 中被编辑的快照会阻止重新生成。个人学习位置单独记录，不推断理解程度。
 
-[架构](docs/architecture.md)解释服务、文本与显示的边界，[系统实践地图](docs/system-practice.md)连接项目场景，[路线](docs/roadmap.md)列出后续内核阶段。[AiriBoot](boot/AiriBoot/README.md)是独立的 UEFI 引导子项目。原始代码采用 MIT 许可，外部来源见 [THIRD_PARTY](THIRD_PARTY.md)。
+[架构](docs/architecture.md)解释服务、文本与显示的边界，[系统实践地图](docs/system-practice.md)连接项目场景，[路线](docs/roadmap.md)列出已实现阶段和扩展边界，[知识地图](docs/knowledge-map.md)区分实现、待实测实验与尚未覆盖内容。[AiriBoot](boot/AiriBoot/README.md)是独立的 UEFI 引导子项目。原始代码采用 MIT 许可，外部来源见 [THIRD_PARTY](THIRD_PARTY.md)。
 
 P2 带敲入口：[K14 异常](dev-log/core/14-exceptions.md) → [K15 物理页](dev-log/core/15-physical-pages.md) → [K16 页表与权限](dev-log/core/16-virtual-memory.md) → [K17 内核堆](dev-log/core/17-kernel-heap.md) → [L02 Linux 内存](dev-log/linux/02-memory.md)。`./airios linux-lab --phase p2` 保存本轮实际连接与运行状态，连接失败不记为 Linux 验证成功。

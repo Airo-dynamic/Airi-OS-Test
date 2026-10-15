@@ -1,5 +1,15 @@
 # 当前路线的验证
 
+## 当前P2–P6状态（2026-10-16）
+
+K14–K33内核参考实现、完整带敲正文、读者资料及逐节点源码身份已提供。K33的完整test实际通过八组ASan/UBSan主机检查、九种带超时启动、三条真实UART/PS2输入、一组用户shell会话及三次存储/I/O会话启动。shell会话验证实际ring3解析、fork/exec/wait、用户页、RAM文件、设备WRITE/FLUSH/READ读回，QMP实际1 IOPS下另一个用户在父CQ等待区间内推进，失败exec、长行、退格/CRLF、退出后monitor输入均通过。
+
+K33从正文导出到新的/tmp/airios-k33-followalong，独立构建、启动与同一shell演示通过。各K14–K32检查点也分别保留本轮隔离构建/启动证据。当前main无frontend、字体或Cocoa，默认test不导入图形模块。图形回归在独立worktree合入原gui分支，九种启动、三条输入和三次存储/I/O会话通过，ui-test通过84张快照与58项颜色组合；Day/Night实际查看。额外PS/2输入run sh验证明确返回UART入口提示，桌面继续操作。详见[P6记录](../.codex/teaching/validation/P6.json)，不把宿主参考服务当guest功能。
+
+L01–L08代码、解释和运行脚本已提供，本轮个人主机SSH255，Linux完整分支编译、程序运行、GDB/strace、O_DIRECT/文件系统能力和liburing支持均未验证。L05–L08的Mac环境拒绝分支编译/返回77及Shell语法通过，不能代替Linux验证。未使用公司主机；只读确认SSH经cloudflared access ssh代理，未修改认证与网络配置。每阶段remote.json保留verified=false和真实连接错误。
+
+当前45个主线节点、125份自有实现可从教程重建，675种main/GUI组合按声明前置核对；45份HISTORY快照生成，编辑保护在一次性副本通过；原生旁注只读审查405块，均达到99%位置覆盖阈值，另作机制与源码核对。这些结果不证明真实读者已经理解。单核固定平台、内核不可抢占、静态ELF、固定副本缓冲、单在途设备和UART单输入均为当前边界；[知识地图](knowledge-map.md)列出未覆盖内容。下面记录按当时检查点保留，不代表当前仍缺已完成的功能。
+
 P4内核已推进到K28：七组ASan/UBSan主机观察、九种启动、三条实际UART/PS2输入和双QEMU恢复全部通过。VirtIO验证真实扇区读写、FLUSH、只读写拒绝、缺设备及漏发布索引后的真实PIT超时；日志验证真实位损坏恢复与16条明确缓存模型故障；管道验证短写、FIFO回绕、EOF、EPIPE及父子端点引用。正常启动只扫描正式日志，不自动追加。K24–K27各自正文导出后编译、启动，K27另外从导出源码跑双启动恢复。
 
 L04本轮仍为SSH255。Linux分支编译、strace、O_DIRECT与文件系统能力均未验证；Mac只编译环境拒绝分支并返回77。当前尚无阻塞管道、就绪订阅、异步提交/完成队列或用户shell；后续P5–P6继续。图形回归按独立合并记录，不把宿主参考Files当持久文件系统。
