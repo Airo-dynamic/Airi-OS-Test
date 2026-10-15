@@ -1,0 +1,53 @@
+checkpoint: G26
+baseline: baseline.yaml
+start: G24
+current_operation: 在同一份未保存文档上切换主题，按相同场景比较实际状态和像素
+already_explained:
+- concept: 桌面拥有主题，绘图逐帧解析颜色
+  at: ../../../dev-log/graphics/18-applications.md#theme-owner
+  establishes: Settings和console同步命令扩展都修改desktop.theme；ui_draw选调色板，文档、saved与窗口仍由原desktop持有。
+- concept: 文档工作副本与保存点
+  at: ../../../dev-log/graphics/17-editing.md#edit-save-run
+  establishes: 保存成功才更新saved和dirty，服务失败保留输入
+- concept: 平台像素借用
+  at: ../../../dev-log/graphics/23-native-window.md#display-lifetime
+  establishes: Cocoa图像读取期间pixels有效，完成后先释放包装而非像素
+- concept: 真实设备命令完成
+  at: ../../../dev-log/core/12-boot-tests.md#console-observation
+  establishes: PS/2输入后只等待旧日志末尾之后的新完成标记，再截本轮guest帧
+first_use:
+- concept: 从实际调色板导出JSON
+  at: ../../../dev-log/graphics/26-theme-validation.md#actual-palette
+  establishes: C角色值变成RGB整数，Python从编译程序输出取字典，不复制颜色常量
+- concept: 颜色编码和相对亮度
+  at: ../../../dev-log/graphics/26-theme-validation.md#contrast-and-snapshots
+  establishes: 提取三个通道并转换到线性光强，两个亮度排序后计算对比，文字与控件边界采用不同目标
+- concept: 同场景双主题矩阵
+  at: ../../../dev-log/graphics/26-theme-validation.md#contrast-and-snapshots
+  establishes: 29个颜色三元组在两个主题中形成58条结果；42个场景六元组在两个主题中形成84次独立输出。
+- concept: 状态快照比较
+  at: ../../../dev-log/graphics/26-theme-validation.md#state-preservation
+  establishes: 保存独立文本、选择端点和矩形，点击主题后逐项比较，不重建桌面掩盖错误
+- concept: 仪表台切到输入会话后的主题像素观察
+  at: ../../../dev-log/graphics/26-theme-validation.md#code-tests-unit-display-test-c-1
+  establishes: 先画dashboard，再用另一console首次绘图，检查extension存在；再在同一地址初始化清空扩展，重画必须重绑，随后theme day/night使同一底栏像素前三字节改变后恢复。
+borrowed:
+- component: macOS Cocoa与sips
+  contract: 共享C直接输出PPM，sips只转换格式；其他平台不声称生成原生图库
+feedback:
+- source: 用户前端重构后教程要求
+  observation: 原生参数和验证代码不能提前大规模预置，也不能用注释数量代替真实状态说明
+  revision: 23先接最小窗口，26再引入状态和场景；展开嵌套列表推导为当前数据形状清楚的循环
+not_inferred: 运行通过和生成图片不记录为真实读者已掌握
+source_reading:
+- concept: C数组配对、位移取通道与RGB字节
+  at: ../../../dev-log/graphics/26-theme-validation.md#code-frontend-platform-macos-preview-m-1
+  establishes: 角色数组与名字数组同下标，逐像素输出按R/G/B三字节编码
+- concept: Python元组解包和JSON字典
+  at: ../../../dev-log/graphics/26-theme-validation.md#code-scripts-ui-preview-py-1
+  establishes: 当前三元组与六元组具有具体元素身份，palette的键查找返回RGB整数供亮度函数消费
+- concept: 工作副本与保存点分别保留
+  at: ../../../dev-log/graphics/26-theme-validation.md#state-preservation
+  establishes: editor与saved分别复制后逐字比较，窗口矩形、dirty和选区也独立核对，主题只改变颜色偏好
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

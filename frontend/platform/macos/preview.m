@@ -7,7 +7,8 @@ static struct ui_desktop desktop;    // 静态存储整份桌面；事件回调�
 static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
 static AiriBootInfo boot;  // 平台保存启动描述副本，backend.boot 只借用这个稳定地址。
 static struct airi_framebuffer framebuffer;  // 保存软件画布的地址、尺寸、行距和颜色位布局。
-static uint32_t *pixels;  // 指向平台拥有的32位像素数组，静态初值为 NULL。
+static bool control_sheet;  // 快照专用控件表使用共享绘图，不伪装成已接入的应用。
+static uint32_t *pixels;    // 指向平台拥有的32位像素数组，静态初值为 NULL。
 static void size_buffer(int w, int h) {  // w/h 为画布宽高；尺寸变化时重建数组并更新描述。
     if (w < 640)  // 软件画布最小宽度640像素，防止布局缺少空间。
         w = 640;  // 把过小宽度提高到下限。
@@ -35,9 +36,40 @@ static void size_buffer(int w, int h) {  // w/h 为画布宽高；尺寸变化�
                                             .blue_size = 8};   // 蓝通道占八位，未指定 blue_shift 时默认零。
     boot.framebuffer = framebuffer;  // 启动描述副本取得同一画布参数，窗口中的设备信息可以读取。
 }
+static void dump_palette(unsigned mode) {  // 输出实际 C 调色板，检查程序不复制一份颜色常量。
+    const uint32_t roles[] = {U_BG, U_PANEL, U_SURFACE, U_RAISED, U_TEXT, U_MUTED, U_ACCENT, U_BLUE, U_RED, U_WARM, U_PINK, U_CONTROL, U_HOVER, U_PRESSED, U_SUCCESS, U_CHROME, U_INK, U_ON_ACCENT};  // 列出参与可读性检查的角色。
+    const char *names[] = {"BG", "PANEL", "SURFACE", "RAISED", "TEXT", "MUTED", "ACCENT", "BLUE", "RED", "WARM", "PINK", "CONTROL", "HOVER", "PRESSED", "SUCCESS", "CHROME", "INK", "ON_ACCENT"};  // JSON 名称与角色一一对应。
+    u_theme(mode);  // 后续 u_color 解析本次指定主题。
+    printf("{");    // JSON 对象从左花括号开始。
+    for (unsigned i = 0; i < sizeof(roles) / sizeof(roles[0]); ++i)  // 遍历当前角色数组的全部有效项。
+        printf("%s\"%s\":%u", i ? "," : "", names[i], u_color(roles[i]));  // 键是角色名，值是实际 RGB 整数；首项不带逗号。
+    puts("}");  // 关闭对象并补换行，供标准 JSON 解码器读取。
+}
+static void draw_controls(void) {  // 同内容状态表用于比较两个主题的可读性。
+    u_rect(0, 0, desktop.width, desktop.height, U_BG);  // 使用当前主题的桌面表面。
+    u_text(64, 48, "AiriOS / control vocabulary", U_TITLE, U_TEXT);  // 标题说明这是设计校准工具。
+    u_text(64, 88, "Shared renderer / identical states in Day and Night", U_BODY, U_MUTED);  // 同一绘图函数承担全部样本。
+    const char *labels[] = {"Default", "Hover", "Pressed", "Selected", "Keyboard focus", "Disabled"};  // 行标题给出状态语义。
+    unsigned states[] = {U_NORMAL, U_HOT, U_DOWN, U_SELECTED, U_FOCUSED, U_INACTIVE};  // 显式状态避免截图依赖系统鼠标位置。
+    for (unsigned i = 0; i < 6; ++i) {  // 所有样本使用一致的尺寸与间距。
+        int y = 152 + (int)i * 72;  // 每行留下文字与轮廓的观察空间。
+        u_text(64, y + 10, labels[i], U_MEDIUM, U_TEXT);  // 名称独立于颜色，便于识别状态。
+        u_control((struct ui_rect){248, y, 152, 36}, "Save document", states[i]);  // 普通按钮使用真实公共控件。
+        u_control((struct ui_rect){424, y, 152, 36}, "Current item", states[i] | U_SELECTED);  // 选中与各状态组合。
+    }
+    u_text(656, 160, "Information hierarchy", U_LABEL, U_TEXT);  // 右列观察正文与辅助信息。
+    u_text(656, 208, "/home/airi/projects/main.lua", U_MONO, U_TEXT);  // 保留真实路径大小写和常规文字尺度。
+    u_text(656, 248, "0xffff800000200000", U_MONO, U_MUTED);  // 十六进制地址测试细节可读性。
+    u_text(656, 312, "Saved / document is up to date", U_BODY, U_SUCCESS);  // 成功同时有文字说明。
+    u_text(656, 356, "Warning / unsaved changes", U_BODY, U_WARM);  // 警告没有借用品牌色表达。
+    u_text(656, 400, "Error / save failed, input retained", U_BODY, U_RED);  // 错误解释失败后保留的内容。
+    u_text(64, desktop.height - 72, "2 px control radius / 2 px window radius / Plex Sans + Mono", U_BODY, U_MUTED);  // 把可调整参数展示为校准信息。
+}
 static void dump(const char *name) {  // name 是输出文件路径，快照直接使用同一共享绘图。
     ui_draw(&desktop, &framebuffer);  // 共享 C 渲染将当前桌面状态写进平台像素数组。
-    FILE *f = fopen(name, "wb");      // 以二进制写模式创建 PPM，失败返回 NULL。
+    if (control_sheet)  // 只有控件场景覆盖应用画面。
+        draw_controls();  // 状态表仍使用同一画布和本次主题。
+    FILE *f = fopen(name, "wb");  // 以二进制写模式创建 PPM，失败返回 NULL。
     if (!f) {  // 路径不可写或打开失败时不继续往空文件指针写入。
         perror(name);  // 把当前 errno 原因连同输出路径写到标准错误。
         exit(1);  // 以失败状态结束快照进程。
@@ -242,15 +274,22 @@ static void dump(const char *name) {  // name 是输出文件路径，快照直�
 @end  // 结束 AiriDelegate 的生命周期方法实现
 int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL 字符串指针数组。
     @autoreleasepool {  // 离开作用域时处理登记在池内的临时对象，C/CG 资源仍显式释放。
+        bool palette = false;  // 显式调色板模式只输出机器可读颜色。
         int w = 1280;  // 软件画布初始宽度为1280逻辑点。
         int h = 800;   // 软件画布初始高度为800逻辑点。
         int app = UI_EDITOR;  // 默认活动应用是Editor，名称表下标将覆盖它。
-        const char *snapshot = NULL;  // 未给文件路径时运行真实事件循环。
-        const char *theme = "night";  // 初始会话偏好为夜间。
+        int tab = 0;  // 默认使用所选应用的首个页签。
+        const char *snapshot = NULL;    // 未给文件路径时运行真实事件循环。
+        const char *state = "normal";   // 服务状态默认为正常。
+        const char *scenario = "none";  // 没有额外固定场景时直接显示所选应用。
+        const char *theme = "night";    // 初始会话偏好为夜间。
         const char *apps[] = {"terminal", "files",    "editor", "tasks",  // 应用名顺序必须与 enum ui_app 一致，前四项从终端到任务。
                               "system",   "settings", "viewer"};  // 后三项补齐系统、设置和数据查看器。
         for (int i = 1; i < argc; ++i) {  // 跳过 argv[0] 程序名，按顺序读取选项。
-            if (!strcmp(argv[i], "--snapshot") && i + 1 < argc)  // strcmp 返回零表示相等，同时确认后面还有路径参数。
+            if (!strcmp(argv[i], "--palette")) {  // 此开关只要求颜色JSON，不消费后续参数。
+                palette = true;  // 记录提前退出模式，--theme仍继续解析。
+            }
+            else if (!strcmp(argv[i], "--snapshot") && i + 1 < argc)  // strcmp 返回零表示相等，同时确认后面还有路径参数。
                 snapshot = argv[++i];  // 先推进到选项值，再保存由运行时持有的路径指针。
             else if (!strcmp(argv[i], "--size") && i + 1 < argc)  // 尺寸选项同样要求有下一个参数。
                 sscanf(argv[++i], "%dx%d", &w, &h);  // 从1280x800形式读取整数到 w/h；& 传可写变量地址。
@@ -259,9 +298,18 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
                 for (int j = 0; j < UI_APP_COUNT; ++j)  // 只遍历有效应用名称数量。
                     if (!strcmp(a, apps[j]))  // 输入字符串与名称相等才匹配。
                         app = j;  // 名称表下标同时就是后续 UI 应用身份。
-            }
+            } else if (!strcmp(argv[i], "--tab") && i + 1 < argc)  // 页签选项接受整数下标。
+                tab = atoi(argv[++i]);  // 把参数十进制文本转成 int；当前演示调用只传有效数字。
+            else if (!strcmp(argv[i], "--state") && i + 1 < argc)  // 状态选项选择普通或失败视图。
+                state = argv[++i];  // 保存参数字符串，初始化后再转换为状态枚举。
             else if (!strcmp(argv[i], "--theme") && i + 1 < argc)  // 主题用于固定快照，也可作为原生窗口初始偏好。
                 theme = argv[++i];  // 两种模式共享所有内容和布局。
+            else if (!strcmp(argv[i], "--scenario") && i + 1 < argc)  // 场景选项用于固定快照中的工作区或对话框。
+                scenario = argv[++i];  // 借用场景名称，后续按名字修改桌面。
+        }
+        if (palette) {  // 颜色检查不建立窗口或文件参考服务。
+            dump_palette(!strcmp(theme, "day") ? UI_DAY : UI_NIGHT);  // 输出指定模式的实际映射。
+            return 0;  // JSON 输出完成后正常退出。
         }
         struct ui_backend b;     // 局部回调表先由参考服务初始化。
         ui_fixture_backend(&b);  // 重建本进程内的参考文件和任务记录。
@@ -271,6 +319,7 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
         airi_console_init(&console, &boot);  // 终端和界面都读取同一平台启动副本。
         ui_init(&desktop, b, &console);      // 复制回调表，连接 console 并建立桌面初始窗口。
         desktop.theme = !strcmp(theme, "day") ? UI_DAY : UI_NIGHT;  // 桌面持有呈现偏好，文本会话不持有颜色状态。
+        control_sheet = !strcmp(scenario, "controls");  // 控件表只用于宿主视觉验证。
         if (app == UI_VIEWER) {  // Viewer 启动前需先装入一份实际 CSV 数据。
             for (unsigned i = 0; i < desktop.file_count; ++i)  // 遍历有效文件快照。
                 if (strstr(desktop.files[i].name, ".csv")) {  // 找到包含.csv的文件名；strstr 返回匹配位置或 NULL。
@@ -278,9 +327,50 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
                     break;  // 当前匹配已完成，停止这一层循环或分支。
                 }
         }
-        ui_open(&desktop, (enum ui_app)app);    // 最终打开指定应用，枚举值来自名称表匹配。
-        desktop.windows[app].maximized = true;  // 默认把应用内容放到最大化工作区。
-        desktop.monitor = app == UI_EDITOR;     // Editor 场景显示旁边的状态监视区域。
+        ui_open(&desktop, (enum ui_app)app);  // 最终打开指定应用，枚举值来自名称表匹配。
+        desktop.windows[app].tab = (unsigned)tab;  // 保存指定页签；快照调用只传有效非负下标。
+        desktop.windows[app].maximized = true;     // 默认把应用内容放到最大化工作区。
+        desktop.monitor = app == UI_EDITOR;  // Editor 场景显示旁边的状态监视区域。
+        if (!strcmp(state, "empty"))  // empty 显示服务返回零项的状态。
+            ui_service_state(&desktop, UI_EMPTY);  // 把桌面切到空结果视图。
+        else if (!strcmp(state, "loading"))  // loading 显示等待服务结果的状态。
+            ui_service_state(&desktop, UI_LOADING);  // 登记加载中，绘图使用对应状态视图。
+        else if (!strcmp(state, "error"))  // error 显示服务失败状态。
+            ui_service_state(&desktop, UI_ERROR);  // 登记失败，界面提供具体提示与重试动作。
+        else if (!strcmp(state, "offline"))  // offline 表示当前服务不可连接。
+            ui_service_state(&desktop, UI_OFFLINE);  // 离线状态使相关保存动作报告错误。
+        if (!strcmp(scenario, "dialog"))  // dialog 场景主动触发一次未连接的执行请求。
+            ui_command(&desktop, UI_EXECUTE, desktop.editor_id, desktop.editor_name,  // 使用当前真实文档身份与名称请求执行。
+                       desktop.editor);  // 执行输入为当前编辑文本，而非另一个示例字符串。
+        if (!strcmp(scenario, "dirty")) {  // dirty 快照显示未保存关闭确认框。
+            desktop.dirty = true;  // 人为建立未保存显示状态，供固定图像观察。
+            desktop.dialog = UI_DIALOG_CLOSE;  // 关闭动作等待用户处理未保存内容。
+            snprintf(desktop.dialog_title, 64, "Unsaved changes");  // 给确认框写入标题，容量包含 NUL。
+            snprintf(desktop.dialog_text, 256,  // 把操作提示写进256字节说明数组。
+                     "Save with Ctrl-S before closing, or discard changes.");  // 提示当前支持保存或放弃的路径。
+        }
+        if (!strcmp(scenario, "workspace")) {  // workspace 场景组合 Editor 与 Terminal 两个窗口。
+            ui_open(&desktop, UI_TERMINAL);  // 终端打开并置顶。
+            desktop.windows[UI_EDITOR].maximized = false;  // Editor 恢复普通窗口，才能与终端同时展示。
+            desktop.windows[UI_EDITOR].rect = (struct ui_rect){80, 58, w - 364, h - 294};  // 设置 Editor 在当前画布内的位置和大小。
+            desktop.windows[UI_TERMINAL].rect = (struct ui_rect){80, h - 224, w - 364, 182};  // 终端放在下部，坐标随指定尺寸变化。
+            desktop.monitor = true;  // 工作区右侧继续显示状态监视区域。
+        }
+        if (!strcmp(scenario, "save-error")) {  // 通过真实 provider 拒绝不存在的文件身份，构造保存失败。
+            ui_open(&desktop, UI_FILES_APP);  // Files 提供失败动作所在目录的上下文。
+            desktop.windows[UI_FILES_APP].maximized = true;  // 列表显示在完整工作区。
+            desktop.monitor = false;  // 本组重点是列表和错误恢复。
+            desktop.dirty = true;     // 故障后必须保留未保存状态与文本。
+            ui_command(&desktop, UI_SAVE, 9999, desktop.editor_name, desktop.editor);  // 失败来自服务结果，不直接编造错误对话框。
+        }
+        if (!strcmp(scenario, "system-tasks")) {  // 内存和任务取自同一参考 backend。
+            ui_open(&desktop, UI_SYSTEM);  // 底层窗口显示内存页。
+            desktop.windows[UI_SYSTEM].tab = 1;  // 第二页是实际启动描述中的内存地图。
+            desktop.windows[UI_SYSTEM].maximized = true;  // 使用整个工作区显示地址与区间。
+            desktop.monitor = false;  // 不重复显示右侧资源监视。
+            ui_open(&desktop, UI_TASKS_APP);  // 任务窗口浮在内存页的下方区域。
+            desktop.windows[UI_TASKS_APP].rect = (struct ui_rect){w - 756, h - 570, 740, 522};  // 保留上方内存信息可见。
+        }
         if (snapshot) {  // 有输出路径时只生成图片，不进入事件循环。
             dump(snapshot);  // 先共享绘图，再将画布按 PPM 字节布局输出。
             free(pixels);    // 快照写完后释放平台像素数组，再结束当前进程。
