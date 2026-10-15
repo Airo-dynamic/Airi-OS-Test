@@ -1,28 +1,72 @@
-#ifndef AIRI_UI_H  // 当前编译单元尚未包含文件服务接口时才展开
-#define AIRI_UI_H  // 标记文件服务接口已经包含
-#include <airi/boot.h>    // 取得bool、size_t等本次合同所需基础类型
-#define UI_DOC_SIZE 8192  // 每份正文最多8191内容字节，另留一格NUL
-#define UI_FILES 32  // 参考服务和调用者目录快照各有32个记录槽
+#ifndef AIRI_UI_H  // 首次包含才展开下面声明，避免类型重复定义。
+#define AIRI_UI_H  // 标记这个头文件已经进入当前编译单元。
+#include <airi/console.h>  // 取得命令环、按键与视图类型。
+#include "render.h"  // 取得像素、矩形与共享绘图声明。
+#define UI_DOC_SIZE 8192  // 文档总容量含结尾NUL，最多保存8191文本字节。
+#define UI_FILES 32  // 单次文件快照至多32条。
 
-enum ui_mode { UI_REFERENCE };  // 本阶段只有主机内存参考服务
-// 目录创建是当前唯一修改能力，编辑保存等操作到实际使用时加入。
-enum ui_action {  // 目前服务只接受两种创建请求，编号仅在本进程调用中使用
-    UI_CREATE_FILE,  // 明确目录中创建空文字文件
-    UI_CREATE_DIR    // 明确目录中创建目录项
+enum ui_app {  // 应用身份从零递增，与平台名称表和窗口数组下标对应。
+    UI_TERMINAL,   // 终端应用，读取同一console命令对象。
+    UI_FILES_APP,  // 文件列表应用，读取服务快照。
+    UI_EDITOR,     // 维护文档工作副本的编辑器。
+    UI_TASKS_APP,  // 显示任务记录和服务统计。
+    UI_SYSTEM,     // 展示启动、内存、设备与日志。
+    UI_SETTINGS,   // 修改界面主题与密度。
+    UI_VIEWER,    // 绘制已成功解析的CSV数据。
+    UI_APP_COUNT  // 前面有效应用数量，作为数组容量和循环上界。
 };
-struct ui_file {  // 目录快照记录，只包含身份与元信息，不包含正文
-    int id;  // 本服务会话的文件身份，槽号加1，与查询数组下标区分
-    bool directory;  // true为目录，不能当普通正文读取
-    char name[64];   // 不含父目录的名称，最多63字节及NUL
-    char path[128];  // 完整服务路径，最多127字节及NUL
-    unsigned bytes;  // 文档内容字节数，不计终止零
+enum ui_mode { UI_LIVE, UI_REFERENCE };  // 区分内核真实服务与主机会话参考服务。
+enum ui_state { UI_NORMAL, UI_EMPTY, UI_LOADING, UI_ERROR, UI_OFFLINE };  // 列表和动作的可见服务状态，不等同线程调度状态。
+enum ui_action { UI_CREATE_FILE, UI_CREATE_DIR };  // 当前服务仅支持创建普通文件和目录
+enum ui_drag { UI_DRAG_NONE = -1 };  // 尚无指针拖动，初始化值表示无操作
+struct ui_file {  // 服务复制出来的一条文件快照，不保存文件内容。
+    int id;  // 稳定服务身份，排序和筛选不改变它。
+    bool directory;  // 区分目录和普通文件，决定打开后的动作。
+    char name[64], path[128];  // 保存有NUL终止的名称与完整路径，容量分别64/128字节。
+    unsigned bytes;  // 文件内容字节数，目录行可显示其他语义。
 };
-struct ui_backend {  // 回调表副本由调用者保存，文件记录仍归提供者拥有
-    enum ui_mode mode;  // 标明这份数据属于本主机进程的参考服务
-    void *context;      // 每次调用原样传回的私有上下文；本提供者使用静态表
-    unsigned (*files)(void *, const char *, struct ui_file *, unsigned);  // 目录和数组容量输入，返回实际复制条数
-    bool (*read)(void *, int, char *, size_t);  // 按id完整读取正文，容量含NUL，失败不修改输出
-    bool (*action)(void *, const char *, enum ui_action, int, const char *, const char *, char *, size_t);  // 显式目录、创建种类与名称输入，失败原因写给调用者
+/* Providers own service data. A backend error is an interface state, never fake success. */
+struct ui_backend {  // 桌面复制这份服务回调表，服务数据继续由提供方持有。
+    enum ui_mode mode;  // 决定当前服务来自真实内核或主机参考进程。
+    const AiriBootInfo *boot;  // 借用运行期间有效的启动描述，不转移其所有权。
+    const char *label;  // 借用用于标明环境的文字。
+    void *context;      // 不透明服务上下文，回调原样接收并自行解释。
+    unsigned (*files)(void *, const char *, struct ui_file *, unsigned);  // 函数指针接收上下文/目录/输出数组/容量，返回实际条数。
+    bool (*read)(void *, int, char *, size_t);  // 按文件id读取字节到给定容量数组，false表示失败。
+    bool (*action)(void *, const char *, enum ui_action, int, const char *, const char *, char *, size_t);  // 接收目录、动作、id、名称、正文及错误缓冲，返回成功与否。
 };
-void ui_fixture_backend(struct ui_backend *);  // 重置参考服务并填好本阶段三项回调
-#endif  // 结束文件服务接口的重复包含保护
+struct ui_window {  // 一个应用的窗口布局与显示状态。
+    struct ui_rect rect;     // 当前整屏窗口矩形，绘图和命中共用
+    struct ui_rect restore;  // 最大化之前的普通布局，恢复时读回
+    bool open;  // 窗口是否参加绘制
+    bool minimized;   // 隐藏正文但保留打开身份
+    bool maximized;   // 是否占满扣除系统栏后的可用区
+    unsigned tab;     // 当前应用页签下标
+    unsigned scroll;  // 此窗口已卷走的行数
+};
+struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状态取得内容。
+    struct ui_backend backend;     // 桌面按值保存回调表；context与boot仍借用服务提供方对象。
+    struct airi_console *console;  // 借用稳定命令对象，终端视图与键输入共用。
+    struct ui_window windows[UI_APP_COUNT];  // 每个应用一个窗口，枚举值直接作下标。
+    unsigned order[UI_APP_COUNT];  // 保存从底到顶的应用身份，命中逆向读取。
+    unsigned order_count;  // order中已登记的有效数量。
+    int active;  // 活动应用，-1表示当前没有。
+    int width;   // 最近绘图的桌面宽度，单位像素。
+    int height;  // 最近绘图的桌面高度，单位像素。
+    enum ui_state service_state;  // 当前界面服务状态，失败动作通过它显示。
+    char directory[128];      // 当前文件操作目录，有NUL终止。
+    unsigned selection_file;  // 文件快照数组下标，不是文件id或排序后行。
+    struct ui_file files[UI_FILES];  // 当前目录的有界快照记录。
+    unsigned file_count;  // files中有效条数，读取不得超过它。
+    unsigned theme;  // 桌面自己持有的日夜模式，文本会话不依赖此字段。
+};
+void ui_init(struct ui_desktop *, struct ui_backend, struct airi_console *);  // 初始化桌面，复制服务表并借用命令对象。
+void ui_open(struct ui_desktop *, enum ui_app);  // 打开、解除最小化并置顶指定应用。
+void ui_draw(struct ui_desktop *, const struct airi_framebuffer *);  // 按实际帧缓冲绘图，并更新可用于命中的窗口矩形。
+void ui_service_state(struct ui_desktop *, enum ui_state);  // 切换服务显示状态并刷新对应快照。
+void ui_refresh(struct ui_desktop *);  // 从当前目录取得最多32条文件元信息副本。
+void ui_fixture_backend(struct ui_backend *);  // 为主机观察填入会话内存参考服务，不进入guest。
+
+void u_icon(int, int, int, uint32_t);  // 在给定坐标以类型和颜色绘制小图标。
+void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应用身份分派内容绘图，rect已扣除标题栏。
+#endif  // 结束完整桌面接口的重复包含保护

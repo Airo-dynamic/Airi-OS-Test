@@ -51,7 +51,16 @@ enum ui_color {  // 数值从24位RGB范围之外开始，名字表示用途而�
     U_COLOR_END  // 半开角色终点，只用于边界检查，不是可绘制颜色
 };
 enum ui_theme { UI_NIGHT, UI_DAY };  // 下标0夜间、1日间，零初始化自然选择夜间
-enum ui_metric { UI_CONTROL_RADIUS = 2 };  // 本章只需要按钮的2像素圆角，不预置窗口尺寸
+enum ui_metric {  // 绘图与后续命中共用同一组像素度量
+    UI_TOP = 36, UI_DOCK = 56, UI_BOTTOM = 30, UI_TITLE_H = 48,  // 整屏顶部、应用栏、底栏及窗口标题高度
+    UI_TOOLBAR_H = 44, UI_STATUS_H = 27,  // 窗口内容顶部和底部的独立区域
+    UI_MONITOR_W = 268, UI_MONITOR_MIN = 1120,   // 资源栏宽度及允许展开它的最小画布宽度
+    UI_WINDOW_RADIUS = 2, UI_CONTROL_RADIUS = 2  // 外框和控件都使用两像素半径
+};
+int u_label_width(const char *);  // 按Medium推进量和每字符两像素字距测当前标题标签。
+void u_label(int, int, const char *, uint32_t);  // 14px Medium短标签，每字符推进后加两像素字距
+void u_plate(struct ui_rect, uint32_t);  // 逐行收窄右缘的窗口身份片
+void u_brand(int, int);  // 用已有线段画原创A形系统标识
 enum ui_control_state {  // 不同状态占不同二进制位，可以按位或组合
     U_NORMAL = 0,    // 没有任何额外状态位
     U_SELECTED = 1,  // 第0位：当前已选中的动作
@@ -65,4 +74,11 @@ uint32_t u_color(uint32_t);  // 角色解析成RGB，0至0xffffff的真实RGB原
 void u_round(struct ui_rect, int, uint32_t);  // 圆角边缘按4×4样本混合，仍遵守裁剪
 void u_control(struct ui_rect, const char *, unsigned);   // 按调用者明确给出的状态绘制按钮，不执行动作
 void u_button(struct ui_rect, const char *, bool, bool);  // 将selected与disabled转换为共同状态表
+static inline struct ui_rect u_window_body(struct ui_rect r) {  // 由外框得到标题下方的应用矩形
+    return (struct ui_rect){r.x + 1, r.y + UI_TITLE_H + 1, r.w - 2, r.h - UI_TITLE_H - 2};  // 左右各去一像素，顶部去48像素标题及一像素边框
+}
+static inline void u_selection(struct ui_rect r) {  // 列表选择共用底色和左侧形状标记
+    u_rect(r.x, r.y, r.w, r.h, U_RAISED);  // 先铺整个当前选择区域，文字随后画在其上
+    u_rect(r.x, r.y + 4, 3, r.h - 8, U_ACCENT);  // 三像素侧标距上下各四像素，颜色变化同时伴随形状
+}
 #endif  // 结束包含保护

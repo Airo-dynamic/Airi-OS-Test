@@ -1,0 +1,63 @@
+checkpoint: G15
+baseline: baseline.yaml
+start: G14
+current_operation: 把同一console日志与启动描述画为Terminal/System的当前48px标题窗口
+already_explained:
+- concept: 文件名、完整路径、服务id与查询下标
+  at: ../../../dev-log/graphics/14-services.md#file-identities
+  establishes: telemetry/main.lua的name是main.lua、path包含父目录；id=槽号+1，只用于当前服务会话；六条快照是查询复制结果。
+- concept: 超宽本行与后续显式换行
+  at: ../../../dev-log/graphics/12-fonts.md#alpha-blend
+  establishes: u_text原点越过右界只跳过本行余下字节，保留换行给外层；WWWWWWWWW\nO的第二行仍回origin，不是自动折行或停止整串。
+- concept: 内置命令之后的同步扩展回调
+  at: ../../../dev-log/core/11-serial-build.md#command-extension
+  establishes: console只保存函数地址及void*上下文；未识别命令同步交给扩展，true表示已处理，回调不能保存局部命令地址。
+first_use:
+- concept: 整屏窗口矩形与正文矩形
+  at: ../../../dev-log/graphics/15-windows.md#window-coordinates
+  establishes: ui_window.rect保存整屏像素，body扣48像素标题加顶边；外框(100,80,800,600)得到(101,129,798,550)。
+- concept: 像素度量、14pxMedium身份标签与斜切片
+  at: ../../../dev-log/graphics/15-windows.md#window-metrics
+  establishes: 44/27分别是工具栏和状态栏；u_label推进量再加2px，u_plate每三行收窄一像素；应用正文仍用普通字距。
+- concept: 绘图层次、裁剪与借用
+  at: ../../../dev-log/graphics/15-windows.md#paint-order
+  establishes: order从底到顶覆盖像素；active选择活动身份；应用只写body，返回恢复整屏裁剪。console与boot保留原持有者，绘图借用。
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/15-windows.md#code-frontend-apps-internal-h-1
+  establishes: 只声明本章定义的公共绘图辅助函数与Terminal/System绘图，不预置对话框或未来click。
+- concept: 标签度量与身份片宽度
+  at: ../../../dev-log/graphics/15-windows.md#window-metrics
+  establishes: u_label_width累加Medium字形advance与每字符2px；54px左部与12px斜角留白形成片宽，至少174且不越系统按钮区。
+- concept: 桌面拥有主题，console只借用扩展入口
+  at: ../../../dev-log/graphics/15-windows.md#code-frontend-core-state-c-1
+  establishes: ui_init把appearance和当前desktop地址安装到console；theme命令只修改desktop.theme，桌面和console均须覆盖后续输入寿命。
+borrowed:
+- component: G12生成的八套字体数据
+  usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 整屏窗口矩形与正文矩形
+  at: ../../../dev-log/graphics/15-windows.md#window-coordinates
+  establishes: ui_window.rect保存整屏像素，body扣48像素标题加顶边；外框(100,80,800,600)得到(101,129,798,550)。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 像素度量、14pxMedium身份标签与斜切片
+  at: ../../../dev-log/graphics/15-windows.md#window-metrics
+  establishes: 44/27分别是工具栏和状态栏；u_label推进量再加2px，u_plate每三行收窄一像素；应用正文仍用普通字距。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 绘图层次、裁剪与借用
+  at: ../../../dev-log/graphics/15-windows.md#paint-order
+  establishes: order从底到顶覆盖像素；active选择活动身份；应用只写body，返回恢复整屏裁剪。console与boot保留原持有者，绘图借用。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/15-windows.md#code-frontend-apps-internal-h-1
+  establishes: 只声明本章定义的公共绘图辅助函数与Terminal/System绘图，不预置对话框或未来click。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 标签度量与身份片宽度
+  at: ../../../dev-log/graphics/15-windows.md#window-metrics
+  establishes: u_label_width累加Medium字形advance与每字符2px；54px左部与12px斜角留白形成片宽，至少174且不越系统按钮区。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

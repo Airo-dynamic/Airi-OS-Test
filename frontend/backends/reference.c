@@ -1,4 +1,4 @@
-#include "ui.h"  // 引入当前文件记录和服务回调合同，桌面状态尚未建立
+#include "ui.h"  // 引入前端服务合同与桌面状态
 #include <airi/base.h>  // 引入自有字节操作和有界格式化函数
 /* This provider is linked only into native design tools, never the kernel. */
 struct reference_file {  // 内存服务拥有的一条元信息、正文和占用状态
@@ -7,6 +7,7 @@ struct reference_file {  // 内存服务拥有的一条元信息、正文和占�
     bool used;  // 服务槽是否占用
 };
 static struct reference_file entries[UI_FILES];  // 服务拥有32个静态文件槽，跨查询保留而退出进程丢失
+static AiriBootInfo boot;  // 参考服务持有示例启动结构，借给System与console使用
 static void add(unsigned slot, const char *path, const char *name, bool directory,  // 把路径、名称和文字填进指定内存服务槽
                 const char *body) {  // body为新服务记录的NUL正文，目录可传空串
     struct reference_file *f = &entries[slot];  // 借用准备填充的服务槽，add的调用者已选择有效下标
@@ -22,7 +23,7 @@ static unsigned files(void *unused, const char *path, struct ui_file *out, unsig
     (void)unused;    // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
     unsigned n = 0;  // 本次已复制给调用者的文件条数从0开始，仅此计数之前的out槽有效
     size_t length = airi_strlen(path);  // 当前查询目录的内容字节长度，不含NUL；它决定父路径前缀的比较范围
-    for (unsigned i = 0; i < UI_FILES && n < cap; ++i) {  // 逐个检查服务32槽，查询或创建受当前占用状态约束
+    for (unsigned i = 0; i < UI_FILES && n < cap; ++i) {  // 遍历最多32个服务槽，输出有效条数达到cap时停止复制
         struct reference_file *f = &entries[i];  // 借用当前服务槽，检查占用与路径后再复制元信息
         if (!f->used)  // 空槽不参与当前目录查询
             continue;  // 本项不参与当前结果，跳过本轮剩余操作进入下一项
@@ -32,7 +33,7 @@ static unsigned files(void *unused, const char *path, struct ui_file *out, unsig
             for (; *rest; ++rest)  // 只在父目录之后的路径余部查斜杠，判断是否直接子项
                 if (*rest == '/') {  // 子项名称中又有斜杠说明它在更深目录，本次只列直接子项
                     direct = false;  // 路径余部还有层级分隔，条目位于更深目录而非直接子项
-                    break;  // 当前路径已经出现子目录分隔符，结束寻找斜杠的循环
+                    break;  // 此路径含子目录分隔符，结束当前斜杠查找循环
                 }
             if (direct)  // 仅直接子项进入本次目录查询结果
                 out[n++] = f->entry;  // 按旧下标复制整条元信息，再增加返回条数；服务记录未搬动
@@ -52,7 +53,7 @@ static bool read(void *unused, int id, char *out, size_t cap) {  // 按服务id�
 }
 static bool error(char *out, size_t cap, const char *message) {  // 把失败原因写入调用者错误缓冲并返回false
     airi_snprintf(out, cap, "%s", message);  // 将具体失败原因复制到调用者错误数组，cap包含终止零的位置
-    return false;  // 失败原因已写出，请求方据false显示错误而不更新保存点
+    return false;  // 失败原因已写到调用者数组，false表示服务记录没有提交本次修改
 }
 static bool valid_name(const char *name) {  // 检查文件名非空、长度与禁止路径分隔符
     size_t n = airi_strlen(name);  // 名称内容字节数用于空名与63字节上限检查，不计NUL
@@ -106,6 +107,23 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
     add(7, "/home/airi/projects/telemetry", "project.airi", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
         "[project]\nname = telemetry\nentry = main.lua\n");  // 提供本次调用的完整文字输入，C相邻字符串会在编译时连接
     add(4, "/home/airi/projects", "telemetry", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-    add(5, "/home/airi", "projects", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-    *b = (struct ui_backend){.mode = UI_REFERENCE, .files = files, .read = read, .action = action};  // 通过b写调用者的整份回调表，函数地址交给files/read/action，未指定context字段自动为NULL
+    add(5, "/home/airi", "projects", true, "");      // 向明确编号的服务槽填这份路径、名称、目录标记与正文
+    boot = (AiriBootInfo){.magic = AIRI_BOOT_MAGIC,  // 为主机窗口准备固定参考启动结构，System明确标成示例数据
+                          .version = AIRI_BOOT_VERSION,  // 设置启动合同版本
+                          .size = sizeof(boot),  // 设置本版启动结构字节数
+                          .direct_map_offset = UINT64_C(0xffff800000000000),  // 设置参考直接映射偏移
+                          .kernel_physical_base = 0x100000,  // 设置参考内核物理起点
+                          .kernel_virtual_base = UINT64_C(0xffffffff80000000),  // 设置参考内核虚拟起点
+                          .kernel_size = 132 * 1024,  // 设置参考内核镜像长度
+                          .region_count = 4};  // 设置参考内存区域有效条数
+    airi_snprintf(boot.loader, 32, "Reference / UEFI");  // 写明这份启动结构属于主机参考数据，System据此区别实际guest启动
+    boot.regions[0] =  // 参考地图第0项描述最低1MiB保留范围，下一行填完整记录
+        (struct airi_memory_region){.base = 0, .length = 0x100000, .kind = AIRI_MEMORY_RESERVED};  // 复合字面量按字段名给起点0、长度1MiB和保留类别
+    boot.regions[1] = (struct airi_memory_region){  // 参考地图第1项填写内核占用范围
+        .base = 0x100000, .length = 0x100000, .kind = AIRI_MEMORY_KERNEL};  // 设置参考物理范围起点、参考物理范围字节长度、参考内存用途分类
+    boot.regions[2] = (struct airi_memory_region){  // 参考地图第2项填写当前保留的引导可回收范围
+        .base = 0x200000, .length = 0x2900000, .kind = AIRI_MEMORY_BOOT_RECLAIM};  // 设置参考物理范围起点、参考物理范围字节长度、参考内存用途分类
+    boot.regions[3] = (struct airi_memory_region){  // 参考地图第3项填写可用物理范围
+        .base = 0x2b00000, .length = 0xd500000, .kind = AIRI_MEMORY_USABLE};  // 设置参考物理范围起点、参考物理范围字节长度、参考内存用途分类
+    *b = (struct ui_backend){.mode = UI_REFERENCE, .boot = &boot, .files = files, .read = read, .action = action};  // 通过b写调用者的整份回调表，函数地址交给files/read/action，未指定context字段自动为NULL
 }

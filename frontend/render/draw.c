@@ -263,3 +263,29 @@ void u_button(struct ui_rect r, const char *label, bool selected, bool disabled)
         state |= U_INACTIVE;  // 按位或加入禁用位，保留已有选择位
     u_control(r, label, state);  // 当前只绘制明确状态，不读取鼠标或执行动作
 }
+
+int u_label_width(const char *s) {  // 身份标签使用Medium推进量，每个字符另加两像素，测量与绘图一致。
+    int width = u_text_width(s, U_MEDIUM);  // 取得这条单行标签的全部字形推进量。
+    for (const char *p = s; *p; ++p)  // 同u_label一样逐字节处理，ASCII标签每项留两像素字距。
+        width += 2;  // 包括最后字形后的留白，使承载身份片有足够范围。
+    return width;  // 返回软件画布中的像素距离，不是字符串字节数。
+}
+
+void u_label(int x, int y, const char *s, uint32_t color) {  // 标签按逐字推进加2像素字距，限于短分区名
+    for (; *s; ++s) {  // 正常文件名与正文不经过这个函数
+        char ch[2] = {*s, 0};  // 单字符形成合法NUL字符串复用字形绘制
+        u_text(x, y, ch, U_MEDIUM, color);    // 使用已生成的14像素、字重500字体
+        x += u_text_width(ch, U_MEDIUM) + 2;  // 字宽加固定空隙构成稳定标签节奏
+    }
+}
+void u_plate(struct ui_rect r, uint32_t color) {  // 斜切片保持矩形左缘，右端随行逐步收缩
+    for (int y = 0; y < r.h; ++y)  // 每行仍由原矩形图元执行裁剪
+        u_rect(r.x, r.y + y, r.w - y / 3, 1, color);  // 约18度右缘使标题身份片区别于内容面板
+}
+void u_brand(int x, int y) {  // 两条斜边和悬浮横梁组成原创A形标识
+    for (int i = 0; i < 3; ++i) {  // 三条相邻线提供系统标识所需的笔画重量
+        u_line(x + i, y + 20, x + 10 + i, y, U_INK);  // 左侧上升边
+        u_line(x + 10 + i, y, x + 20 + i, y + 20, U_INK);  // 右侧下降边
+    }
+    u_rect(x + 7, y + 13, 10, 3, U_PINK);  // 粉色横梁只承担产品身份
+}
