@@ -1,0 +1,23 @@
+{
+  "checkpoint": "00",
+  "document": "dev-log/00-first-tool.md",
+  "document_sha256": "e4e6742ac699f4e87ab388cbac09b45e2d0d3428920ebf47f1a3c06e191fc10a",
+  "reader": ".codex/teaching/readers/00.yaml",
+  "reader_sha256": "4dc577c4448f65044482db4accb7ac9a8c6f882fc69f7297ff3a71f9a96aef8b",
+  "source": {
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95"
+  },
+  "commands": [
+    {
+      "command": "python3 scripts/probe.py  # 执行脚本默认的 python3 查找和版本探测\nif python3 scripts/probe.py airi_no_such_tool; then exit 1; fi  # 故障应返回非零；若意外成功，then 以 1 中止此组观察",
+      "exit": 0,
+      "elapsed": 0.242,
+      "output_sha256": "e699af637d9d7b0be5058eae47c488e310041e3dc6154d5157bdc69fe4d3d44a",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/00-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

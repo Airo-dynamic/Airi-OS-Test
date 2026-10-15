@@ -1,0 +1,24 @@
+{
+  "checkpoint": "01",
+  "document": "dev-log/01-tools.md",
+  "document_sha256": "a85e76f83de0a87becf486341baa3e04aeab44313ee1310154ef229f96c961bc",
+  "reader": ".codex/teaching/readers/01.yaml",
+  "reader_sha256": "5818ac17f10a0d4433d519801afce44dda0b98ec961df5898372ec909e4462db",
+  "source": {
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开\nfrom tools import tool, make_command  # 分别取得可执行路径和完整的 Make 参数列表\nprint(tool('cc'))  # 打印实际找到的主机编译器路径，尚未运行编译器\nprint(make_command(target='kernel'))  # 打印内核构建参数，当前未启动 Make\nPY\nif AIRI_CLANG='' PYTHONPATH=scripts python3 -c 'from tools import tool; tool(\"clang\", \"llvm\")'; then exit 1; fi  # 显式空路径必须失败；若意外返回成功则以非零中止",
+      "exit": 0,
+      "elapsed": 0.284,
+      "output_sha256": "f316103113856ebdba9764550c20f9b1206f2e17947f21a0bda539af9497a92b",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/01-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "checkpoint": "04",
+  "document": "dev-log/core/04-format.md",
+  "document_sha256": "4ed4ff4e0a3485ec04a0394fdf0b6d9866f1ba61473f347ca9950de7fa9d033a",
+  "reader": ".codex/teaching/readers/04.yaml",
+  "reader_sha256": "4ae135eaf48cc29f281d45b76bfba83bf05bc9c451c4cb867f3ce28cbb6cbeb2",
+  "source": {
+    "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+    "include/airi/base.h": "8244a108504fe1fd8a8a3e10a6a0c59776667b8539ba95f414ea79447f246b14",
+    "kernel/lib/base.c": "e70c0c5697063ffd0def7e7d3db7348d88d7a2abd3a235f3abbd8b4167e72d8a",
+    "labs/host/base/memmove_trace.c": "a69e029c5e0d31f3cc7ba08b562962a98fa73840bf7c0c1ad556b0df550374f9",
+    "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+    "labs/tutorial/format.c": "999ca74a4e9819b4e92522ced64d2ef1e0a8e0ebb741dded01a70536b41f774c",
+    "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "mkdir -p build  # 建立主机观察产物目录，已有目录也可继续\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/tutorial/format.c kernel/lib/base.c  -o build/probe  # 把本轮观察源码和实现编译链接成指定主机可执行文件\n./build/probe  # 运行刚生成的主机观察，非零退出表示实际结果不符\nmkdir -p build  # 建立主机观察产物目录，已有目录也可继续\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/host/base/memmove_trace.c kernel/lib/base.c  -o build/memmove  # 把本轮观察源码和实现编译链接成指定主机可执行文件\n./build/memmove  # 显示两个正确方向、错误循环和截断的实际结果",
+      "exit": 0,
+      "elapsed": 1.725,
+      "output_sha256": "74846e3783524b4385fa725f58c8c797acd1122d2c2cd1d9ca0568e893e9757d",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/04-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

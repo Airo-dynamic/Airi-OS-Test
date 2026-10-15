@@ -1,21 +1,50 @@
-# AiriOS · T02
+# 从串口进入内核与 Linux I/O
 
-This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
+从空的 `~/Desktop/AiriOS-work` 目录开始，沿代码块逐步写出自己的系统。每章在已有结果上增加一项操作，并给出完整编辑范围、机制解释和运行观察。检查点表示源码位置，可以按自己的节奏停下和继续；课程不设答题、评分或掌握度门槛。
+
+已到 day2 可以继续 03，无需重新开始。00–02 的实现字节保持不变，正文只作必要澄清。03–10 接着完成基础库、启动、串口命令和真实输入，K11–K13 形成日常构建与验证入口，然后完成 Linux 对照 L01。T01–T03 提供课程重建、来源检查与快照工具，它们都属于 main，不依赖图形课程。
+
+| 集合 | 入口与前置 | 怎样继续 |
+| --- | --- | --- |
+| [内核](core/README.md) | 00–10、K11–K13 | 在同一学习目录继续，以串口观察结果 |
+| [Linux 对照](linux/README.md) | L01 承接 K13 | 必修；分别观察普通程序、系统调用和内核入口 |
+| [作者工具](tools/README.md) | T01–T03 接在 L01 后 | 沿 main 写出重建、校验和导出工具，无需 GUI |
+| [图形课程](https://github.com/Airo-dynamic/Airi-OS-Test/blob/gui/dev-log/graphics/README.md) | 独立 gui 分支，运行需 K11，G24 需 K13 | G11–G23 先作宿主观察，G24 接 guest，G26 检查图形行为 |
+
+## 从 day2 继续
 
 - [00 · 从空目录找到并运行一个程序](00-first-tool.md)
 - [01 · 让构建使用正确的一份工具](01-tools.md)
 - [02 · 让外部引导材料有可验证的身份](02-dependencies.md)
 - [03 · 让字节复制在重叠时仍然正确](core/03-bytes.md)
-- [04 · 在容量有限的数组里形成一行日志](core/04-format.md)
-- [05 · 把启动信息变成可检查的数据](core/05-boot-contract.md)
-- [06 · 让引导器进入自己的 C 代码，并发出第一行文字](core/06-entry.md)
-- [07 · 把 ELF 放入 UEFI 镜像并看到第一行](core/07-first-boot.md)
-- [08 · 将真实引导响应复制到自己的接口](core/08-real-boot-info.md)
-- [09 · 先让普通字符成为一条可执行命令](core/09-console.md)
-- [10 · 把串口和键盘字节接入内核命令模型](core/10-input.md)
-- [K11 · 让串口构建独立于图形支线](core/11-serial-build.md)
-- [K12 · 用完成标记核对真实启动与输入](core/12-boot-tests.md)
-- [K13 · 把已有构建、运行与观察收拢为统一入口](core/13-commands.md)
-- [L01 · 对照 Linux 的函数调用、系统调用与内核入口](linux/01-entry.md)
-- [T01 · 从正文重建同一份源码](tools/01-reconstruction.md)
-- [T02 · 固定来源并保护快照](tools/02-snapshots.md)
+
+编号不对应日历天数。03–10 沿 02 的文件基础继续；像素、字体、主题和窗口由可选图形课程引入，不成为异常、内存和 I/O 学习的前置。
+
+## 在参考工程中查阅和导出
+
+```sh
+./airios learn list # 默认列出 main 的 18 个节点。
+./airios learn list --track core # 只显示内核课程及其前置。
+./airios learn show K11 # 阅读这一检查点的完整正文。
+./airios learn progress --record 02 # 记录自己的主线停留位置。
+./airios learn export K13 /tmp/airios-core-reference # 在新目录重建纯串口对照源码。
+./airios snapshots # 在 HISTORY 中生成各检查点的独立对照目录。
+```
+
+这些命令从参考工程执行。导出源码用于对照，带敲目录仍从章首声明的起点连续增长。progress 只记录所选路线的位置，不修改学习源码；export 拒绝已有目标目录。HISTORY 由固定来源和教程重建，快照被编辑后不会直接覆盖。
+
+## 组合可选图形停点
+
+main 有 18 个节点：00–10、K11–K13、L01、T01–T03。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
+
+图形的运行前置另行声明：运行需主线到 K11，G24 的 guest 接入需 K13。合并 gui 后出现独立的 graphics.json，learn 才增加图形节点；未合并时，主线列表、导出和快照只处理 main。
+
+```sh
+./airios learn list --track graphics # 合并 gui 后查看可选课程。
+./airios learn progress --record G13 # 单独记录图形停留位置。
+./airios learn export K13 /tmp/airios-core-with-g13 --alongside G13 # 组合当前主线与图形停点。
+```
+
+组合会闭合所选检查点的前置，只应用一次共享基础。G13 的图形文件不会把 K13 的内核退回 K11；HISTORY 中的图形检查点也包含其需要的主线基础。图形进度不推进或重置内核位置，G11–G23 的宿主结果也不代表 guest 已经显示图形。
+
+[当前验证](../docs/verification.md)记录实际运行和未验证平台；[系统实践地图](../docs/system-practice.md)说明这些机制怎样回到 BOSS、Taishan 和以前的网络库。

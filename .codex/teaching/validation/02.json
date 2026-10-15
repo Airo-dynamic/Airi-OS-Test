@@ -1,0 +1,26 @@
+{
+  "checkpoint": "02",
+  "document": "dev-log/02-dependencies.md",
+  "document_sha256": "1346f5544f6163ccc83a6b0f41effb2b079ca03e60069e27a6affbc26a71c742",
+  "reader": ".codex/teaching/readers/02.yaml",
+  "reader_sha256": "d512258d04d98fa9f6822b5a9f5f50b1525f1f28f66f06a3dc3cf922c100ab96",
+  "source": {
+    "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+    "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开\nfrom pathlib import Path  # 将文件名包装为可拼接、可读取的路径对象\nimport shutil  # 复制文件及移除旧的打包目录树\nfrom tools import ROOT  # 取得这份学习工程的绝对根路径\n# 固件是外部二进制材料；仅从已校验的参考缓存取得这两份，不复制任何项目源码。\nsource = Path('/Users/bilibili/Desktop/AiriOS/third_party/firmware')  # 参考工程中只有这两份外部固件可借用，项目源码仍手敲\nif source.is_dir() and source.resolve() != (ROOT / 'third_party/firmware').resolve():  # 仅从另一个已存在目录借用外部固件，避免把同一文件复制到自己\n    target = ROOT / 'third_party/firmware'  # 本次学习工程的固件目录，与参考缓存不同\n    target.mkdir(parents=True, exist_ok=True)  # 建立目标固件目录，允许已有缓存\n    for name in ('edk2-x86_64-code.fd', 'edk2-i386-vars.fd'):  # 元组限定可复制的两个外部文件名\n        shutil.copyfile(source / name, target / name)  # 将当前固件字节放入学习目录，prepare 仍会重新校验\nfrom deps import prepare  # 取得刚写好的材料准备函数，不在 import 时自动准备\nprint('Limine', prepare()['limine']['version'])  # 全部准备成功才从返回字典取出版本，打印 Limine 12.9.2\nPY",
+      "exit": 0,
+      "elapsed": 2.829,
+      "output_sha256": "469b460dfba18b1cfb283e37dd465a0403c7ab3837f88847bb0a274bb4e381f1",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/02-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

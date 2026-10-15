@@ -1,0 +1,34 @@
+{
+  "checkpoint": "05",
+  "document": "dev-log/core/05-boot-contract.md",
+  "document_sha256": "9fc5ff4fe62dcf2ccae501bff016d8baa2b7866f5d759dabc19815eabe4d705c",
+  "reader": ".codex/teaching/readers/05.yaml",
+  "reader_sha256": "b71467c4268b9852bade48bb86f8a72dcf192a655a5cc4219265d4a2e795d100",
+  "source": {
+    "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+    "include/airi/base.h": "8244a108504fe1fd8a8a3e10a6a0c59776667b8539ba95f414ea79447f246b14",
+    "include/airi/boot.h": "4522e5b6d6825190d22c375bac9a36744033ea8c9208da0bcdb195b9acf312af",
+    "kernel/boot/info.c": "089c4ae44fee68d8cf1136b721df400c9499b4af606ceeb8ae7781b881714b6b",
+    "kernel/lib/base.c": "e70c0c5697063ffd0def7e7d3db7348d88d7a2abd3a235f3abbd8b4167e72d8a",
+    "labs/host/base/memmove_trace.c": "a69e029c5e0d31f3cc7ba08b562962a98fa73840bf7c0c1ad556b0df550374f9",
+    "labs/host/boot/boot_info_probe.c": "50dd84dbf252d45cf72c817e8174c379a311827ceb9549e1b6d53de22f649bc0",
+    "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+    "labs/tutorial/format.c": "999ca74a4e9819b4e92522ced64d2ef1e0a8e0ebb741dded01a70536b41f774c",
+    "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "mkdir -p build  # 建立主机观察产物目录，已有目录也可继续\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/host/boot/boot_info_probe.c kernel/boot/info.c  -o build/probe  # 把本轮观察源码和实现编译链接成指定主机可执行文件\n./build/probe  # 运行刚生成的主机观察，非零退出表示实际结果不符",
+      "exit": 0,
+      "elapsed": 2.459,
+      "output_sha256": "f0fd742126c43a6df19213176594a1b231923ab132738d25e1567d41bdfdf55f",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/05-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

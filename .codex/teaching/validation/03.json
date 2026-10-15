@@ -1,0 +1,29 @@
+{
+  "checkpoint": "03",
+  "document": "dev-log/core/03-bytes.md",
+  "document_sha256": "c510a8c7331c5a9bb07876384fd93b88b45041ba84d058c80009a4bedb38cf40",
+  "reader": ".codex/teaching/readers/03.yaml",
+  "reader_sha256": "c4b3e02caa5f902e304d05b9a9c837583d954a528149840f12f3485670ded0ef",
+  "source": {
+    "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+    "include/airi/base.h": "0a609532b56cc55203e2f6e1dff3cefb9f32265b91364372676068249e2760dc",
+    "kernel/lib/base.c": "8f960aef964f8e2e73283ae7c9776e584bd5296655cefc7b3a90626aca26ab02",
+    "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+    "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "mkdir -p build  # 建立主机观察产物目录，已有目录也可继续\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/tutorial/bytes.c kernel/lib/base.c  -o build/probe  # 把本轮观察源码和实现编译链接成指定主机可执行文件\n./build/probe  # 运行刚生成的主机观察，非零退出表示实际结果不符",
+      "exit": 0,
+      "elapsed": 2.144,
+      "output_sha256": "4d6b7cb93ba36ad655e4bf9ebb11cfcff8435f00c1c97ac9ace5571b1beb8a08",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/03-1.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

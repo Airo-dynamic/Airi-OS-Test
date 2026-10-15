@@ -1,0 +1,35 @@
+checkpoint: 'T03'
+baseline: baseline.yaml
+start: 'T02'
+current_operation: 接入内容检查与学习命令，分别保存core/linux位置，并运行保护与失败示范
+already_explained:
+- concept: 内容重建与完整来源盘点
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-audit
+  establishes: 每节点累计摘要及命令与声明比较，全部终点组合再对照实际自有文件
+- concept: 固定来源导出
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-composition
+  establishes: 路线导出从固定正文重建源码，另复制纯资料，输出身份记录实际节点及源码摘要
+- concept: 统一命令参数
+  at: ../../../dev-log/core/13-commands.md#command-entry
+  establishes: argparse保存动作与选项，统一入口按实际动作延迟导入模块并交回进程状态
+first_use:
+- concept: 本地链接、画像锚点与报告失效
+  at: ../../../dev-log/tools/03-check-and-progress.md#tool-navigation
+  establishes: audit前删旧结果，来源失败无新JSON；来源通过后累积链接错误并写报告；普通链接只查文件，画像才查显式id锚点
+- concept: 子命令、进度字典与两种导出
+  at: ../../../dev-log/tools/03-check-and-progress.md#tool-progress
+  establishes: 子解析器分别限定参数，choices取字典键；按track更新一项进度，不重置其他项；current归档干净HEAD而课程身份按前置重建
+- concept: 自动构造失败与局部替换
+  at: ../../../dev-log/tools/03-check-and-progress.md#tool-failures
+  establishes: TestCase实例用self比较结果，assertRaisesRegex检查错误类型和文字；patch只暂时替换模块属性，进度保存改到临时目录而课程资料仍从course读取
+- concept: 固定差异、块身份与说明位置
+  at: ../../../dev-log/tools/03-check-and-progress.md#tool-diff-coverage
+  establishes: base/target解析为SHA，NUL分隔路径，按块头偏移切diff；EMPTY是空树，covers只定位，重算清单后检查missing与duplicate
+borrowed:
+- component: Python unittest、Git差异与已有Make实验目标
+  contract: 保护观察使用真实临时文件和受控子进程；GUI未安装明确skip；差异工具help只确认参数入口，不当作语义运行验收
+feedback:
+- source: 独立完整阅读审查
+  observation: 旧报告失效与新报告写出属于不同阶段，测试还需要说明被替换ROOT与真实课程来源并非同一对象。
+  revision: 正文分别说明audit早退和链接错误记录，沿core/linux进度示例解释module属性替换，再建立差异块与covers的位置关系。
+not_inferred: 已解释、敲完或工具成功不证明理解；不设置答题门槛。

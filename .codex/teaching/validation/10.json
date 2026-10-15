@@ -1,0 +1,50 @@
+{
+  "checkpoint": "10",
+  "document": "dev-log/core/10-input.md",
+  "document_sha256": "af72bd967a1cd71454d610019ee3d5a02202f3b320fc81f5d23a5ff795107cf3",
+  "reader": ".codex/teaching/readers/10.yaml",
+  "reader_sha256": "a5f69f144937ce4247ba93644a6f86484b33a0eb03bf04e5810c85f7908713d9",
+  "source": {
+    "Makefile": "ba40d9025ada9ce974a6a811d549172546f2a733d5269ebcccfb7c3d5e6e04f3",
+    "config/boot/limine.conf": "f76f884b3186345f956444ca8580580fc02e3b6d9e900d818d5dc9c833521c53",
+    "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+    "include/airi/base.h": "8244a108504fe1fd8a8a3e10a6a0c59776667b8539ba95f414ea79447f246b14",
+    "include/airi/boot.h": "4522e5b6d6825190d22c375bac9a36744033ea8c9208da0bcdb195b9acf312af",
+    "include/airi/console.h": "9fb809498bb82abc1ba0ccb102a8e1c5f4d2f107ea751d66370a5107b61fd9a1",
+    "include/airi/kernel.h": "b01e418efcf8fef2cbe56373b0cfecf4716775c5c9c5ed538ad54c2859fe95d5",
+    "kernel/arch/x86_64/entry.S": "6d1ba38c032fc3d3ee459326bcb6139d5b5ff49b014cf4fbd48b87f6ab181e68",
+    "kernel/arch/x86_64/input.c": "2701747c4a9b0d1ed1377ea8f6c78154492db8e8009c53250cc4b6d44493d9cf",
+    "kernel/arch/x86_64/serial.c": "a43d16ed4f22e9e57daeece54056ba0b4f93e665fa9855aceaa083fc4f787d9c",
+    "kernel/boot/info.c": "089c4ae44fee68d8cf1136b721df400c9499b4af606ceeb8ae7781b881714b6b",
+    "kernel/boot/limine.c": "b925c98c70129ae182668633bbe02e30172010f80c8946cf35696adc5f7342dc",
+    "kernel/console/console.c": "28d01099d2b8034ab40271e9b8797c630b7fd346a2598b6e2e9f7bdc107b8fb7",
+    "kernel/lib/base.c": "e70c0c5697063ffd0def7e7d3db7348d88d7a2abd3a235f3abbd8b4167e72d8a",
+    "kernel/lib/runtime.c": "401da96e9dcc1c4f6c41bc7dda7c27f0fd3bb0e4547577cb77b0f517d43fa15b",
+    "kernel/linker.ld": "2eb6a8a52336cd2fa1386e1b48edd24b614391e09dd9fe6a873ebca7becf942a",
+    "kernel/main.c": "2b400a667e99c08233afdeda67d58802417c28e9794fe6495b51b7fc645d4d99",
+    "labs/host/base/memmove_trace.c": "a69e029c5e0d31f3cc7ba08b562962a98fa73840bf7c0c1ad556b0df550374f9",
+    "labs/host/boot/boot_info_probe.c": "50dd84dbf252d45cf72c817e8174c379a311827ceb9549e1b6d53de22f649bc0",
+    "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+    "labs/tutorial/console.c": "b301648ec6241c748a1c4d85359f09db0bd961dada07d5ac2976c8393658d1bb",
+    "labs/tutorial/format.c": "999ca74a4e9819b4e92522ced64d2ef1e0a8e0ebb741dded01a70536b41f774c",
+    "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+    "scripts/first_boot.py": "5f31db61c852369c796ba6c473bf8643d40d5763b57595402e7a3460cb3edc4d",
+    "scripts/first_input.py": "d80e37de72e4c1ff6988553affc90da251d3ee6ab3bb67e5df8a64a7af66cf5f",
+    "scripts/image.py": "e846df8bc62c10d605d0d3eaf6fa4c8254adc9975653c1988a37551ff7fb9740",
+    "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+    "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08"
+  },
+  "commands": [
+    {
+      "command": "# 通过声明的PYTHONPATH从本学习目录导入构建模块，再执行下方Python命令\nPYTHONPATH=scripts python3 - <<'PY'  # 仅此进程从 scripts 查找模块，单引号阻止 Shell 展开随后 Python 文本\nimport subprocess  # 导入子进程接口，用于执行本次构建\nfrom tools import make_command  # 取得带已查明工具路径的Make参数构造函数\nsubprocess.run(make_command(target='all'), check=True)  # 构造all目标并执行，非零退出码使本轮操作失败\nPY\npython3 scripts/first_boot.py  # 启动独立QEMU并等完整启动成功标记\npython3 scripts/first_input.py  # 启动另一份QEMU，通过真实UART提交六条命令并等最终完成记录",
+      "exit": 0,
+      "elapsed": 15.596,
+      "output_sha256": "95eb4378560c5d24db7d4cddc5d638bcbd092a5032311d7f620e02ec071d537f",
+      "log": "artifacts/tutorial-route-rebuild/reviews/evidence/blind-logs/10-1-1792056717455602000.log"
+    }
+  ],
+  "status": "reconstructed and executed",
+  "limits": [
+    "Running and source equality do not establish reader mastery."
+  ]
+}

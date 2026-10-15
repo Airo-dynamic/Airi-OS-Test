@@ -89,6 +89,11 @@
       "id": "T02",
       "title": "T02 · 固定来源并保护快照",
       "document": "dev-log/tools/02-snapshots.md"
+    },
+    {
+      "id": "T03",
+      "title": "T03 · 核对正文并记录学习位置",
+      "document": "dev-log/tools/03-check-and-progress.md"
     }
   ]
 }
