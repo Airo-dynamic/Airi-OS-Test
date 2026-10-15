@@ -104,6 +104,11 @@
       "id": "K15",
       "title": "K15 · 把可用 RAM 交给明确的页面所有者",
       "document": "dev-log/core/15-physical-pages.md"
+    },
+    {
+      "id": "K16",
+      "title": "K16 · 接管四级页表与真实页权限",
+      "document": "dev-log/core/16-virtual-memory.md"
     }
   ]
 }

@@ -1,0 +1,28 @@
+checkpoint: K16
+baseline: baseline.yaml
+start: K15
+current_operation: 用页池建立四级表并装CR3，真实演示只读写、NX和未映射故障
+already_explained:
+- concept: 页池与直接映射
+  at: ../../../dev-log/core/15-physical-pages.md#page-direct-map
+  establishes: 物理地址必须通过已存在的虚拟别名访问；归还后不能使用旧指针
+- concept: CPU现场与精确恢复
+  at: ../../../dev-log/core/14-exceptions.md#trap-owner
+  establishes: 汇编保存GPR，C只为登记故障修改返回RIP
+first_use:
+- concept: 48位规范地址和四级索引
+  at: ../../../dev-log/core/16-virtual-memory.md#four-levels
+  establishes: 39/30/21/12位起的9位索引和12位偏移，根在CR3
+- concept: 页表所有权和失败回滚
+  at: ../../../dev-log/core/16-virtual-memory.md#mapping-transaction
+  establishes: 先清表再连接，失败先断链接和失效再归还
+- concept: 硬件NX WP与TLB
+  at: ../../../dev-log/core/16-virtual-memory.md#install-cr3
+  establishes: 开能力位和装根后硬件执行权限，修改活动映射需失效
+- concept: PF错误码与NX调用栈
+  at: ../../../dev-log/core/16-virtual-memory.md#page-fault-probe
+  establishes: CR2是故障VA，NX在call目标取指时发生，恢复须丢弃内部返回地址
+not_assumed:
+- 用户态、按需缺页、COW、SMP、PCID、内核堆
+limits:
+- 主机模拟页表不等于硬件运行；运行不代表读者掌握

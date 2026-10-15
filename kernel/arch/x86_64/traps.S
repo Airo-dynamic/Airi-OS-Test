@@ -113,6 +113,27 @@ airi_probe_gp_site: /* 故障报告的 RIP 应指向这条装载。 */
     movw %ax, %ds /* 无效选择子触发带硬件错误码的 GP。 */
 airi_probe_gp_resume: /* 故障装载未成功，原 DS 仍有效。 */
     ret /* 返回 C 检查点。 */
+
+.global airi_probe_read, airi_probe_read_site, airi_probe_read_resume /* 访问地址由 rdi 传入。 */
+airi_probe_read: /* 调用者登记预期的未映射读取。 */
+airi_probe_read_site: /* PF 的保存 RIP 指向这条 load。 */
+    movq (%rdi), %rax /* 未映射数据访问产生 PF。 */
+airi_probe_read_resume: /* 恢复时不再访问坏地址。 */
+    ret /* 返回 C 检查状态。 */
+.global airi_probe_write, airi_probe_write_site, airi_probe_write_resume /* supervisor 只读权限演示。 */
+airi_probe_write: /* rdi 是只读映射的虚拟起点。 */
+airi_probe_write_site: /* PF 的保存 RIP 指向这条 store。 */
+    movq $0x55, (%rdi) /* CR0.WP 开启后只读叶子拒绝这次写。 */
+airi_probe_write_resume: /* 恢复时跳过整条已知 store。 */
+    ret /* 返回调用者。 */
+.global airi_probe_execute, airi_probe_execute_resume /* NX 页的执行入口与恢复标签。 */
+airi_probe_execute: /* 调用目标地址由 rdi 传入。 */
+    call *%rdi /* 返回地址先入栈，取指时因 NX 产生 PF，RIP 是目标地址。 */
+    ret /* 若未发生 PF，则 C 调用者会报告演示未发生。 */
+airi_probe_execute_resume: /* PF 现场的 RSP 已包含上面 call 压入的返回地址。 */
+    addq $8, %rsp /* 丢弃不能再使用的内部 call 返回地址。 */
+    ret /* 回到调用 probe_execute 的 C 函数。 */
+
 .section .rodata /* 入口地址表只读。 */
 .global airi_trap_entries /* C 用这张表填 IDT。 */
 airi_trap_entries: /* 连续 32 个 64 位入口地址。 */

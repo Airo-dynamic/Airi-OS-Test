@@ -28,6 +28,7 @@ extern char airi_probe_ud_site[], airi_probe_ud_resume[]; // UD 精确指令与�
 extern char airi_probe_gp_site[], airi_probe_gp_resume[]; // GP 精确指令与恢复地址。
 static uintptr_t expected_site, expected_resume; // 仅同步演示期间非零，不允许一般内核故障被吞掉。
 static uint64_t expected_vector, expected_error; // 同时核对向量与硬件错误码。
+static uint64_t expected_cr2; // PF 必须同时核对本次访问的线性地址。
 static bool recovered; // 处理器真正进入处理函数后才置位。
 void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备中断。
     gdt[1] = 0x00af9a000000ffffull; // present、ring0、64 位可读代码段。
@@ -53,7 +54,7 @@ void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指
     airi_log("[EXCEPTION] vector=%llu error=0x%llx rip=0x%llx cs=0x%llx rsp=0x%llx cr2=0x%llx", // 保存实际 CPU 返回现场，便于反汇编定位。
              (unsigned long long)f->vector, (unsigned long long)f->error, (unsigned long long)f->rip, // 向量/错误码/指令位置分别输出。
              (unsigned long long)f->cs, (unsigned long long)f->rsp, (unsigned long long)cr2); // 栈地址来自 CPU，而非 C 局部变量。
-    if (expected_site && f->rip == expected_site && f->vector == expected_vector && f->error == expected_error) { // 只接受精确登记的作者演示。
+    if (expected_site && f->rip == expected_site && f->vector == expected_vector && f->error == expected_error && (f->vector != 14 || cr2 == expected_cr2)) { // 只接受精确登记的作者演示。
         f->rip = expected_resume; // 修改 iretq 将恢复的指令地址，不猜指令长度。
         expected_site = 0; // 一次性登记在返回前消费，不能无限跳过相同错误。
         recovered = true; // 调用者据此检查故障确实发生。
@@ -80,4 +81,31 @@ _Noreturn void airi_trap_fatal_demo(void) { // 命令演示真正的未处理异
     expected_site = 0; // 不登记恢复，故障必须走停止路径。
     airi_probe_ud(); // 执行真实 UD2，处理器进入向量 6。
     airi_panic("fatal probe unexpectedly returned"); // 若错误返回也必须停止。
+}
+
+extern void airi_probe_read(uint64_t), airi_probe_write(uint64_t), airi_probe_execute(uint64_t); // 汇编产生真实访存或取指。
+extern char airi_probe_read_site[], airi_probe_read_resume[]; // 未映射读取的指令与恢复标签。
+extern char airi_probe_write_site[], airi_probe_write_resume[], airi_probe_execute_resume[]; // 只读写入与 NX 取指的恢复标签。
+void airi_trap_memory_probe(uint64_t address, enum airi_memory_fault kind) { // 只用于作者可预测的三种 supervisor 故障。
+    expected_vector = 14; // 三种情况都由分页硬件产生 PF。
+    expected_cr2 = address; // PF 报告的虚拟地址必须和本次实参一致。
+    recovered = false; // 不继承之前演示的成功状态。
+    if (kind == AIRI_FAULT_READ) { // 演示未映射地址的读访问。
+        expected_site = (uintptr_t)airi_probe_read_site; // RIP 位于已知 load 指令。
+        expected_resume = (uintptr_t)airi_probe_read_resume; // 返回标签不再访问目标。
+        expected_error = 0; // supervisor、read、not-present。
+        airi_probe_read(address); // 真实读指令应立即触发 PF。
+    } else if (kind == AIRI_FAULT_WRITE) { // 演示只读页拒绝 supervisor 写。
+        expected_site = (uintptr_t)airi_probe_write_site; // RIP 位于已知 store 指令。
+        expected_resume = (uintptr_t)airi_probe_write_resume; // 跳过完整 store。
+        expected_error = 3; // present=1、write=1、user=0。
+        airi_probe_write(address); // CR0.WP 必须已经开启。
+    } else { // 演示 NX 叶子拒绝取指。
+        expected_site = address; // 取指故障 RIP 是目标，不是 call 本身。
+        expected_resume = (uintptr_t)airi_probe_execute_resume; // 特殊恢复标签还会丢弃内部 call 的返回地址。
+        expected_error = 17; // present=1、instruction-fetch=1、user=0。
+        airi_probe_execute(address); // 目标含 ret 字节，若 NX 不生效也能返回并被下方检查拒绝。
+    }
+    if (!recovered || expected_site) // 只有处理器进入了正确 PF 入口才算完成。
+        airi_panic("page fault probe did not recover"); // 不把普通函数返回误记为权限生效。
 }

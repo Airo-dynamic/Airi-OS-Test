@@ -18,6 +18,7 @@ K11 把文本会话与显示实现分开，默认构建只链接串口实现。K
 - [K13 · 统一运行入口](13-commands.md)
 - [K14 · CPU 异常现场与受控恢复](14-exceptions.md)
 - [K15 · 物理页所有权与分配回收](15-physical-pages.md)
+- [K16 · 四级页表、CR3 与真实权限故障](16-virtual-memory.md)
 - [下一阶段 · 从异常报告开始管理内存](next.md)
 
 K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接到当前终端，按 Ctrl-A 后按 X 退出；后者使用独立 QEMU 进程、日志和截止时间，检查启动与输入。默认构建只需主线源码、工具和引导材料。
