@@ -159,18 +159,78 @@
         "mkdir -p build  # 确保两张主题图的父目录存在\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude -Ifrontend/include labs/tutorial/controls.c frontend/render/draw.c -o build/controls  # 链接当前明确状态的控件观察程序\n./build/controls  # 两轮使用同内容，分别写Night与Day文件"
       ],
       "reader": ".codex/teaching/readers/G13.yaml"
+    },
+    {
+      "id": "G14",
+      "track": "graphics",
+      "title": "G14 · 用同一个内存服务列出、创建和读取文件",
+      "document": "dev-log/graphics/14-services.md",
+      "requires": [
+        "G13"
+      ],
+      "files": {
+        "Makefile": "d4cb5b97864246e79f53773ca296cf3b067b8c8c77351358d91bf4303f987491",
+        "config/boot/limine.conf": "f76f884b3186345f956444ca8580580fc02e3b6d9e900d818d5dc9c833521c53",
+        "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+        "frontend/assets/fonts.lock.json": "49d606c559015aea36ad29ba1bfa23dd567a6286dd0c22fec5c4b1b38b163c43",
+        "frontend/backends/reference.c": "57a4adf345b8153bb3190cf3487f2bec540c2bec283d9868f328ca39cf037586",
+        "frontend/include/render.h": "ef56248346bc8d260a1f505e86a374c7aa73791463e24a033eb3501f6c56c955",
+        "frontend/include/ui.h": "f1b9674f1e2500d65e31b76ccc63c2f965f9a02f91ff5ff52570b239df617cdc",
+        "frontend/render/draw.c": "c52a0acd6dd4c186af60b0382e5af4ead780458819bba1f45e6ea6669f1ac491",
+        "include/airi/arch.h": "98670e1aae599ebdd57841499f0f4bb8d092e6f0b19078386297bd64b28cebab",
+        "include/airi/base.h": "8244a108504fe1fd8a8a3e10a6a0c59776667b8539ba95f414ea79447f246b14",
+        "include/airi/boot.h": "4522e5b6d6825190d22c375bac9a36744033ea8c9208da0bcdb195b9acf312af",
+        "include/airi/console.h": "f9a4205f11c5e7c5e4b4684c5b8dcd0deb58b2a0142346aa79d601e9ff0a5d61",
+        "include/airi/kernel.h": "b01e418efcf8fef2cbe56373b0cfecf4716775c5c9c5ed538ad54c2859fe95d5",
+        "kernel/arch/x86_64/cpu.c": "b2defe5d80d4c597822896043b1ddc7196e067d23ba472e0be67e440da33e697",
+        "kernel/arch/x86_64/entry.S": "6d1ba38c032fc3d3ee459326bcb6139d5b5ff49b014cf4fbd48b87f6ab181e68",
+        "kernel/arch/x86_64/input.c": "2701747c4a9b0d1ed1377ea8f6c78154492db8e8009c53250cc4b6d44493d9cf",
+        "kernel/arch/x86_64/serial.c": "a43d16ed4f22e9e57daeece54056ba0b4f93e665fa9855aceaa083fc4f787d9c",
+        "kernel/boot/info.c": "089c4ae44fee68d8cf1136b721df400c9499b4af606ceeb8ae7781b881714b6b",
+        "kernel/boot/limine.c": "b925c98c70129ae182668633bbe02e30172010f80c8946cf35696adc5f7342dc",
+        "kernel/console/console.c": "3f882717a6a222131bbc487b85e7542279aa2819131c0cc72af333b8feaf3d5c",
+        "kernel/console/serial_display.c": "f4cce6a3cd9fe2101244d2a4b11b6eb93fb7f564986fd03286fa38670e06a969",
+        "kernel/lib/base.c": "e70c0c5697063ffd0def7e7d3db7348d88d7a2abd3a235f3abbd8b4167e72d8a",
+        "kernel/lib/runtime.c": "401da96e9dcc1c4f6c41bc7dda7c27f0fd3bb0e4547577cb77b0f517d43fa15b",
+        "kernel/linker.ld": "2eb6a8a52336cd2fa1386e1b48edd24b614391e09dd9fe6a873ebca7becf942a",
+        "kernel/main.c": "28dd105de4af4353b1f39c837acd6f1ab2c0ac3ae93f383b3f51404826becf4d",
+        "labs/host/base/memmove_trace.c": "a69e029c5e0d31f3cc7ba08b562962a98fa73840bf7c0c1ad556b0df550374f9",
+        "labs/host/boot/boot_info_probe.c": "50dd84dbf252d45cf72c817e8174c379a311827ceb9549e1b6d53de22f649bc0",
+        "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+        "labs/tutorial/console.c": "b301648ec6241c748a1c4d85359f09db0bd961dada07d5ac2976c8393658d1bb",
+        "labs/tutorial/controls.c": "16287a99e9e720fd300c9fb1888152469baa850d04d255884523a1c74c71d014",
+        "labs/tutorial/fonts.c": "f74d53ea56b5b1922aa7096fad853b1226697272a78d60113528c881d55f7b8c",
+        "labs/tutorial/format.c": "999ca74a4e9819b4e92522ced64d2ef1e0a8e0ebb741dded01a70536b41f774c",
+        "labs/tutorial/pixels.c": "c31cb987a17ee3b17ced5ea8a003b4f1782031b4ff2df5c505491753e44ed10c",
+        "labs/tutorial/provider.c": "a72bcb50e3bc25f56f7b7fcfdfe03c6f9ff4a31b8d20a535437e58a023d7b7e6",
+        "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+        "scripts/first_boot.py": "5f31db61c852369c796ba6c473bf8643d40d5763b57595402e7a3460cb3edc4d",
+        "scripts/first_input.py": "d80e37de72e4c1ff6988553affc90da251d3ee6ab3bb67e5df8a64a7af66cf5f",
+        "scripts/font_atlas.py": "6c887af55741a06a4a30bac9850f320d3a04405da930b0b9f28ec40d05a714a1",
+        "scripts/image.py": "e846df8bc62c10d605d0d3eaf6fa4c8254adc9975653c1988a37551ff7fb9740",
+        "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+        "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08",
+        "tests/unit/base_test.c": "fbc2ae3a87c589edd107b398b8226c4bd896f8d9cd02a5a493d9f6198aacfea7"
+      },
+      "commands": [
+        "mkdir -p build  # 创建本学习目录的产物目录，已有目录可复用\ncc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude -Ifrontend/include labs/tutorial/provider.c frontend/backends/reference.c kernel/lib/base.c -o build/probe  # 按当前检查点源码链接主机观察程序，-I提供接口目录，-o指定输出文件\n./build/probe  # 运行刚构建的本检查点观察程序，退出码和输出共同核对结果"
+      ],
+      "reader": ".codex/teaching/readers/G14.yaml"
     }
   ],
   "owned": [
     "frontend/assets/fonts.lock.json",
+    "frontend/backends/reference.c",
     "frontend/include/render.h",
+    "frontend/include/ui.h",
     "frontend/render/draw.c",
     "labs/tutorial/controls.c",
     "labs/tutorial/fonts.c",
     "labs/tutorial/pixels.c",
+    "labs/tutorial/provider.c",
     "scripts/font_atlas.py"
   ],
   "endpoints": [
-    "G13"
+    "G14"
   ]
 }

@@ -1,0 +1,38 @@
+checkpoint: G14
+baseline: baseline.yaml
+start: G13
+current_operation: 列telemetry、读取main.lua，容量不足保留xyz，创建hello.txt再拒绝重名
+already_explained:
+- concept: 像素颜色角色与字体观察
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-frontend-render-draw-c-3
+  establishes: u_control按显式状态组合图元和字形，u_button只转换选择与禁用位；按钮像素尚不触发服务动作。
+first_use:
+- concept: 文件名、完整路径、服务id与查询下标
+  at: ../../../dev-log/graphics/14-services.md#file-identities
+  establishes: telemetry/main.lua的name是main.lua、path包含父目录；id=槽号+1，只用于当前服务会话；六条快照是查询复制结果。
+- concept: C函数指针合同与上下文
+  at: ../../../dev-log/graphics/14-services.md#service-callbacks
+  establishes: bool (*read)(void *,int,char *,size_t)保存调用地址；context原样传回，当前静态数组不使用它；在同一主机进程调用。
+- concept: 容量、NUL、空槽与提前失败
+  at: ../../../dev-log/graphics/14-services.md#code-frontend-backends-reference-c-1
+  establishes: 完整正文加终止零容纳后才memcpy；小数组失败不写输出。used标记槽是否占用；不重复占已有名称。
+borrowed: []
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 文件名、完整路径、服务id与查询下标
+  at: ../../../dev-log/graphics/14-services.md#file-identities
+  establishes: telemetry/main.lua的name是main.lua、path包含父目录；id=槽号+1，只用于当前服务会话；六条快照是查询复制结果。
+  status: 本版就地解释；不推断读者已掌握
+- concept: C函数指针合同与上下文
+  at: ../../../dev-log/graphics/14-services.md#service-callbacks
+  establishes: bool (*read)(void *,int,char *,size_t)保存调用地址；context原样传回，当前静态数组不使用它；在同一主机进程调用。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 容量、NUL、空槽与提前失败
+  at: ../../../dev-log/graphics/14-services.md#code-frontend-backends-reference-c-1
+  establishes: 完整正文加终止零容纳后才memcpy；小数组失败不写输出。used标记槽是否占用；不重复占已有名称。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
