@@ -95,6 +95,9 @@ int airi_block_init(const AiriBootInfo *info) { // 仅启动时调用，不支�
     airi_log("[BLOCK_READY] pci=0:%u.%u io=0x%x queue=%u sectors=%llu readonly=%u flush=%u", found_slot, found_function, io, queue_size, (unsigned long long)capacity, readonly, can_flush); // 数据来自真实设备配置。
     return 0; // 上层不接触端口或描述符。
 }
+bool airi_block_readonly(void) { // 单设备配置启动后保持稳定。
+    return readonly; // 不泄露驱动内部队列指针。
+}
 uint64_t airi_block_sectors(void) { // 只给上层有界容量信息。
     return ready ? capacity : 0; // 停止后不继续发布可用设备。
 }

@@ -1,0 +1,23 @@
+checkpoint: K26
+baseline: baseline.yaml
+start: K25
+current_operation: 同步追加alpha和beta，真实损坏第二条后恢复前缀并替换坏尾
+already_explained:
+- concept: VirtIO完成与FLUSH
+  at: ../../../dev-log/core/25-block-device.md#block-ring-ownership
+  establishes: 设备完成按链身份确认，FLUSH不等于应用多扇区事务
+first_use:
+- concept: 两扇区格式与CRC
+  at: ../../../dev-log/core/26-journal.md#journal-format
+  establishes: little endian显式编码，sequence和双CRC绑定记录，错误I/O不当空尾
+- concept: 提交同步和不确定失败
+  at: ../../../dev-log/core/26-journal.md#journal-order
+  establishes: 清当前commit及下一空尾，数据先同步再提交，失败停止并重新scan
+- concept: 故障模型的边界
+  at: ../../../dev-log/core/26-journal.md#journal-crash-model
+  establishes: live与durable、进程退出、VM重启和主机掉电不同，最后flush报错仍可能已提交
+not_assumed:
+- 生产级文件系统、事务组、日志回收或真实主机掉电保证
+limits:
+- guest验证受控位损坏，主机验证16个明确缓存模型边界
+- 用户系统调用和跨QEMU重启接续下一节

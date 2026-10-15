@@ -164,6 +164,11 @@
       "id": "K25",
       "title": "K25 · VirtIO块设备、DMA队列与有超时同步完成",
       "document": "dev-log/core/25-block-device.md"
+    },
+    {
+      "id": "K26",
+      "title": "K26 · 校验追加日志、提交同步与坏尾恢复",
+      "document": "dev-log/core/26-journal.md"
     }
   ]
 }
