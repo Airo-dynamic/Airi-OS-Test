@@ -1,3 +1,4 @@
+#include <airi/trap.h> // 安装异常表并演示处理器现场。
 #include <airi/arch.h>     // 通过架构边界使用忙等提示。
 #include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
 #include <airi/console.h>  // 取得命令环、按键与视图类型。
@@ -11,6 +12,11 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     const char *error = airi_boot_validate(info);  // 校验必需启动字段，NULL 表示通过，字符串给出失败原因。
     if (error)  // 有具体原因则不能继续读取未经验证的数据。
         airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
+    airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
+    airi_trap_demo(); // 正常启动验证带与不带硬件错误码的返回路径。
+#ifdef AIRI_TEST_FATAL_TRAP // 只在作者故障镜像中执行未处理异常。
+    airi_trap_fatal_demo(); // 必须报告并停止，不能发布 READY。
+#endif // 普通镜像继续初始化。
     airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
              info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
     airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 串口分别记录内核物理位置、虚拟地址和字节长度。

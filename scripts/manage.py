@@ -8,7 +8,7 @@ from deps import prepare  # 复用外部依赖下载与校验，统一入口先�
 from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment')  # 元组固定四种构建配置，CLI choices 与 test 遍历共用。
+PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal')  # 元组固定四种构建配置，CLI choices 与 test 遍历共用。
 def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
     subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
 def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。

@@ -1,0 +1,22 @@
+checkpoint: K14
+baseline: baseline.yaml
+start: K13 + L01
+current_operation: 让UD2和非法选择子经CPU异常栈进入C报告，再由iretq恢复
+already_explained:
+- concept: 栈与普通C调用
+  at: ../../../dev-log/core/06-entry.md
+  establishes: 自有栈和call进入C，当前尚无用户态
+first_use:
+- concept: IDT GDT TSS与CPU现场
+  at: ../../../dev-log/core/14-exceptions.md#trap-frame
+  establishes: CPU查门和代码段，64位现场含SS/RSP；TSS用于独立栈
+- concept: 汇编宏与异常ABI
+  at: ../../../dev-log/core/14-exceptions.md#trap-entry
+  establishes: 两种错误码形状统一，保存GPR、对齐调用栈并由iretq恢复
+- concept: 表的寿命与精确故障恢复
+  at: ../../../dev-log/core/14-exceptions.md#trap-owner
+  establishes: 静态表持续有效，仅登记的RIP向量错误码可以恢复
+not_assumed:
+- 用户进程、设备中断、调度、页分配、页表和信号
+limits:
+- 运行证据不记录为读者已掌握

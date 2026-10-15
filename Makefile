@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -25,7 +25,7 @@ endif # 结束当前可选图形分支。
 # 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
 CASE := $(patsubst desktop-%,%,$(PROFILE))
 # patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
+OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o
 # 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
@@ -46,6 +46,10 @@ ifeq ($(CASE),missing-memory)
 # 模拟必需内存地图缺失，内核应打印具体PANIC。
 CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
 endif # 结束 missing-memory 的编译条件
+# 作者故障配置不登记恢复，应报告真实异常后停止。
+ifeq ($(CASE),trap-fatal)
+CPPFLAGS += -DAIRI_TEST_FATAL_TRAP # 仅此构建目录触发未处理 UD2。
+endif # 结束故障配置。
 # 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
 ifeq ($(CASE),edit-experiment)
 # 单引号由shell保护内部双引号，编译器取得C字符串宏值；下一续行同时设置学习日志文字。

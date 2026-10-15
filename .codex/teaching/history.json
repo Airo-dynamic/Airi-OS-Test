@@ -94,6 +94,11 @@
       "id": "T03",
       "title": "T03 · 核对正文并记录学习位置",
       "document": "dev-log/tools/03-check-and-progress.md"
+    },
+    {
+      "id": "K14",
+      "title": "K14 · 让 CPU 故障成为可以定位的异常报告",
+      "document": "dev-log/core/14-exceptions.md"
     }
   ]
 }

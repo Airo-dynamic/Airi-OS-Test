@@ -59,6 +59,8 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
     expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P1_READY]'  # 缺内存响应要看具体 PANIC，其他配置要看 READY。
+    if case == 'trap-fatal': # 未处理异常镜像必须进入具体停止路径。
+        expected = '[AIRI_PANIC] unhandled CPU exception' # 不以 QEMU 存活推断故障已处理。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
     with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
         process=subprocess.Popen(cmd,stdout=errors,stderr=errors)  # 启动后立即取得进程句柄，轮询 guest 标记而非等待进程退出。
@@ -67,9 +69,10 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                 text=serial.read_text(errors='replace') if serial.exists() else ''  # 日志尚未创建时取空串；暂时不完整的字节以替代字符读取。
                 complete_lines = text.splitlines(keepends=True)  # 保留行结束符，完整记录与写到一半的标记可区分。
                 if any(line.endswith('\n') and line.startswith(expected) for line in complete_lines):  # 生成器逐行检查，至少一个完整且以预期标记开头才成立。
-                    if case=='missing-memory':  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
+                    if case in ('missing-memory', 'trap-fatal'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
                         assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
                     else:  # 按当前profile的另一条完整验证路径处理。
+                        assert '[TRAP_DEMO_OK] ud=6 gp=13 resumed=2' in text # 正常启动必须真的从两种异常栈返回。
                         assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
                         assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。。
                         assert '[MEMORY_SUMMARY]' in text  # 完成之前应已记录实际内存总计。
