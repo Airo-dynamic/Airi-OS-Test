@@ -1,4 +1,4 @@
-#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
+#include "internal.h"  // 引入当前目录内部共享接口和基础函数
 static bool appearance(struct airi_console *console, const char *command, void *context) {  // 本扩展只消费完整的主题命令。
     struct ui_desktop *desktop = context;  // 原样取回 ui_init 绑定的桌面，数据由调用平台拥有。
     if (airi_strlen(command) == 9 && !airi_memcmp(command, "theme day", 9))  // 比较长度后再比较字节，不接受附带尾部参数。
@@ -27,13 +27,27 @@ void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) 
     s->backend = b;  // 把回调表和上下文复制进桌面，服务数据仍归服务拥有
     c->extension = appearance;  // 安装同步命令扩展；console 不包含主题或窗口类型。
     c->extension_context = s;   // 桌面和 console 都由平台持有，须覆盖后续输入调用。
-    s->console = c;   // 桌面借用同一console状态，Terminal不另复制日志
-    s->active = -1;   // 没有活动窗口，-1哨兵不能拿去索引应用数组
+    s->console = c;     // 桌面借用同一console状态，Terminal不另复制日志
+    s->active = -1;     // 没有活动窗口，-1哨兵不能拿去索引应用数组
+    s->editor_id = -1;  // 编辑器尚未绑定任何服务文件身份
+    s->file_clipboard = -1;  // 文件剪贴板没有服务id，不能发起复制或移动
     s->width = 1280;  // 绘图前暂用1280像素默认画布宽度
     s->height = 800;  // 绘图前暂用800像素默认画布高度
     copy(s->directory, sizeof(s->directory), "/home/airi/projects/telemetry");  // 把文字"/home/airi/projects/telemetry"复制到当前目录路径，sizeof(s->directory)是包含NUL的数组容量
-    ui_refresh(s);  // 首次查询当前目录，目录有效条数和选择下标由ui_refresh更新
-    ui_open(s, UI_TERMINAL);  // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
+    copy(s->editor_name, sizeof(s->editor_name), "Untitled");  // 把文字"Untitled"复制到当前文档名，sizeof(s->editor_name)是包含NUL的数组容量
+    ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
+    ui_open(s, b.mode == UI_REFERENCE ? UI_EDITOR : UI_TERMINAL);  // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
+    if (b.mode == UI_REFERENCE && s->file_count && b.read) {  // 参考服务有文件且提供read时，才尝试读取一份初始普通文档
+        for (unsigned i = 0; i < s->file_count; ++i)  // 只遍历本次目录快照有效前缀，未用槽不参与
+            if (!s->files[i].directory) {  // 跳过目录元信息，首个普通文件才可能作为Editor初始文档
+                if (b.read(b.context, s->files[i].id, s->editor, sizeof(s->editor))) {  // 按服务id完整读入成功后才绑定编辑身份、名称和保存副本
+                    s->editor_id = s->files[i].id;  // 读取或保存成功后绑定该快照项的服务id，后续保存用此身份而不用显示下标
+                    copy(s->editor_name, sizeof(s->editor_name), s->files[i].name);  // 把s->files[i].name复制到当前文档名，sizeof(s->editor_name)是包含NUL的数组容量
+                    copy(s->saved, sizeof(s->saved), s->editor);  // 把服务已接受的文字记录为独立保存点
+                }
+                break;  // 结束当前最近一层循环或应用分派，不执行其剩余候选
+            }
+    }
 }
 
 void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个应用，更新窗口次序和活动编号
@@ -44,9 +58,9 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
         int offset = (int)s->order_count * 24;  // 每个已排入次序的窗口错开24像素，新窗口避免完全重合
         w->rect = (struct ui_rect){92 + offset, 72 + offset, s->width - 152, s->height - 144};  // 新窗口从屏幕左上留92和72像素并按已有数量错开，宽高先扣固定边距
         if (w->rect.w < 720)  // 初始窗口宽度至少720像素，画布尺寸后续再约束
-            w->rect.w = 720;  // 首次打开宽度至少720像素；真正绘制时再按画布收窄
+            w->rect.w = 720;  // 初次打开宽度至少720像素；这里建立初始布局，ui_draw再按实际画布收窄
         if (w->rect.h < 480)  // 初始窗口高度至少480像素，画布尺寸后续再约束
-            w->rect.h = 480;  // 首次打开高度至少480像素；真正绘制时再按画布收窄
+            w->rect.h = 480;  // 初次打开高度至少480像素；当前画布不足时ui_draw再收窄可见矩形
         w->restore = w->rect;  // 保留当前普通窗口几何，退出最大化时可恢复
         w->open = true;  // 该应用窗口现在进入已打开状态
     }
@@ -58,10 +72,11 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
             s->order[n++] = s->order[i];  // 保留其他应用次序并压紧前缀，当前应用稍后追加
     s->order[n++] = (unsigned)app;  // 把当前应用放到绘图顺序末尾，使它成为顶层
     s->order_count = n;  // 记录去重后绘图顺序的有效长度
+    s->focus = UI_FOCUS_NONE;  // 当前字段结束接收，后续按键回到活动应用
 }
 
 void ui_service_state(struct ui_desktop *s, enum ui_state state) {  // 切换服务显示状态并刷新相应快照
     s->service_state = state;  // 用调用者指定状态切换服务反馈，随后刷新决定是否继续查询快照
-    ui_refresh(s);  // 按新服务状态重新查询；非正常状态留下0条有效元信息
+    ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
 }
 

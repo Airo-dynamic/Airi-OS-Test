@@ -1,4 +1,4 @@
-#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
+#include "internal.h"  // 引入当前目录内部共享接口和基础函数
 static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
 void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按当前窗口次序绘制整帧
@@ -79,6 +79,10 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_rect(r.x + 53, r.y + 12, 1, 24, U_CONTROL);  // 图标与标题使用一致的分隔尺度
         u_clip((struct ui_rect){r.x + 62, r.y + 1, r.w - 170, UI_TITLE_H - 2});  // 长文件名不会覆盖系统按钮
         u_label(r.x + 62, r.y + 14, heads[app], U_INK);  // 身份标签使用14像素Medium字形和额外字距，与普通正文区别
+        if (app == UI_EDITOR && r.w > 500) {  // 宽编辑器在标题后保留当前对象
+            u_text(r.x + 196, r.y + 14, "/", U_BODY, U_MUTED);  // 应用与文档层次分明
+            u_text(r.x + 220, r.y + 14, s->editor_name, U_MEDIUM, U_TEXT);  // 文件名保持正常大小写
+        }
         if (app == UI_TERMINAL && r.w > 600)  // 连接身份位于标题里，避免占用一整行工具栏
             u_text(r.x + 200, r.y + 15, s->backend.mode == UI_REFERENCE ? "/  Local console" : (s->backend.label ? s->backend.label : "Kernel console"), U_BODY, U_MUTED);  // 只报告实际接入类型
         u_reset_clip();  // 窗口操作区独立于标题裁剪

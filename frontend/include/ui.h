@@ -18,6 +18,7 @@ enum ui_app {  // 应用身份从零递增，与平台名称表和窗口数组�
 enum ui_mode { UI_LIVE, UI_REFERENCE };  // 区分内核真实服务与主机会话参考服务。
 enum ui_state { UI_NORMAL, UI_EMPTY, UI_LOADING, UI_ERROR, UI_OFFLINE };  // 列表和动作的可见服务状态，不等同线程调度状态。
 enum ui_action { UI_CREATE_FILE, UI_CREATE_DIR };  // 当前服务仅支持创建普通文件和目录
+enum ui_focus { UI_FOCUS_NONE, UI_FOCUS_FILTER, UI_FOCUS_FIND };  // 键入目标为应用正文、筛选字段或查找字段。
 enum ui_drag { UI_DRAG_NONE = -1 };  // 尚无指针拖动，初始化值表示无操作
 struct ui_file {  // 服务复制出来的一条文件快照，不保存文件内容。
     int id;  // 稳定服务身份，排序和筛选不改变它。
@@ -53,12 +54,29 @@ struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状�
     int active;  // 活动应用，-1表示当前没有。
     int width;   // 最近绘图的桌面宽度，单位像素。
     int height;  // 最近绘图的桌面高度，单位像素。
+    bool find;   // Editor查找栏是否展开。
+    bool dirty;  // 工作文本是否与最近成功保存内容不同。
+    bool selection;  // anchor与cursor之间是否构成有效选区。
     enum ui_state service_state;  // 当前界面服务状态，失败动作通过它显示。
-    char directory[128];      // 当前文件操作目录，有NUL终止。
+    char directory[128];  // 当前文件操作目录，有NUL终止。
+    char filter[UI_APP_COUNT][64];  // 每个应用独立筛选文本，二维数组先按应用再按字节。
+    char editor[UI_DOC_SIZE];  // 正在修改的工作文本，服务内容不会随按键自动改变。
+    char saved[UI_DOC_SIZE];   // 独立数组接收服务实际保存的文本。
+    char find_text[64];  // 查找输入字段，搜索结果映射回文档字节偏移。
+    unsigned cursor;     // 光标位于0..文本长度的字节间隙。
+    unsigned anchor;     // 选区起点间隙，拖动时固定。
+    unsigned editor_scroll;  // 正文顶部已卷走的行数。
+    unsigned editor_column_scroll;  // 正文左侧已卷走的字符列数。
     unsigned selection_file;  // 文件快照数组下标，不是文件id或排序后行。
+    int editor_id;  // 当前文档服务id，未保存的新文档另按创建路径处理。
+    int focus;      // 当前键入字段身份。
+    int sort;  // 列表排序方向，0/1切换。
+    int file_clipboard;    // 文件剪贴板保存源id，-1表示无。
+    char editor_name[64];  // 当前文档名称，保存和执行请求使用。
     struct ui_file files[UI_FILES];  // 当前目录的有界快照记录。
     unsigned file_count;  // files中有效条数，读取不得超过它。
-    unsigned theme;  // 桌面自己持有的日夜模式，文本会话不依赖此字段。
+    unsigned theme;    // 桌面自己持有的日夜模式，文本会话不依赖此字段。
+    unsigned density;  // Files列表行高，0为36像素、非0为28像素；当前绘图读取此值。
 };
 void ui_init(struct ui_desktop *, struct ui_backend, struct airi_console *);  // 初始化桌面，复制服务表并借用命令对象。
 void ui_open(struct ui_desktop *, enum ui_app);  // 打开、解除最小化并置顶指定应用。
@@ -68,5 +86,6 @@ void ui_refresh(struct ui_desktop *);  // 从当前目录取得最多32条文件
 void ui_fixture_backend(struct ui_backend *);  // 为主机观察填入会话内存参考服务，不进入guest。
 
 void u_icon(int, int, int, uint32_t);  // 在给定坐标以类型和颜色绘制小图标。
+unsigned ui_file_order(const struct ui_desktop *, unsigned *);  // 把当前文件排序位置写成快照下标数组并返回数量。
 void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应用身份分派内容绘图，rect已扣除标题栏。
 #endif  // 结束完整桌面接口的重复包含保护
