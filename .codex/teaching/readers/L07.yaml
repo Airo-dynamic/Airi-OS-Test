@@ -1,0 +1,19 @@
+checkpoint: L07
+baseline: baseline.yaml
+start: L06
+current_operation: 五个Linux读请求按cookie收取CQ，再独立FSYNC
+already_explained:
+- concept: 就绪不执行读
+  at: ../../../dev-log/linux/06-epoll.md#epoll-lt-et
+  establishes: epoll返回后应用仍调用recv，LT/ET依条件变化通知
+first_use:
+- concept: 部分提交与SQ身份
+  at: ../../../dev-log/linux/07-uring.md#uring-submit
+  establishes: get_sqe准备参数，submit只报告接受数量，数字cookie不依赖顺序
+- concept: CQ与借用缓冲
+  at: ../../../dev-log/linux/07-uring.md#uring-completion
+  establishes: 负res不是线程errno，短读只验证有效前缀，消费CQ与释放数据是不同动作
+not_assumed:
+- Linux允许io_uring、安装liburing即内核可用、完成必须乱序
+limits:
+- SSH255，实际Linux分支及依赖未验证；普通静态数组不称固定注册缓冲

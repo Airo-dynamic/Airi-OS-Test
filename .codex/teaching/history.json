@@ -214,6 +214,11 @@
       "id": "L06",
       "title": "L06 · epoll LT/ET、TCP背压与半关闭",
       "document": "dev-log/linux/06-epoll.md"
+    },
+    {
+      "id": "L07",
+      "title": "L07 · liburing批量提交、错误完成与缓冲寿命",
+      "document": "dev-log/linux/07-uring.md"
     }
   ]
 }
