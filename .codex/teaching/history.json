@@ -84,6 +84,11 @@
       "id": "T01",
       "title": "T01 · 从正文重建同一份源码",
       "document": "dev-log/tools/01-reconstruction.md"
+    },
+    {
+      "id": "T02",
+      "title": "T02 · 固定来源并保护快照",
+      "document": "dev-log/tools/02-snapshots.md"
     }
   ]
 }

@@ -1,0 +1,41 @@
+checkpoint: 'T02'
+baseline: baseline.yaml
+start: 'T01'
+current_operation: 固定一次课程输入导出K13，核对重复导出的摘要，再保护完整HISTORY的构造与交接
+already_explained:
+- concept: 完整源码状态与摘要
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-edits
+  establishes: state保存相对路径到完整字符串，digest按UTF-8计算摘要，源码可先在内存重建再写盘
+- concept: 新目录重建和失败现场
+  at: ../../../dev-log/tools/01-reconstruction.md#t01-replay
+  establishes: 目标原身份先检查再resolve，只写变化文件，run失败保留退出状态及replay记录
+- concept: 内存归档字节
+  at: ../../../dev-log/linux/01-entry.md#code-scripts-linux-lab-py-2
+  establishes: tar字节可经BytesIO交给tarfile读取，解包位置和归档内相对路径是两层关系
+first_use:
+- concept: 不变提交与可变分支
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-git-model
+  establishes: SHA固定提交树，first-parent沿本路线前驱读取身份；参考分支约定不要求学习者重建相同Git历史
+- concept: 尾注、引用和两种提交位置
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-branches
+  establishes: 本地引用缺失才读已有origin引用；commit指教学停点，branch_commit指本次材料终点，维护提交可无教学身份
+- concept: 归档数据形状与输出保护
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-output-protection
+  establishes: files值为bytes与权限二元组，摘要只比较字节；归档成员先核对，旧HISTORY按生成器身份和全部文件摘要判断是否可替换
+- concept: 一次固定输入与可选GUI
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-freeze
+  establishes: Git读取固定树，普通包双读核对后写独立视图；两种来源分别记录SHA或材料摘要，GUI拒绝覆盖主线及合并父链
+- concept: 输出清单的范围
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-composition
+  establishes: 先replay再复制纯资料，core最后记录给主线累计文件，图形owned取组合差集；只为实际选择生成图形清单和字体
+- concept: 文件锁、备用目录与异常恢复
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-lock
+  establishes: 锁排除同工程另一生成器但不阻止编辑器；stage完成后核对并移开旧树，BaseException先恢复，失败保留持久backup，两个rename不是整体不可分割操作
+borrowed:
+- component: Git、tar归档与macOS/Linux宿主文件系统
+  contract: Git参考模式读取已声明分支，学习者可用无Git纯资料观察；字体资产按锁与配方复制，不从终点源码补实现
+feedback:
+- source: 独立完整阅读审查
+  observation: 仅写固定来源和安全替换，无法辨认教学提交、分支终点、内存文件表及新旧目录各自的状态。
+  revision: 分开解释commit与branch_commit、files的字节权限形状、source与来源字典，以及target/stage/previous的交接与失败范围。
+not_inferred: 已解释、敲完或运行成功不证明理解；隔离资料导出不等于真实guest再次运行。

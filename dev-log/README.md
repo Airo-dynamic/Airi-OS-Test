@@ -1,4 +1,4 @@
-# AiriOS · T01
+# AiriOS · T02
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -18,3 +18,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [K13 · 把已有构建、运行与观察收拢为统一入口](core/13-commands.md)
 - [L01 · 对照 Linux 的函数调用、系统调用与内核入口](linux/01-entry.md)
 - [T01 · 从正文重建同一份源码](tools/01-reconstruction.md)
+- [T02 · 固定来源并保护快照](tools/02-snapshots.md)
