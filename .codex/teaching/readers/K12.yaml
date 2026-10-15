@@ -1,0 +1,38 @@
+checkpoint: 'K12'
+baseline: baseline.yaml
+start: 'K11'
+current_operation: 独立启动四种配置，再通过UART和PS/2核对本次命令结果
+already_explained:
+- concept: UART字节与命令提交
+  at: ../../../dev-log/core/10-input.md#uart-input-path
+  establishes: 父进程发送bytes，虚拟设备交内核积累，回车后生成命令结果和递增提交计数
+- concept: 进程句柄、单调时钟与清理
+  at: ../../../dev-log/core/07-first-boot.md#qemu-machine
+  establishes: Popen返回运行中的进程，poll检查是否退出；截止时间限制等待，finally终止并wait回收本次进程
+- concept: 串口实现与故障配置
+  at: ../../../dev-log/core/11-serial-build.md#serial-build-rules
+  establishes: profile分别选择显示实现与故障宏，当前串口配置预期graphics为0
+first_use:
+- concept: 默认参数与启动参数构造
+  at: ../../../dev-log/core/12-boot-tests.md#qemu-parameters
+  establishes: command复制本轮固件变量并返回参数列表，gui/debug/debug_port可用具名参数覆盖，调用方才启动进程
+- concept: QMP消息与本机流式连接
+  at: ../../../dev-log/core/12-boot-tests.md#qmp-messages
+  establishes: QMP控制QEMU，UART传guest设备字节；JSON文字加换行后编码，readline还原消息，event不结束请求，嵌套with依次关闭包装和连接
+- concept: 本轮启动的完整记录
+  at: ../../../dev-log/core/12-boot-tests.md#boot-observation
+  establishes: 删除旧日志和结果，正常等待换行READY，缺地图等待具体PANIC，成功后才写汇总
+- concept: 非阻塞接收、闭包与完成偏移
+  at: ../../../dev-log/core/12-boot-tests.md#console-observation
+  establishes: UART先接再cont；字节累积后解码，after排除旧文本，完整行精确匹配状态字段，超时和提前退出都收回进程
+- concept: 参数收集、列表推导与nonlocal
+  at: ../../../dev-log/core/12-boot-tests.md#qmp-keys
+  establishes: key的星号形参把键名收集为元组，再形成qcode字典列表；run通过nonlocal递增同一个提交计数并等待对应新结果
+borrowed:
+- component: QEMU的QMP和字符设备socket
+  contract: QMP模拟键盘或继续CPU，UART连接交接设备字节；两条主机连接均不向guest传Python对象
+feedback:
+- source: 2026-10-15独立教程审查
+  observation: 完整记录要求仅在boot.check成立，console等待原先只匹配子串。
+  revision: console等待完整换行，去确定提示符和CRLF后精确比较命令字段；READY按独立标记加空格边界接受字段。
+not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
