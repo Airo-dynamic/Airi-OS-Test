@@ -71,7 +71,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     (work/'command.json').write_text(json.dumps(cmd,indent=2))  # 保存实际参数列表供本轮复现。
     case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
-    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]'  # 正常配置等完整进程阶段，旧阶段标记只保留兼容。
+    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]' if case == 'block-timeout' else '[AIRI_P4_READY]' # 正常配置等完整存储阶段，隔离盘只保留进程可用标记。
     if case == 'block-missing': # 缺盘是明确设备初始化失败，不能继续宣称存储可用。
         expected = '[AIRI_PANIC] virtio block initialization failed' # 错误码另外核对。
     if case in ('trap-fatal', 'stack-guard'): # 未处理异常镜像必须进入具体停止路径。
@@ -98,6 +98,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         assert journal_marker in text # 正常配置必须真实恢复并替换坏尾。
                         storage_marker = '[STORAGE_SKIPPED]' if case == 'block-timeout' else '[STORAGE_RECOVERED]' # 只读仍可恢复，隔离盘不能提供空日志。
                         assert storage_marker in text # 正式区必须实际扫描或明确未提供。
+                        assert '[PIPE_USER_OK]' in text # 有界流、背压、关闭与fork共享均已实际运行。
                         assert '[FILES_USER_OK]' in text and '[FD_EXEC_OK]' in text # RAM文件和成功exec继承均完成。
                         assert '[PROCESS_FORK_WAIT_OK]' in text and '[PROCESS_DEMO_OK]' in text # 复制、真实阻塞、timer换身份和回收都须完成。
                         assert '[ELF_LOAD]' in text and '[ELF_USER_OK]' in text # 独立ELF段、BSS与用户libc必须真正运行。

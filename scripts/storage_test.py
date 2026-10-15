@@ -63,7 +63,7 @@ def check_storage_restart(profile='normal'): # 对当前构建正常或图形正
                                 raise RuntimeError(f'Guest exited before {marker}') # 保留目标身份。
                             time.sleep(.05) # 等设备与CPU推进。
                         raise RuntimeError(f'Restart test timed out: {marker}; see {serial}') # 明确失败文件。
-                    text = wait('[AIRI_P3_READY] ') # 全部初始化和用户演示结束后才输入。
+                    text = wait('[AIRI_P4_READY] ') # 全部初始化和用户演示结束后才输入。
                     assert kernel_marker in text and '[AIRI_PANIC]' not in text # 当前新CPU必须扫描出指定前缀。
                     offset = len(text) # 用户命令只消费之后的新输出。
                     wire.sendall((request + '\n').encode()) # 通过实际UART提交控制台命令。

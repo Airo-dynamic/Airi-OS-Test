@@ -3,9 +3,11 @@
 #define OPEN_COUNT 24u // 全局打开对象容量与每进程FD容量不同。
 #define FILE_BYTES 1024u // 每个可写文件的固定字节上限。
 struct memory_file { char name[32]; uint8_t data[FILE_BYTES]; size_t size; bool readonly; }; // 名字和内容跨程序会话存活，重启丢失。
-struct airi_open_file { struct memory_file *node; uint64_t offset; unsigned flags, references; }; // 多个表项可共享同一个偏移。
+struct memory_pipe { uint8_t data[64]; unsigned head, size, readers, writers; }; // 四个固定环，端点最终引用消失才回收。
+struct airi_open_file { struct memory_file *node; struct memory_pipe *pipe; uint64_t offset; unsigned flags, references; }; // 多个表项可共享同一个偏移。
 static struct memory_file nodes[NODE_COUNT]; // 初值零表示空目录槽。
 static struct airi_open_file opened[OPEN_COUNT]; // 引用数零表示空打开槽。
+static struct memory_pipe pipes[4]; // readers与writers都零表示未使用的管道。
 static struct airi_open_file terminal; // 固定串口对象，不含RAM文件内容。
 static struct airi_open_file *get(const struct airi_fd_table *table, unsigned fd) { // 用户整数必须先做范围检查。
     return fd < AIRI_FD_COUNT ? table->entries[fd].file : NULL; // 不把FD转成内核指针。
@@ -18,6 +20,7 @@ static int empty_fd(const struct airi_fd_table *table) { // 低编号优先，�
 }
 void airi_files_init(void) { // 启动一次，不能在仍有FD时重置。
     airi_memset(nodes, 0, sizeof(nodes)); // 清空名字、内容和长度。
+    airi_memset(pipes, 0, sizeof(pipes)); // 启动前没有端点或在途字节。
     airi_memset(opened, 0, sizeof(opened)); // 清空全局打开对象。
     airi_memset(&terminal, 0, sizeof(terminal)); // 固定对象没有自有节点。
     terminal.flags = AIRI_OPEN_WRITE; // 当前只提供stdout/stderr。
@@ -43,8 +46,17 @@ long airi_fd_close(struct airi_fd_table *table, unsigned fd) { // 关闭表项�
     if (!file) // 无效或已关闭。
         return -9; // -EBADF。
     table->entries[fd] = (struct airi_fd_entry){0}; // 先撤掉进程引用。
-    if (--file->references == 0 && file != &terminal) // 最后引用消失才归还全局槽。
-        airi_memset(file, 0, sizeof(*file)); // 下一次open取得独立偏移。
+    if (--file->references == 0 && file != &terminal) { // 最后表项引用消失才关闭真实端点。
+        if (file->pipe) { // 普通RAM文件没有管道对端状态。
+            if (file->flags & AIRI_OPEN_READ) // 当前是只读端点打开对象。
+                --file->pipe->readers; // dup/fork共享对象，不能每关一个FD都减端点数。
+            else // pipe创建的另一个打开对象是写端。
+                --file->pipe->writers; // 最后写端消失后，读者排空再EOF。
+            if (!file->pipe->readers && !file->pipe->writers) // 所有端点引用真正结束。
+                airi_memset(file->pipe, 0, sizeof(*file->pipe)); // 未读内容丢弃，槽可供新管道使用。
+        }
+        airi_memset(file, 0, sizeof(*file)); // 回收全局打开对象，不误清别人的共享偏移。
+    }
     return 0; // 节点内容保留到重启或truncate。
 }
 void airi_fd_close_all(struct airi_fd_table *table, bool exec_only) { // 多次清理空表安全。
@@ -90,7 +102,7 @@ long airi_fd_open(struct airi_fd_table *table, const char *path, unsigned flags)
     }
     if (flags & AIRI_OPEN_TRUNCATE) // 有写权限且不会因表满再失败。
         node->size = 0; // 后续扩洞时再显式清零，旧尾不对读者可见。
-    *file = (struct airi_open_file){node, 0, flags & 3u, 1}; // 独立open得到新偏移0。
+    *file = (struct airi_open_file){.node = node, .flags = flags & 3u, .references = 1}; // 独立open得到新偏移0。
     table->entries[fd] = (struct airi_fd_entry){file, (flags & AIRI_OPEN_CLOEXEC) != 0}; // 标志按表项保存。
     return fd; // 用户只拿整数。
 }
@@ -123,6 +135,32 @@ static long transfer(struct airi_fd_table *table, unsigned fd, void *buffer, siz
     struct airi_open_file *file = get(table, fd); // 当前表里的整数转内部对象。
     if (!file || !(file->flags & (write ? AIRI_OPEN_WRITE : AIRI_OPEN_READ))) // 错误访问模式也返回EBADF。
         return -9; // 无副作用。
+    if (file->pipe) { // 端点使用FIFO字节流，不使用文件偏移。
+        struct memory_pipe *pipe = file->pipe; // 内核共享缓冲，不直接借用户地址。
+        if (positioned) // pread/pwrite不能定位流。
+            return -29; // -ESPIPE。
+        if (!bytes) // 零长度不消费或等待，不检查对端存在。
+            return 0; // 访问模式已经核对。
+        if (write && !pipe->readers) // 没有任何读端，数据永远无人接收。
+            return -32; // 自有EPIPE，不发Linux SIGPIPE。
+        unsigned available = write ? (unsigned)sizeof(pipe->data) - pipe->size : pipe->size; // 写看空位，读看已占字节。
+        if (!available) // 暂无进展不等于永久结束。
+            return !write && !pipe->writers ? 0 : -11; // 读端无写者为EOF，其余EAGAIN。
+        if (bytes > available) // 本项目允许有界短写，不宣称Linux PIPE_BUF原子性。
+            bytes = available; // 只处理当前可完成前缀。
+        for (size_t i = 0; i < bytes; ++i) // 最多64字节，直接按环下标复制。
+            if (write) // 写入当前尾部，不覆盖未读数据。
+                pipe->data[(pipe->head + pipe->size + i) % sizeof(pipe->data)] = ((const uint8_t *)buffer)[i]; // 尾部越界时回到0。
+            else // 读取最老的未消费字节。
+                ((uint8_t *)buffer)[i] = pipe->data[(pipe->head + i) % sizeof(pipe->data)]; // 按FIFO顺序交回。
+        if (write) // 完成数据复制后再发布可读数量。
+            pipe->size += (unsigned)bytes; // 后续就绪查询才能看到新字节。
+        else { // 读后释放环空间。
+            pipe->head = (pipe->head + (unsigned)bytes) % (unsigned)sizeof(pipe->data); // 推进读头。
+            pipe->size -= (unsigned)bytes; // 写者随后可继续。
+        }
+        return (long)bytes; // 实际前缀长度，不保留本次buffer。
+    }
     struct memory_file *node = file->node; // 终端不在此处直接访问端口。
     if (!node) // 不支持的设备操作。
         return -29; // -ESPIPE。
@@ -160,4 +198,51 @@ unsigned airi_files_open_count(void) { // 验证退出与exec没有遗留打开�
     for (unsigned i = 0; i < OPEN_COUNT; ++i) // 固定全局容量。
         count += opened[i].references != 0; // 返回对象数量，不是表项数量。
     return count; // 终端固定对象单独管理，不占此表。
+}
+
+long airi_fd_pipe(struct airi_fd_table *table, unsigned ends[2], bool nonblocking) { // 所有容量检查完成前不发布任何端点。
+    unsigned fds[2], count = 0; // 两个最低空编号，不先占一个再回滚。
+    for (unsigned i = 0; i < AIRI_FD_COUNT && count < 2; ++i) // 有界寻找两个空表项。
+        if (!table->entries[i].file) // 不碰已有文件和终端。
+            fds[count++] = i; // 只保存在内核局部数组。
+    if (count != 2) // 不能留下半个管道。
+        return -24; // -EMFILE。
+    struct airi_open_file *files[2]; // 两个独立端点打开对象。
+    count = 0; // 复用计数只找本类资源。
+    for (unsigned i = 0; i < OPEN_COUNT && count < 2; ++i) // 全局容量独立检查。
+        if (!opened[i].references) // 未发布槽。
+            files[count++] = &opened[i]; // 尚未加引用。
+    if (count != 2) // 有FD不代表有内核打开槽。
+        return -23; // -ENFILE。
+    struct memory_pipe *pipe = NULL; // 只有两个端点都消失才可复用缓冲。
+    for (unsigned i = 0; i < 4; ++i) // 固定四个环。
+        if (!pipes[i].readers && !pipes[i].writers) { // 未使用，不会匹配仍有一端的流。
+            pipe = &pipes[i]; // 取得整个环的所有权。
+            break; // 不重复占用。
+        }
+    if (!pipe) // 全局流数量达到上限。
+        return -28; // -ENOSPC，输出与表都仍未改。
+    airi_memset(pipe, 0, sizeof(*pipe)); // 新流不含上一流未读字节。
+    pipe->readers = pipe->writers = 1; // 每端一个打开对象，引用数由FD再管理。
+    for (unsigned i = 0; i < 2; ++i) { // 分别发布只读端和只写端。
+        *files[i] = (struct airi_open_file){.pipe = pipe, .flags = (i ? AIRI_OPEN_WRITE : AIRI_OPEN_READ) | (nonblocking ? AIRI_OPEN_NONBLOCK : 0), .references = 1}; // 两端共享同一个环。
+        table->entries[fds[i]] = (struct airi_fd_entry){.file = files[i]}; // 初始不设CLOEXEC，dup可另选。
+        ends[i] = fds[i]; // 所有资源都齐后才写输出编号。
+    }
+    return 0; // 不把内部指针交给用户。
+}
+long airi_fd_ready(const struct airi_fd_table *table, unsigned fd) { // 查询当前条件，不保存边沿事件。
+    struct airi_open_file *file = get(table, fd); // 完整编号由陷入层校验。
+    if (!file) // 已关闭不该继续使用旧就绪状态。
+        return -9; // -EBADF。
+    if (!file->pipe) // 不把RAM文件或终端冒充已支持的事件源。
+        return -95; // -EOPNOTSUPP。
+    const struct memory_pipe *pipe = file->pipe; // 同一不可抢占调用内状态稳定。
+    if (file->flags & AIRI_OPEN_READ) // 读端可读包括EOF。
+        return (pipe->size || !pipe->writers ? AIRI_READY_READ : 0) | (!pipe->writers ? AIRI_READY_HUP : 0); // HUP不丢弃仍可读取数据。
+    return (pipe->readers && pipe->size < sizeof(pipe->data) ? AIRI_READY_WRITE : 0) | (!pipe->readers ? AIRI_READY_ERROR : 0); // 就绪描述条件，不保证下次操作一定成功。
+}
+bool airi_fd_nonblocking(const struct airi_fd_table *table, unsigned fd) { // 后续系统调用层决定遇EAGAIN如何处理。
+    struct airi_open_file *file = get(table, fd); // 不直接解用户值。
+    return file && (file->flags & AIRI_OPEN_NONBLOCK); // 不支持或无效对象不会被当成非阻塞流。
 }

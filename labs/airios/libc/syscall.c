@@ -73,3 +73,10 @@ long airi_log_read(unsigned index, void *data, size_t capacity) { // 内核验�
 long airi_log_count(void) { // 只返回数值，不借内核对象。
     return call3(19, 0, 0, 0); // 真实恢复失败保持负错误。
 }
+
+long airi_pipe(unsigned ends[2], unsigned nonblocking) { // 内核先验证输出再原子创建两个FD。
+    return call3(20, (uintptr_t)ends, nonblocking, 0); // 成功后ends[0]读、ends[1]写。
+}
+long airi_ready(unsigned fd) { // 仅查询当前管道条件。
+    return call3(21, fd, 0, 0); // 返回掩码或负错误，不能把负数当事件位。
+}

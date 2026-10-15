@@ -45,6 +45,39 @@ int main(void) { // 独立进程，每次建立干净RAM目录。
     airi_fd_close_all(&tables[0], false); // 清全局引用的一部分。
     airi_fd_close_all(&tables[1], false); // 清剩余部分。
     assert(!airi_files_open_count()); // 所有槽均可再次复用。
-    puts("PASS RAM files: offsets, fork/exec references, sparse zero, short I/O, transactional exhaustion"); // 全部边界通过才发布。
+    airi_fd_init(&parent); // 继续用同一文件系统测试管道资源，不重置已有状态。
+    unsigned ends[2] = {77, 88}; // 创建失败必须保留输出身份。
+    assert(!airi_fd_pipe(&parent, ends, true) && ends[0] == 0 && ends[1] == 3); // 两个最低空FD。
+    assert(airi_fd_ready(&parent, 0) == 0 && airi_fd_ready(&parent, 3) == AIRI_READY_WRITE); // 空管道的双端条件不同。
+    assert(airi_fd_read(&parent, 0, data, 1, false, 0) == -11); // 有写者时空读不是EOF。
+    char input[100], output[100]; // 模式覆盖整个环并越过容量。
+    for (unsigned i = 0; i < sizeof(input); ++i) // 每个位置有明确值。
+        input[i] = (char)i; // 可检查FIFO和回绕。
+    assert(airi_fd_write(&parent, 3, input, 100, false, 0) == 64); // 容量边界产生短写。
+    assert(airi_fd_write(&parent, 3, input, 1, false, 0) == -11 && airi_fd_ready(&parent, 3) == 0); // 满流形成背压。
+    assert(airi_fd_read(&parent, 0, output, 10, false, 0) == 10 && !airi_memcmp(output, input, 10)); // 先释放一段空间。
+    assert(airi_fd_write(&parent, 3, input, 10, false, 0) == 10); // 新数据跨环尾。
+    assert(airi_fd_read(&parent, 0, output, 100, false, 0) == 64 && !airi_memcmp(output, input + 10, 54) && !airi_memcmp(output + 54, input, 10)); // 完整FIFO次序不被回绕改变。
+    airi_fd_clone(&child, &parent); // fork后端点存在直到最后共享引用消失。
+    assert(!airi_fd_close(&parent, 3) && airi_fd_read(&parent, 0, data, 1, false, 0) == -11); // 子仍持写端，不能提前EOF。
+    assert(!airi_fd_close(&child, 3) && airi_fd_ready(&parent, 0) == (AIRI_READY_READ | AIRI_READY_HUP)); // 最后写引用消失才HUP。
+    assert(airi_fd_read(&parent, 0, data, 1, false, 0) == 0); // 排空后真正EOF。
+    airi_fd_close_all(&child, false); // 关闭子读端引用，不破坏父。
+    airi_fd_close_all(&parent, false); // 最后读端结束，缓冲可复用。
+    assert(!airi_files_open_count()); // 两端对象全部归还。
+    airi_fd_init(&parent); // 新会话再建新管道。
+    assert(!airi_fd_pipe(&parent, ends, true)); // 旧流字节必须清零丢弃。
+    assert(!airi_fd_close(&parent, ends[0])); // 不再存在任何读者。
+    assert(airi_fd_write(&parent, ends[1], input, 1, false, 0) == -32 && airi_fd_ready(&parent, ends[1]) == AIRI_READY_ERROR); // 写端收到EPIPE和错误就绪。
+    assert(airi_fd_write(&parent, ends[1], NULL, 0, false, 0) == 0); // 零长度不访问buffer，也不等待对端。
+    airi_fd_close_all(&parent, false); // 回收断流。
+    airi_fd_init(&parent); // 四个流总共八个端点，小于本进程FD容量。
+    for (unsigned i = 0; i < 4; ++i) // 填满独立管道池。
+        assert(!airi_fd_pipe(&parent, ends, true)); // 每次两个端点完整成功。
+    ends[0] = 77; ends[1] = 88; // 失败输出哨兵。
+    assert(airi_fd_pipe(&parent, ends, true) == -28 && ends[0] == 77 && ends[1] == 88 && airi_files_open_count() == 8); // 第五条失败不泄漏半个FD或对象。
+    airi_fd_close_all(&parent, false); // 扫描全部表项，端点池也全部回收。
+    assert(!airi_files_open_count()); // 后续程序可继续创建流。
+    puts("PASS RAM files/pipes: offsets, fork/exec references, sparse zero, short I/O, FIFO wrap, endpoint lifetime, exhaustion"); // 全部边界通过才发布。
     return 0; // 宿主测试成功。
 }

@@ -8,6 +8,11 @@
 #define AIRI_OPEN_CREATE 4u // 名称不存在时创建。
 #define AIRI_OPEN_TRUNCATE 8u // 有写权限才可清空。
 #define AIRI_OPEN_CLOEXEC 16u // 成功替换时关闭此表项。
+#define AIRI_OPEN_NONBLOCK 32u // 管道可显式选择非阻塞，不支持普通文件open这个标志。
+#define AIRI_READY_READ 1u // 管道读不会等待，可能得到数据或EOF。
+#define AIRI_READY_WRITE 2u // 当前有读者且有缓冲空间。
+#define AIRI_READY_HUP 4u // 读端已无写者，仍须先消费已有数据。
+#define AIRI_READY_ERROR 8u // 写端已无读者，下一次写得到EPIPE。
 struct airi_open_file; // 全局打开对象由实现拥有。
 struct airi_fd_entry { struct airi_open_file *file; bool cloexec; }; // 偏移不放在进程表项中。
 struct airi_fd_table { struct airi_fd_entry entries[AIRI_FD_COUNT]; }; // fork逐项增加引用。
@@ -22,5 +27,8 @@ long airi_fd_seek(struct airi_fd_table *table, unsigned fd, uint64_t offset); //
 long airi_fd_read(struct airi_fd_table *table, unsigned fd, void *buffer, size_t bytes, bool positioned, uint64_t offset); // 输出是内核副本。
 long airi_fd_write(struct airi_fd_table *table, unsigned fd, const void *buffer, size_t bytes, bool positioned, uint64_t offset); // 输入不被异步保留。
 bool airi_fd_console(const struct airi_fd_table *table, unsigned fd); // 终端发送由设备适配完成。
+long airi_fd_pipe(struct airi_fd_table *table, unsigned ends[2], bool nonblocking); // 原子创建两个FD和有界共享缓冲，失败不改输出。
+long airi_fd_ready(const struct airi_fd_table *table, unsigned fd); // 本阶段只查询管道当前条件，不订阅事件。
+bool airi_fd_nonblocking(const struct airi_fd_table *table, unsigned fd); // 后续等待层据此决定是否可阻塞。
 unsigned airi_files_open_count(void); // 不含固定终端对象，用于会话回收检查。
 #endif // 结束保护。

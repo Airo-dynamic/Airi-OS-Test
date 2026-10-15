@@ -32,4 +32,10 @@ long airi_pwrite(unsigned fd, const void *buffer, size_t bytes, uint64_t offset)
 long airi_log_append(const void *data, size_t bytes); // 最多480字节，成功返回从1开始的sequence。
 long airi_log_read(unsigned index, void *data, size_t capacity); // 索引从0，返回实际长度。
 long airi_log_count(void); // 已恢复有效前缀，错误为负。
+#define AIRI_READABLE 1u // 当前read可得到数据或EOF。
+#define AIRI_WRITABLE 2u // 当前有读者和空位。
+#define AIRI_HANGUP 4u // 最后写者关闭，仍应排空已有数据。
+#define AIRI_ERROR 8u // 最后读者关闭，写将EPIPE。
+long airi_pipe(unsigned ends[2], unsigned nonblocking); // 本节仅支持nonblocking=1。
+long airi_ready(unsigned fd); // 管道当前条件查询，不是Linux epoll ABI。
 #endif // 结束包含保护。

@@ -179,6 +179,11 @@
       "id": "L04",
       "title": "L04 · Linux向量I/O、文件缓存、直接I/O与同步替换",
       "document": "dev-log/linux/04-storage.md"
+    },
+    {
+      "id": "K28",
+      "title": "K28 · 非阻塞管道、背压、端点引用与当前就绪",
+      "document": "dev-log/core/28-pipes.md"
     }
   ]
 }

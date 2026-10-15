@@ -40,6 +40,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_pipes_elf_start[], airi_pipes_elf_end[]; // 非阻塞管道用户程序。
 extern const uint8_t airi_storage_elf_start[], airi_storage_elf_end[]; // 写入和恢复共用一份明确分支的用户ELF。
 extern const uint8_t airi_files_elf_start[], airi_files_elf_end[]; // 内存文件用户工作负载。
 extern const uint8_t airi_worker_elf_start[], airi_worker_elf_end[]; // exec目标是另一个独立静态ELF。
@@ -49,6 +50,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
     {"worker", airi_worker_elf_start, airi_worker_elf_end},
+    {"pipes", airi_pipes_elf_start, airi_pipes_elf_end}, // 有界FIFO与关闭语义。
     {"storage", airi_storage_elf_start, airi_storage_elf_end}, // 显式提交记录。
     {"recover", airi_storage_elf_start, airi_storage_elf_end}, // 只读取已恢复记录。
     {"files", airi_files_elf_start, airi_files_elf_end}, // 真实用户FD演示。
@@ -517,6 +519,21 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = (uint64_t)result; // 同一次用户调用取得精确结果。
     } else if (f->rax == 19) // 已恢复前缀数值查询。
         f->rax = (uint64_t)airi_storage_count(); // 缺设备或不确定状态返回负数。
+    else if (f->rax == 20) { // pipe原子创建并返回两个整数，不暴露内部环。
+        unsigned ends[2]; // 内核副本，发布前用户输出已验证。
+        long result; // 0或负错误。
+        if (f->rsi != 1) // 本节只发布非阻塞模式，阻塞接下一阶段。
+            result = -22; // -EINVAL。
+        else if (!user_access(current, f->rdi, sizeof(ends), true)) // 坏输出不能创建无法交给用户的FD。
+            result = -14; // -EFAULT。
+        else { // 没有半次FD分配的用户可见状态。
+            result = airi_fd_pipe(&current->files, ends, true); // 两端和缓冲都齐后才成功。
+            if (!result && !copy_user(current, ends, f->rdi, sizeof(ends), true)) // 映射在本次调用中不应变化。
+                airi_panic("validated pipe output mapping changed"); // 明确内核不变量。
+        }
+        f->rax = (uint64_t)result; // 失败输出保持原值。
+    } else if (f->rax == 21) // 当前就绪条件查询，不保存通知事件。
+        f->rax = f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_ready(&current->files, (unsigned)f->rdi) : (uint64_t)-9ll; // 完整64位编号先限制。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     return airi_user_resume(f); // 普通调用继续同一用户，仍检查RSP与标志。
@@ -576,13 +593,14 @@ void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回�
     run_one(airi_hello_elf_start, (size_t)((uintptr_t)airi_hello_elf_end - (uintptr_t)airi_hello_elf_start), "hello", 0, true, false, false); // 独立C和自有用户库。
     run_one(airi_process_elf_start, (size_t)((uintptr_t)airi_process_elf_end - (uintptr_t)airi_process_elf_start), "processes", 0, true, false, true); // 真实多进程复制、抢占、阻塞与回收。
     run_one(airi_files_elf_start, (size_t)((uintptr_t)airi_files_elf_end - (uintptr_t)airi_files_elf_start), "files", 0, true, false, false); // 文件内容、共享偏移与exec引用回收。
+    run_one(airi_pipes_elf_start, (size_t)((uintptr_t)airi_pipes_elf_end - (uintptr_t)airi_pipes_elf_start), "pipes", 0, true, false, false); // 真实FIFO、背压、关闭和fork共享。
     airi_log("[USER_DEMO_OK] ring=3 syscall=int80 bad_pointers=2 user_gp=13 user_pf=14 bad_rsp=rejected reclaimed=1"); // 完整会话结束，仍回串口命令。
 }
 
 bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
     size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
     if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
-        airi_console_print(console, "programs: hello processes worker broken files storage recover"); // broken是明确损坏的演示输入。
+        airi_console_print(console, "programs: hello processes worker broken files storage recover pipes"); // broken是明确损坏的演示输入。
         return true; // 已处理，不再交给图形扩展。
     }
     if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。

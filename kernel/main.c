@@ -73,6 +73,8 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
              (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
     airi_log("[AIRI_P2_READY] exceptions=1 pages=1 own_cr3=1 heap=1"); // 所有内存演示和控制台初始化结束后才发布阶段完成。
     airi_log("[AIRI_P3_READY] user=ring3 elf=static fork=copy exec=transaction wait=blocked"); // 完整内核进程路径结束并恢复后才发布。
+    if (airi_storage_count() >= 0) // 超时隔离的故障镜像不宣称磁盘阶段可用。
+        airi_log("[AIRI_P4_READY] files=ram pipes=nonblocking block=virtio journal=crc writable=%u", !airi_block_readonly()); // Linux实测状态另记，不由guest标记证明。
     airi_serial_write("airi> ");  // 输出首个串口提示符。
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。

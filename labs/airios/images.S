@@ -33,3 +33,9 @@ airi_files_elf_end: /* 映像右端，不把后续字节算入文件。 */
 airi_storage_elf_start: /* 文件首。 */
 .incbin AIRI_STORAGE_ELF /* 本配置真实链接的用户ELF。 */
 airi_storage_elf_end: /* 文件半开右端。 */
+
+.section .rodata /* 独立管道用户映像。 */
+.global airi_pipes_elf_start, airi_pipes_elf_end /* 只发布文件边界。 */
+airi_pipes_elf_start: /* 文件起点。 */
+.incbin AIRI_PIPES_ELF /* 当前配置的真实ELF。 */
+airi_pipes_elf_end: /* 文件右端。 */

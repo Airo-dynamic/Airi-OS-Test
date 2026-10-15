@@ -205,11 +205,11 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -c $< -o $@
 
 # 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
 USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
@@ -256,3 +256,14 @@ $(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h
 $(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/program.ld
 # 用户库没有宿主libc依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/storage.o -o $@
+
+# 非阻塞管道有独立用户main，保持前面程序各自可运行。
+$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h
+# 当前配置目录单独建立。
+	@mkdir -p $(dir $@)
+# 不链接内核头或宿主运行时。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 管道程序只复用自有用户入口与库。
+$(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
+# 保持相同低地址ELF布局。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/pipes.o -o $@

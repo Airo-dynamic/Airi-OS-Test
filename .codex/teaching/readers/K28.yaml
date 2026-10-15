@@ -1,0 +1,23 @@
+checkpoint: K28
+baseline: baseline.yaml
+start: K27 + L04
+current_operation: 64字节管道的短写、回绕、EOF、EPIPE及父子共享
+already_explained:
+- concept: FD与打开对象引用
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: fork/dup加引用，exec转移，最后引用才回收对象
+first_use:
+- concept: FIFO环与端点寿命
+  at: ../../../dev-log/core/28-pipes.md#pipe-endpoint-owner
+  establishes: head/size定位字节，端点只在打开对象最后引用消失时关闭，两端结束才复用环
+- concept: 当前条件与实际I/O结果
+  at: ../../../dev-log/core/28-pipes.md#pipe-conditions
+  establishes: EAGAIN、EOF、EPIPE分开，HUP需排空数据，当前ready不承诺下次仍可完成
+- concept: P4完成标记的边界
+  at: ../../../dev-log/core/28-pipes.md#p4-ready
+  establishes: 内核存储就绪与Linux未验证分别记录，当前仍同步等待
+not_assumed:
+- Linux PIPE_BUF原子性、epoll兼容、用户I/O阻塞或设备异步完成
+limits:
+- 本节仅发布nonblocking=1，阻塞接下一阶段
+- Linux对照仍未验证，不把READY当跨环境证明
