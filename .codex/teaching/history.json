@@ -224,6 +224,11 @@
       "id": "K33",
       "title": "K33 · 用户shell与完整存储I/O演示",
       "document": "dev-log/core/33-shell-pipeline.md"
+    },
+    {
+      "id": "L08",
+      "title": "L08 · 同负载的同步、epoll与io_uring等待路径",
+      "document": "dev-log/linux/08-comparison.md"
     }
   ]
 }

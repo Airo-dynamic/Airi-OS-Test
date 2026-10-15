@@ -12,6 +12,7 @@ LAB_SOURCES = { # 阶段名到本阶段完整源码元组，新增实验不再�
     'p2': ('memory.c', 'run.sh'), # 匿名映射、驻留与权限。
     'p3': ('process.c', 'run.sh'), # fork/exec与FD继承。
     'p4': ('io.c', 'run.sh'), # 向量、缓存和同步替换。
+    'p6': ('compare.c', 'run.sh'), # 相同TCP回显负载的三个等待模型。
     'p5-uring': ('uring.c', 'run.sh'), # liburing提交、身份和完成生命周期。
     'p5-epoll': ('epoll.c', 'run.sh'), # 本机TCP就绪与背压。
     'p5-threads': ('threads.c', 'run.sh'), # 线程队列、原子发布与futex。

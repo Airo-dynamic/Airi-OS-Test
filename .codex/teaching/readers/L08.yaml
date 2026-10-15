@@ -1,0 +1,22 @@
+checkpoint: L08
+baseline: baseline.yaml
+start: K33
+current_operation: 同一64x256 TCP回显比较三种等待位置，不发布性能优劣
+already_explained:
+- concept: LT/ET与短传输
+  at: ../../../dev-log/linux/06-epoll.md#epoll-pressure
+  establishes: 发送只推进实际前缀，空队列不订阅可写，EOF和EAGAIN不同
+- concept: CQ身份与缓冲存活
+  at: ../../../dev-log/linux/07-uring.md#uring-completion
+  establishes: cookie匹配结果，负res为请求错误，完成收取后才复用
+first_use:
+- concept: 可比较工作负载
+  at: ../../../dev-log/linux/08-comparison.md#compare-workload
+  establishes: 相同连接、内容、消息边界和客户协议，每轮均核对真实字节
+- concept: 等待位置与计时范围
+  at: ../../../dev-log/linux/08-comparison.md#compare-wait
+  establishes: 三条路径改变等待和推进方式，低并发跟踪耗时不足以推出吞吐排名
+not_assumed:
+- Linux实际运行通过、io_uring必然更快、TCP等于存储持久化
+limits:
+- SSH255，Linux分支未编译与运行；Mac只验证拒绝分支
