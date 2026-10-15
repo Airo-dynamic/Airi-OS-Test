@@ -1,0 +1,26 @@
+checkpoint: L02
+baseline: baseline.yaml
+start: K17
+current_operation: Linux匿名mmap、逐页触碰、mprotect和故障子进程，明确记录远端未验证
+already_explained:
+- concept: Linux用户程序和系统调用
+  at: ../../../dev-log/linux/01-entry.md
+  establishes: libc与原始syscall进入Linux，用户程序不直接操作内核设备和页表
+- concept: 物理页、映射和对象分层
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-backing
+  establishes: backing由堆持有，对象free不自动归还页面
+first_use:
+- concept: VMA RSS触碰与smaps
+  at: ../../../dev-log/linux/02-memory.md#linux-vma-rss
+  establishes: 范围存在与实际驻留分别观察，进程累计缺页不等于单VMA计数
+- concept: fork隔离预期SIGSEGV
+  at: ../../../dev-log/linux/02-memory.md#linux-permission-fault
+  establishes: 父子返回值和wait状态，Linux保护进程与内核故障停止的差别
+- concept: 连接失败与未验证状态
+  at: ../../../dev-log/linux/02-memory.md#linux-run-record
+  establishes: 先写false，只有真实远端运行成功才能改verified
+not_assumed:
+- Linux完整COW、页缓存、O_DIRECT或持久性
+limits:
+- 本轮SSH255，Linux运行和GDB停点未验证
+- 只记录已解释，不记录读者掌握

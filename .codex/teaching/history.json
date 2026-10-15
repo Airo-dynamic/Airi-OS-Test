@@ -114,6 +114,11 @@
       "id": "K17",
       "title": "K17 · 在持有的页面上分配小对象",
       "document": "dev-log/core/17-kernel-heap.md"
+    },
+    {
+      "id": "L02",
+      "title": "L02 · 在 Linux 分开观察虚拟范围、驻留和访问权限",
+      "document": "dev-log/linux/02-memory.md"
     }
   ]
 }
