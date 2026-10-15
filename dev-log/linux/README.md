@@ -9,3 +9,5 @@ Linux实验与内核实现共同构成主线。自制内核让机制可见，Lin
 [L02 · 虚拟范围、驻留和权限](02-memory.md)已提供完整mmap/mprotect/故障子进程程序与GDB操作；`./airios linux-lab --phase p2`选择独立目录，本轮仍因SSH255未验证Linux运行。后续与内核阶段同期提供完整程序、命令和解释，范围见[系统实践地图](../../docs/system-practice.md)：内存与缺页、文件和向量I/O、同步与原子替换、线程等待、epoll与io_uring。当前已提供L01、L02与L03的实现，不把这些计划实验列为已交付。
 
 [L03 · 进程替换、COW与FD继承](03-process.md)从K23继续，观察同一PID换映像、共享打开文件偏移及CLOEXEC；本轮远端仍为SSH255未验证。
+
+[L04 · 向量I/O、文件缓存、直接I/O与同步替换](04-storage.md)从K27继续。Linux分支、strace和FS能力本轮仍因SSH255未验证；Mac只编译拒绝分支，不能替代Linux编译。

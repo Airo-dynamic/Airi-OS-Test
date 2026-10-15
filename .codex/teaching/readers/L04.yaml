@@ -1,0 +1,26 @@
+checkpoint: L04
+baseline: baseline.yaml
+start: K27 + L03
+current_operation: Linux向量短读、共享文件页、真实EINTR、直接I/O能力与同步名称替换
+already_explained:
+- concept: FD与打开对象
+  at: ../../../dev-log/linux/03-process.md#linux-fd-inheritance
+  establishes: 表项引用对象与共享偏移，路径和对象分开
+- concept: 明确故障模型
+  at: ../../../dev-log/core/27-user-storage.md#storage-two-boots
+  establishes: VM重启与主机掉电不同，不能由可见结果扩大持久性结论
+first_use:
+- concept: 向量消费前缀
+  at: ../../../dev-log/linux/04-storage.md#linux-vector-io
+  establishes: 总返回数跨iovec前缀消费，正短返回与EINTR分开
+- concept: 文件缓存、预分配和直接I/O约束
+  at: ../../../dev-log/linux/04-storage.md#linux-cache-and-space
+  establishes: 可见、驻留与同步区分，statx查询实际对齐，能力缺失不猜规则
+- concept: 名称替换同步边界
+  at: ../../../dev-log/linux/04-storage.md#linux-replace-durability
+  establishes: 文件同步、rename可见性、目录同步分别负责内容和名字，旧FD仍指旧对象
+not_assumed:
+- 本轮Linux已运行、O_DIRECT所有文件系统行为相同或真实主机掉电已测
+limits:
+- SSH255，Linux分支编译和运行未验证
+- Mac只检查环境拒绝分支，不记录为Linux编译通过
