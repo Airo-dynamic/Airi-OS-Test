@@ -1,0 +1,48 @@
+checkpoint: G23
+baseline: baseline.yaml
+start: G22
+current_operation: 把真实 macOS 输入送到共享 C 核心
+already_explained:
+- concept: 鼠标事件路由
+  at: ../../../dev-log/graphics/20-pointer-routing.md#pointer-routing
+  establishes: 先命中当前窗口，再转换应用内容坐标与可见行，使用与绘图相同的几何
+- concept: 编辑、保存与执行的结果
+  at: ../../../dev-log/graphics/17-editing.md#edit-save-run
+  establishes: print(42) 加换行为十字节；替换变 dirty，保存成功才清，Run 失败不撤销保存
+- concept: 服务函数指针
+  at: ../../../dev-log/graphics/14-services.md#service-callbacks
+  establishes: 回调表保存函数地址，前端按合同传上下文与输出缓冲；调用仍在同一进程
+first_use:
+- concept: Cocoa 对象与消息
+  at: ../../../dev-log/graphics/23-native-window.md#cocoa-objects
+  establishes: 框架提供应用、窗口和视图；自有视图实现回调，消息语法在同一进程调用
+- concept: 画布与图像寿命
+  at: ../../../dev-log/graphics/23-native-window.md#display-lifetime
+  establishes: 平台拥有 pixels，图像包装在同步显示期读取；先释放包装，尺寸改变才换数组
+- concept: 事件循环与重绘
+  at: ../../../dev-log/graphics/23-native-window.md#event-loop
+  establishes: 回调修改状态并登记重绘，事件循环稍后调用绘图；请求不是完成
+- concept: 平台字符串与字符表示
+  at: ../../../dev-log/graphics/23-native-window.md#native-text
+  establishes: NSString 对象与 C 字符数组不同；UTF-16 单元用于识别键，UTF-8 字节复制后由核心按 ASCII 范围处理
+borrowed:
+- component: Cocoa 与 CoreGraphics
+  contract: 主机框架负责事件与显示，共享 C 核心在同进程处理文档与像素
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 平台类、事件与像素生命周期需要围绕实际窗口衔接。
+  revision: 从平台持有画布到重绘，再连接事件坐标、按键转换与程序关闭。
+- source: v2 独立源码伴读与连续复敲
+  observation: 平台Tab转换不宣称切换字段焦点
+  revision: 在原代码单元和相关机制正文修正；不将运行通过写成已经掌握
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: Objective-C 消息与对象寿命
+  at: ../../../dev-log/graphics/23-native-window.md#code-frontend-platform-macos-preview-m-2
+  establishes: 方括号向对象发送消息，@interface/@implementation 分别声明与定义；C 状态仍由 ui_* 操作，非 ARC 对象和像素资源按各自规则回收
+  status: 本版就地解释；不推断读者已掌握
+- concept: 平台粘贴的事件边界
+  at: ../../../dev-log/graphics/23-native-window.md#native-text
+  establishes: 没有平台文字或字节数超过8191时取消本次文本粘贴，保留选区；Files仍使用内部文件标识，不读取平台文字
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
