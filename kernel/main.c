@@ -1,3 +1,4 @@
+#include <airi/async.h> // 有界SQ/CQ先在真实设备演示，再接用户。
 #include <airi/storage.h> // 正式日志区跨进程和QEMU重启保留。
 #include <airi/journal.h> // 追加记录恢复演示独立于RAM文件。
 #include <airi/block.h> // 设备适配在内存、时钟之后初始化。
@@ -56,6 +57,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
         airi_log("[STORAGE_INIT_ERROR] error=%d", storage_error); // 保留具体失败。
         airi_panic("storage recovery failed"); // 不继续提供错误前缀。
     }
+    airi_async_demo(); // 三个真实设备操作和一个有界范围错误完成。
     airi_user_demo(); // 正常与非法用户程序结束后仍回到启动栈和串口。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
     console.service = airi_user_command; // 系统程序服务独立于可选主题/窗口扩展。

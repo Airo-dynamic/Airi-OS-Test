@@ -1,0 +1,23 @@
+checkpoint: K31
+baseline: baseline.yaml
+start: K30
+current_operation: 四条SQ请求经真实单队列生成CQ，并用模型验证owner撤销与晚完成
+already_explained:
+- concept: 接收与完成分开
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-begin-poll
+  establishes: begin只接收，poll收集前DMA所有权保留
+first_use:
+- concept: 多重身份与固定记录
+  at: ../../../dev-log/core/31-async-queues.md#async-three-identities
+  establishes: 设备id、cookie、代数handle和owner epoch分别关联，result才是I/O结果
+- concept: CQ信用与缓冲BUSY
+  at: ../../../dev-log/core/31-async-queues.md#async-credit
+  establishes: 接受预留完成位置，收集才解锁buffer并归还信用，SQ空不代表可无限提交
+- concept: ACTIVE晚完成
+  at: ../../../dev-log/core/31-async-queues.md#async-late-owner
+  establishes: 排队可撤销，ACTIVE副本保持到后端收集，同编号新epoch不接旧完成
+not_assumed:
+- 用户页直接DMA、Linux io_uring ABI、并行或乱序硬件请求
+limits:
+- 硬件单在途，软件SQ四项，不承诺性能提升
+- 用户接口与真实进程退出/exec接下一节，晚完成当前由明确主机模型验证

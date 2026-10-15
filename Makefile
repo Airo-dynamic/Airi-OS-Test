@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -144,6 +144,12 @@ host-test:
 	    kernel/storage/journal.c kernel/lib/base.c -o build/tests/journal_test
 # 模型不声称真实主机掉电，真设备另由guest演示。
 	./build/tests/journal_test
+# 异步队列用明确延后后端验证SQ/CQ、代数句柄和晚完成。
+	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
+	    -fsanitize=address,undefined -Iinclude tests/unit/async_test.c \
+	    kernel/io/engine.c kernel/lib/base.c -o build/tests/async_test
+# 全部模型边界通过后才继续真实guest。
+	./build/tests/async_test
 # 清理仅删除可重建产物，保留运行证据artifacts。
 clean:
 # 调用shutil删除build；ignore_errors允许尚不存在目录。

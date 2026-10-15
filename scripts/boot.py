@@ -98,6 +98,8 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                             assert '[BLOCK_NONBLOCK_OK]' in text # begin接受、重叠拒绝和poll收集已运行。
                         journal_marker = '[JOURNAL_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[JOURNAL_DEMO_OK]' # 没有可写设备时不冒充日志完成。
                         assert journal_marker in text # 正常配置必须真实恢复并替换坏尾。
+                        async_marker = '[ASYNC_QUEUE_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[ASYNC_QUEUE_DEMO_OK]' # 受限设备不冒充可写队列演示。
+                        assert async_marker in text # 接收、忙与完成身份须符合当前设备。
                         storage_marker = '[STORAGE_SKIPPED]' if case == 'block-timeout' else '[STORAGE_RECOVERED]' # 只读仍可恢复，隔离盘不能提供空日志。
                         assert storage_marker in text # 正式区必须实际扫描或明确未提供。
                         assert '[WAIT_USER_OK]' in text and '[WAIT_IDLE_OK]' in text and '[WAIT_DEMO_OK]' in text # 真阻塞、超时与现场继续均已完成。

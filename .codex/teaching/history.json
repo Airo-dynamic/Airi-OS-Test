@@ -194,6 +194,11 @@
       "id": "K30",
       "title": "K30 · 块请求begin/poll与同步适配的所有权",
       "document": "dev-log/core/30-block-begin-poll.md"
+    },
+    {
+      "id": "K31",
+      "title": "K31 · 有界SQ/CQ、注册缓冲、信用与晚完成",
+      "document": "dev-log/core/31-async-queues.md"
     }
   ]
 }
