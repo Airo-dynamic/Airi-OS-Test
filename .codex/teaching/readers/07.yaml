@@ -1,0 +1,36 @@
+checkpoint: '07'
+baseline: baseline.yaml
+start: '06'
+current_operation: 制作镜像、启动并等待新串口标记
+already_explained:
+- concept: 固件、引导器与协议头
+  at: ../../../dev-log/02-dependencies.md#boot-materials
+  establishes: 固件先执行，Limine 装入内核；协议头提供格式声明，本身不是引导程序
+- concept: UART 发送通路
+  at: ../../../dev-log/core/06-entry.md#serial-path
+  establishes: 内核文字经 UART 到 QEMU，再到主机文件；主机日志文件不是 guest 文件系统
+- concept: 节、段与链接
+  at: ../../../dev-log/core/06-entry.md#elf-layout
+  establishes: 节组织输入代码数据，装载段指导加载；链接脚本给符号与入口安排地址
+first_use:
+- concept: 主机日志与 guest 输出
+  at: ../../../dev-log/core/07-first-boot.md#host-guest-output
+  establishes: -serial file 将 guest UART 字节收集到主机记录；等待新行标记而非仅等待进程存活
+- concept: QEMU 机器与启动材料
+  at: ../../../dev-log/core/07-first-boot.md#qemu-machine
+  establishes: TCG 模拟目标 CPU；q35 等参数固定机器，固件 vars 每轮复制
+borrowed:
+- component: QEMU 与 OVMF
+  contract: 按固定机器启动镜像，UART 字节输出到日志；vars 使用副本
+feedback:
+- source: author independent replay/review, not a reader mastery test
+  observation: 实际固件ANSI可能贴首标记；内核先写换行，观察器仍要求完整行。
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 镜像与观察脚本需要以本次启动的文件和进程为中心。
+  revision: 从介质中的 ELF 追踪 OVMF、Limine、READY 和进程清理。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 子进程句柄、截止时间与回收
+  at: ../../../dev-log/core/07-first-boot.md#code-scripts-first-boot-py-1
+  establishes: Popen交回运行中的进程，poll的None表示未退出；monotonic设90秒总截止时间，finally负责成功与失败后的回收
+  status: 本版就地解释；不推断读者已掌握
