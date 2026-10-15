@@ -1,0 +1,54 @@
+checkpoint: G21
+baseline: baseline.yaml
+start: G20
+current_operation: 沿同一鼠标序列移动窗口(30,25)，缩放(24,19)，再释放
+already_explained:
+- concept: 屏幕坐标经可见行与快照映射得到服务id
+  at: ../../../dev-log/graphics/20-pointer-routing.md#pointer-routing
+  establishes: Files扣除body表头后按行高求视口行，加scroll得到全列表行，再经ui_file_order取快照下标交给ui_open_document；读取才使用记录id。
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+first_use:
+- concept: 移动只改变窗口几何，下一帧与命中读取相同rect
+  at: ../../../dev-log/graphics/21-window-actions.md#window-actions
+  establishes: 标题按下保存鼠标距左上偏移，移动减该偏移；右下角动作改变宽高并保持最小尺寸；释放结束动作。
+- concept: 窗口拖动持久字段与逆序命中
+  at: ../../../dev-log/graphics/21-window-actions.md#drag-state
+  establishes: order末尾到开头找第一个命中窗口；drag_x/drag_y分别保存此次窗口移动时的鼠标到外框左上角偏移；缩放直接以当前鼠标减外框原点计算尺寸；最大化restore供恢复使用。
+- concept: 确认框与窗口动作分派优先级
+  at: ../../../dev-log/graphics/21-window-actions.md#code-frontend-core-pointer-c-1
+  establishes: dialog优先截获，launcher和系统栏先于普通窗口；Save/Discard/Cancel各消耗自己的关闭意图；滚动先有符号相加再下限到零。
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/21-window-actions.md#code-frontend-apps-internal-h-1
+  establishes: 其余应用click现在参与窗口内容分派，Settings保留前文接口，不提前借用未实现的动作。
+borrowed:
+- component: G12生成的八套字体数据
+  usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
+feedback:
+- source: 用户本轮连续教程要求
+  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
+  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
+source_reading:
+- concept: 移动只改变窗口几何，下一帧与命中读取相同rect
+  at: ../../../dev-log/graphics/21-window-actions.md#window-actions
+  establishes: 标题按下保存鼠标距左上偏移，移动减该偏移；右下角动作改变宽高并保持最小尺寸；释放结束动作。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 窗口拖动持久字段与逆序命中
+  at: ../../../dev-log/graphics/21-window-actions.md#drag-state
+  establishes: order末尾到开头找第一个命中窗口；drag_x/drag_y分别保存此次窗口移动时的鼠标到外框左上角偏移；缩放直接以当前鼠标减外框原点计算尺寸；最大化restore供恢复使用。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 确认框与窗口动作分派优先级
+  at: ../../../dev-log/graphics/21-window-actions.md#code-frontend-core-pointer-c-1
+  establishes: dialog优先截获，launcher和系统栏先于普通窗口；Save/Discard/Cancel各消耗自己的关闭意图；滚动先有符号相加再下限到零。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 应用接口随实际消费者增长
+  at: ../../../dev-log/graphics/21-window-actions.md#code-frontend-apps-internal-h-1
+  establishes: 其余应用click现在参与窗口内容分派，Settings保留前文接口，不提前借用未实现的动作。
+  status: 本版就地解释；不推断读者已掌握
+- concept: 正文定位与持续选择不分派按钮
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
+  status: 本版就地解释；不推断读者已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。

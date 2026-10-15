@@ -109,3 +109,23 @@ void ui_system_draw(struct ui_desktop *s, struct ui_rect r) {  // 按当前页�
                   tab == 1 ? "PgUp / PgDn: memory inventory" : NULL);  // Memory页右侧显示翻页说明，其他页面不额外画这条状态文字
 }
 
+void ui_system_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // System将内容坐标解释成页签与页面按钮。
+    (void)twice;  // 统一点击接口保留双击参数；这个应用当前只使用点击位置。
+    enum ui_app app = UI_SYSTEM;  // 本函数只修改System窗口状态。
+    if (y < r.y + 45) {  // 内容顶部45像素属于页签区。
+        int tab = (x - r.x - 14) / 108;  // 扣掉14像素内边距后按108像素一项算页签。
+        if (tab >= 0 && tab < 5)  // 仅0..4是System有效页签。
+            s->windows[app].tab = (unsigned)tab;  // 边界检查后再转无符号下标。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (s->windows[app].tab == 0 && y >= r.y + 328 && y < r.y + 360)  // 概况页中的设置按钮按当前内容纵坐标命中。
+        ui_open(s, UI_SETTINGS);  // 打开并置顶设置窗口。
+    if (s->windows[app].tab == 2 && y >= r.y + 285 && y < r.y + 317)  // 存储页中的文件按钮命中时打开Files。
+        ui_open(s, UI_FILES_APP);  // 打开并置顶当前目录文件窗口。
+    if (s->service_state == UI_ERROR) {  // 失败状态下的点击触发一次重新查询。
+        s->service_state = UI_NORMAL;  // 恢复普通查询状态，再由刷新回调决定实际结果。
+        ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+    }
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

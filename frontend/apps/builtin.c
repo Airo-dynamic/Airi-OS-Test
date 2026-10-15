@@ -30,15 +30,27 @@ void ui_apps_draw(struct ui_desktop *s, enum ui_app app, struct ui_rect r) {  //
 void ui_apps_click(struct ui_desktop *s, enum ui_app app, struct ui_rect r, int x, int y,  // 总入口先按应用身份分派内容点击。
                    bool twice) {  // 双击标志保持原值交给应用，不在桌面重复解释。
     s->focus = UI_FOCUS_NONE;  // 先取消旧字段焦点，应用命中字段后可重新设置。
-    switch (app) {      // 按已命中的应用编号选择点击处理器
+    switch (app) {     // 按已命中的应用编号选择点击处理器
+    case UI_TERMINAL:  // 应用身份为终端时进入对应分支。
+        ui_terminal_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给终端的命中规则。
+        break;  // 当前匹配已完成，停止这一层循环或分支。
     case UI_FILES_APP:  // 应用身份为目录时进入对应分支。
         ui_files_click(s, r, x, y, twice);  // 把当前内容矩形和屏幕点交给 Files。
         break;  // 当前匹配已完成，停止这一层循环或分支。
     case UI_EDITOR:  // 应用身份为文档时进入对应分支。
         ui_editor_click(s, r, x, y, twice);  // 把相同事件表示交给 Editor。
         break;  // 当前匹配已完成，停止这一层循环或分支。
+    case UI_TASKS_APP:  // 应用身份为任务时进入对应分支。
+        ui_tasks_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给任务的命中规则。
+        break;  // 当前匹配已完成，停止这一层循环或分支。
+    case UI_SYSTEM:  // 应用身份为系统信息时进入对应分支。
+        ui_system_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给系统信息的命中规则。
+        break;  // 当前匹配已完成，停止这一层循环或分支。
     case UI_SETTINGS:  // 应用身份为设置时进入对应分支。
         ui_settings_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给设置的命中规则。
+        break;  // 当前匹配已完成，停止这一层循环或分支。
+    case UI_VIEWER:  // 应用身份为曲线时进入对应分支。
+        ui_viewer_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给曲线的命中规则。
         break;  // 当前匹配已完成，停止这一层循环或分支。
     default:  // 未知或本阶段尚未接点击的应用不改变状态
         break;  // 当前匹配已完成，停止这一层循环或分支。

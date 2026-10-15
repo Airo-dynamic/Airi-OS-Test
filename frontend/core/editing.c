@@ -110,7 +110,8 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
     if (key == UI_ESCAPE) {  // 全局Escape取消弹出交互和搜索，后续按键重新交给活动应用
         s->dialog = UI_DIALOG_NONE;  // 关闭当前对话框，后续键不再被它优先接收
         s->pending_close = false;    // 结束关闭请求，后续普通保存不应沿用旧关闭动作
-        s->find = false;  // 隐藏Editor查找栏，后续正文可使用这部分高度
+        s->launcher = false;  // Escape关闭应用启动菜单，保持已有窗口打开状态
+        s->find = false;      // 隐藏Editor查找栏，后续正文可使用这部分高度
         s->focus = UI_FOCUS_NONE;  // 当前字段结束接收，后续按键回到活动应用
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }

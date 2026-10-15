@@ -193,6 +193,16 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_rect(s->width - 382, s->height - 78, 360, 34, U_RAISED);  // 用选中背景色写矩形，起点(s->width - 382,s->height - 78)，尺寸360×34像素
         u_text(s->width - 368, s->height - 70, s->toast, U_SMALL, U_TEXT);  // 在整屏x=s->width - 368、整屏y=s->height - 70显示本次操作短提示
     }
+    if (s->launcher) {  // 启动菜单打开时，最后绘制应用选择列表
+        u_rect(8, 43, 244, UI_APP_COUNT * 42 + 48, U_PANEL);  // 用工具栏底色写矩形，起点(8,43)，尺寸244×UI_APP_COUNT * 42 + 48像素
+        u_frame((struct ui_rect){8, 43, 244, UI_APP_COUNT * 42 + 48}, U_EDGE);  // 沿当前显式矩形的四边画一像素边框
+        u_text(24, 54, "Applications", U_LABEL, U_TEXT);  // 在整屏列24、整屏行54显示文字"Applications"
+        for (int i = 0; i < UI_APP_COUNT; ++i) {  // 逐个检查7个有效应用编号
+            u_icon(25, 90 + i * 42, i, U_MUTED);  // 启动菜单按每行42像素绘制第i个应用身份图标
+            u_text(59, 90 + i * 42, titles[i], U_BODY, U_TEXT);  // 在整屏列59、整屏y=90 + i * 42显示titles[i]
+        }
+    }
+
     if (s->dialog) {  // 菜单和普通窗口已经绘完，再写对话框像素，使它覆盖下层
         struct ui_rect d = {s->width / 2 - 240, s->height / 2 - 112, 480, 224};  // 480×224对话框以整屏中心为中心，左上扣除半宽半高
         u_round((struct ui_rect){d.x + 4, d.y + 6, d.w, d.h}, 7, U_SHADOW);  // 在对话框右移4、下移6像素的位置画7像素半径阴影

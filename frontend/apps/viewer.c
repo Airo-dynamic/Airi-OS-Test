@@ -51,3 +51,10 @@ void ui_viewer_draw(struct ui_desktop *s, struct ui_rect r) {  // 把已提交�
     ui_app_status(r, description, "CSV data");  // 在内容底部显示曲线条数和来源名称；右侧说明按测得的文字宽度对齐
 }
 
+void ui_viewer_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // Viewer的工具栏只提供打开Files按钮。
+    (void)twice;  // 统一点击接口保留双击参数；这个应用当前只使用点击位置。
+    if (y < r.y + 44 && x > r.x + r.w - 120)  // 命中Viewer顶部右侧文件入口的命中带，打开Files。
+        ui_open(s, UI_FILES_APP);  // 打开并置顶当前目录文件窗口。
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

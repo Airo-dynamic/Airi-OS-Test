@@ -31,7 +31,7 @@ enum ui_action {  // 回调接收的服务动作，同一动作具有明确文�
 };
 enum ui_dialog { UI_DIALOG_NONE, UI_DIALOG_ERROR, UI_DIALOG_CLOSE, UI_DIALOG_NEW_FILE, UI_DIALOG_NEW_DIR, UI_DIALOG_RENAME, UI_DIALOG_DELETE, UI_DIALOG_STOP, UI_DIALOG_SAVE_AS, UI_DIALOG_INFO };  // 对话框类型决定输入、确认与取消后续动作；NONE为零。
 enum ui_focus { UI_FOCUS_NONE, UI_FOCUS_FILTER, UI_FOCUS_FIND };  // 键入目标为应用正文、筛选字段或查找字段。
-enum ui_drag { UI_DRAG_NONE = -1, UI_DRAG_SELECT = 3 };  // 按下到释放之间仅续接Editor文本拖选
+enum ui_drag { UI_DRAG_NONE = -1, UI_DRAG_RESIZE = 2, UI_DRAG_MOVE = 1, UI_DRAG_SELECT = 3 };  // -1明确无拖动，其余值区分跨事件延续的操作。
 enum ui_key {  // 功能键编号与ASCII字节分开，避免把命令误插入正文。
     UI_LEFT = 512,  // 功能键从512起，不与0..127的文本字节混淆。
     UI_RIGHT,  // 后续枚举自动递增，表示右移光标。
@@ -98,9 +98,12 @@ struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状�
     int mouse_x;  // 当前鼠标屏幕横坐标。
     int mouse_y;  // 当前鼠标屏幕纵坐标。
     int drag;     // 当前跨事件拖动种类，-1表示无。
-    bool monitor;  // 右侧状态监视区是否展开。
-    bool find;     // Editor查找栏是否展开。
-    bool dirty;    // 工作文本是否与最近成功保存内容不同。
+    int drag_x;     // 移窗时按下点距窗口左边的偏移。
+    int drag_y;     // 移窗时按下点距窗口顶部的偏移。
+    bool monitor;   // 右侧状态监视区是否展开。
+    bool launcher;  // 应用启动菜单是否展开。
+    bool find;      // Editor查找栏是否展开。
+    bool dirty;     // 工作文本是否与最近成功保存内容不同。
     bool selection;      // anchor与cursor之间是否构成有效选区。
     bool field_all;      // 对话框字段是否处于全选替换状态。
     bool undo_valid;     // undo数组是否有可交换的历史文本。
@@ -148,7 +151,8 @@ void ui_open(struct ui_desktop *, enum ui_app);  // 打开、解除最小化并�
 void ui_draw(struct ui_desktop *, const struct airi_framebuffer *);  // 按实际帧缓冲绘图，并更新可用于命中的窗口矩形。
 void ui_pointer(struct ui_desktop *, int x, int y,  // 鼠标接口接收同一桌面屏幕坐标。
                 int phase);  /* 0 move, 1 down, 2 up, 3 double-click */  // phase把平台事件统一成移动/按下/释放/双击。
-bool ui_key(struct ui_desktop *, int key, bool shift);      // 分派字符或功能键，Shift控制扩展选区等规则。
+bool ui_key(struct ui_desktop *, int key, bool shift);  // 分派字符或功能键，Shift控制扩展选区等规则。
+void ui_scroll(struct ui_desktop *, int rows);  // 有符号行增量交给活动视图，负方向需限到零。
 void ui_service_state(struct ui_desktop *, enum ui_state);  // 切换服务显示状态并刷新对应快照。
 void ui_refresh(struct ui_desktop *);  // 从当前服务取得文件、任务与汇总快照。
 void ui_command(struct ui_desktop *, enum ui_action, int, const char *, const char *);  // 把稳定身份、名称与内容交给服务动作回调。

@@ -83,3 +83,56 @@ void ui_tasks_draw(struct ui_desktop *s, struct ui_rect r) {  // 绘制任务快
     ui_app_status(r, "Select a process to inspect or end it.", "Session tasks");  // 在内容底部显示文字"Select a process to inspect or end it."；右侧说明按测得的文字宽度对齐
 }
 
+void ui_tasks_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // 任务列表按位置选择快照项，停止确认保存pid。
+    if (y < r.y + 44) {  // 当前应用工具栏先处理按钮，不把这一点击解释为列表行。
+        if (x > r.x + r.w - 98 && s->task_count)  // 右侧End task按钮还要求有可选任务记录。
+            ui_app_dialog(  // 先建立确认框，不在鼠标按下时立即停止。
+                s, UI_DIALOG_STOP, s->tasks[s->selected_task].pid, "End task",  // 取当前快照项的稳定pid作为目标。
+                "Remove this task from the recorded session?", "");  // 说明只移除参考记录，不会终止宿主进程。
+        else if (x > r.x + r.w - 184) {  // 相邻刷新按钮重新请求任务快照。
+            s->service_state = UI_NORMAL;  // 恢复普通查询状态，再由刷新回调决定实际结果。
+            ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        }
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (s->service_state == UI_ERROR &&  // 仅在服务失败界面检测重试按钮。
+        u_inside((struct ui_rect){r.x + 72, r.y + 179, 92, 32}, x, y)) {  // 失败页面的重试按钮范围为92×32。
+        s->service_state = UI_NORMAL;  // 恢复普通查询状态，再由刷新回调决定实际结果。
+        ui_refresh(s);  // 按更新后的目录及服务状态重新取得文件与任务快照。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    int top = r.y + (r.h >= 540 ? 160 : 100) + 139;  // 高窗口为汇总面板留160像素，矮窗口留100像素，再跳过固定顶部布局。
+    if (y >= top && y < top + 32) {  // 此高度范围是任务筛选字段。
+        s->focus = UI_FOCUS_FILTER;  // 后续键入先交给当前应用的筛选字段。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    if (y >= top + 48 && y < top + 76) {  // 表头区域切换排序方向。
+        s->sort = !s->sort;  // 逻辑非把排序方向在0与1之间切换。
+        return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+    }
+    top += 80;  // 跳过筛选和表头得到实际首行顶部。
+    if (y >= top) {  // 只有列表内容区域才把y转换成行号。
+        unsigned row =  // 以下计算筛选后的全列表行号。
+            (unsigned)(y - top) / (s->density ? 28 : 36) + s->windows[UI_TASKS_APP].scroll;  // 使用与绘图同一密度行高，并补卷走行数。
+        unsigned shown = 0;  // 只统计筛选后可见记录。
+        for (unsigned k = 0; k < s->task_count; ++k) {  // 在有效任务条数内遍历排序位置。
+            unsigned i = s->sort ? s->task_count - 1 - k : k;  // 降序反向取快照下标，升序直接取k。
+            if (!ui_app_match(s->tasks[i].name, s->filter[UI_TASKS_APP]))  // 不匹配的任务不占可见行。
+                continue;  // 跳过当前不适用项，继续检查下一项。
+            if (shown++ == row) {  // 先比较当前可见行，再递增计数；命中时 i 就是原记录下标。
+                s->selected_task = i;  // 选择保存原快照下标，后续操作再读取pid。
+                if (twice) {  // 双击额外显示这条记录的详情。
+                    char details[256];  // 局部详情文本，dialog函数会复制其内容。
+                    airi_snprintf(details, 256,  // 有界格式化到详情数组，容量包含终止NUL。
+                                  "PID %d / %s / %s / CPU %u%% / %u KiB. Recorded session.",  // %%输出百分号，其他字段分别对应pid、名称、状态、CPU和内存。
+                                  s->tasks[i].pid, s->tasks[i].name, s->tasks[i].state,  // 按实际命中记录取身份和文本。
+                                  s->tasks[i].cpu, s->tasks[i].memory_kib);  // 数值单位与格式字符串中的百分数/KiB一致。
+                    ui_app_dialog(s, UI_DIALOG_INFO, 0, "Process details", details, "");  // 复用消息框显示详情，此处不对应待提交服务目标。
+                }
+                break;  // 当前匹配已完成，停止这一层循环或分支。
+            }
+        }
+    }
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

@@ -43,3 +43,10 @@ void ui_terminal_draw(struct ui_desktop *s, struct ui_rect r) {  // 把console�
                                                   : "COM1 / 115200 / polled I/O");  // 真实内核后端页脚报告当前串口设备模式
 }
 
+void ui_terminal_click(struct ui_desktop *s, struct ui_rect r, int x, int y, bool twice) {  // Terminal内容点击只需命中清屏按钮。
+    (void)twice;  // 统一点击接口保留双击参数；这个应用当前只使用点击位置。
+    if (u_inside((struct ui_rect){r.x + r.w - 100, r.y + r.h - 61, 84, 28}, x, y))  // 命中底部输入行右侧的Clear按钮矩形时清屏。
+        airi_console_key(s->console, AIRI_KEY_CLEAR);  // 复用命令对象的清屏规则，不删除另一份日志。
+    return;  // 本次事件处理已结束，不再落入其他按钮或底层窗口。
+}
+

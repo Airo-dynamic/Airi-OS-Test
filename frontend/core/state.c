@@ -82,6 +82,7 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
     }
     w->minimized = false;  // 重新打开或激活窗口时取消最小化
     s->active = (int)app;  // 令本次打开的应用成为按键与窗口操作接收者
+    s->launcher = false;   // 打开应用后关闭启动菜单
     unsigned n = 0;  // 去重后的窗口次序从空前缀开始，n计保留的应用编号条数
     for (unsigned i = 0; i < s->order_count; ++i)  // 按有效窗口层次遍历，数组后部不作窗口身份
         if (s->order[i] != (unsigned)app)  // 重排时保留其他应用，当前应用将另放到末尾
