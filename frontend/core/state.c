@@ -12,18 +12,32 @@ static bool appearance(struct airi_console *console, const char *command, void *
     airi_console_print(console, "Appearance: %s / theme day | theme night", desktop->theme ? "Day" : "Night");  // 查询和设置都报告实际呈现状态。
     return true;  // 表示本条命令已经同步处理。
 }
-void ui_refresh(struct ui_desktop *s) {  // 重新查询当前目录元信息，并重新建立文件快照的有效前缀
+void ui_refresh(struct ui_desktop *s) {  // 重新取得文件任务快照，更新显示所需有效计数
     s->file_count = 0;  // 刷新前清有效文件条数，失败时不显示旧成功快照
+    s->task_count = 0;  // 刷新前清有效任务条数，随后由任务服务填写
+    airi_memset(&s->stats, 0, sizeof(s->stats));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
     if (s->service_state != UI_NORMAL)  // 服务未正常时停止复制或显示成功快照
-        return;  // 服务状态不是NORMAL，保持有效文件计数为0，不调用文件查询回调
+        return;  // 当前重新取得文件任务快照，更新显示所需有效计数在本分支结束，后续语句不执行
     if (s->backend.files)  // 文件查询回调存在时才调用
         s->file_count = s->backend.files(s->backend.context, s->directory, s->files, UI_FILES);  // 查询当前目录并复制最多32项元信息到桌面数组，返回值标出此次有效前缀
     if (s->file_count > UI_FILES)  // 服务条数超过本地32槽容量时收窄
         s->file_count = UI_FILES;  // 把服务返回条数限制到本地文件快照容量
+    if (s->backend.tasks)  // 任务查询回调存在时才取得同次任务与统计
+        s->task_count = s->backend.tasks(s->backend.context, s->tasks, UI_TASKS, &s->stats);  // 同次调用复制最多16项参考任务与资源统计，返回值界定任务数组有效前缀
+    if (s->task_count > UI_TASKS)  // 服务任务条数超过16槽容量时收窄
+        s->task_count = UI_TASKS;  // 把服务返回条数限制到本地任务快照容量
+    if (s->stats.cpu > 100)  // CPU百分数超过100时截到绘图上界
+        s->stats.cpu = 100;  // CPU百分数超过100时限制显示值
+    for (unsigned i = 0; i < 60; ++i)  // 按采样下标处理60个参考百分数点
+        if (s->stats.samples[i] > 100)  // 当前历史采样超过100时限制高度，避免曲线越出图区
+            s->stats.samples[i] = 100;  // 把当前历史采样限制在百分数绘图上界
+    if (s->stats.memory_kib > s->stats.total_kib)  // 已用参考内存超过总量时收窄显示值
+        s->stats.memory_kib = s->stats.total_kib;  // 已用内存显示量最多等于本次统计总量
     if (s->selection_file >= s->file_count)  // 旧选择不在新文件快照有效范围时归零
         s->selection_file = 0;  // 旧选中下标失效时回到新快照第一项
+    if (s->selected_task >= s->task_count)  // 旧任务选择不在新快照有效范围时归零
+        s->selected_task = 0;  // 旧任务选择失效时回到任务快照首项
 }
-
 void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) {  // 清桌面状态，绑定服务和console并打开默认应用
     airi_memset(s, 0, sizeof(*s));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
     s->backend = b;  // 把回调表和上下文复制进桌面，服务数据仍归服务拥有
@@ -51,7 +65,6 @@ void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) 
             }
     }
 }
-
 void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个应用，更新窗口次序和活动编号
     if (app >= UI_APP_COUNT)  // 应用编号超出窗口数组范围时拒绝打开
         return;  // 当前打开或置顶一个应用，更新窗口次序和活动编号在本分支结束，后续语句不执行
@@ -76,12 +89,10 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
     s->order_count = n;  // 记录去重后绘图顺序的有效长度
     s->focus = UI_FOCUS_NONE;  // 当前字段结束接收，后续按键回到活动应用
 }
-
 void ui_service_state(struct ui_desktop *s, enum ui_state state) {  // 切换服务显示状态并刷新相应快照
     s->service_state = state;  // 用调用者指定状态切换服务反馈，随后刷新决定是否继续查询快照
     ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
 }
-
 void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char *name,  // 调用服务操作，成功后刷新，失败形成错误对话框
                 const char *data) {  // data借用本次请求正文，回调返回前按合同复制或读取
     char error[160] = "This operation is unavailable.";  // 先给160字节错误缓冲设置未连接原因，服务失败时可覆盖
@@ -119,4 +130,3 @@ void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char 
                       action == UI_SAVE ? " Your edits are still open." : "");  // 追加恢复说明，不清空编辑器或重设保存点。
     }
 }
-

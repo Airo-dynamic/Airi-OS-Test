@@ -116,7 +116,7 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
     }
     if (s->dialog) {  // 有对话框时先由它消费当前键，下面的字段和应用不再接收同一事件
         if (key == '\n' || key == '\r') {  // 换行或回车表示提交当前命令、字段或文档换行动作，按当前接收者处理
-            if (s->dialog == UI_DIALOG_ERROR)  // 错误提示只需关闭，不应当被回车转成文件服务动作
+            if (s->dialog == UI_DIALOG_ERROR || s->dialog == UI_DIALOG_INFO)  // 错误提示只需关闭，不应当被回车转成文件服务动作
                 s->dialog = UI_DIALOG_NONE;  // 关闭当前对话框，后续键不再被它优先接收
             else  // 前一分支未成立时执行下方替代操作
                 ui_confirm(s);  // 把当前对话框确认转换成明确服务动作，本次实参取自当前桌面状态
@@ -160,7 +160,7 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
         }
         return airi_console_key(s->console, key);  // 把当前键交给同一console，并把它的处理结果原样返回给调用者
     }
-    if (key == UI_FIND_KEY && s->active == UI_FILES_APP) {  // Files的查找快捷键只切到自己的筛选框，不开启Editor文内查找
+    if (key == UI_FIND_KEY && (s->active == UI_FILES_APP || s->active == UI_TASKS_APP)) {  // Files和Tasks的查找快捷键只切到该应用筛选框，不开启Editor文内查找
         s->focus = UI_FOCUS_FILTER;  // 后续文字交给当前应用筛选字段
         s->field_all = true;  // 输入字段内容设为整体选中，下一次键入可以替换
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
@@ -205,6 +205,13 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
         else if (key == AIRI_KEY_DOWN && row + 1 < count)  // 候选下一行必须仍在有效可见索引前缀内
             ++row;  // 当前计数位置前进一项，文档分支按行、Files分支按可见索引计数
         s->selection_file = order[row];  // 把选定可见行转换回原快照下标，后面取files仍能找到同一项目
+        return true;  // 本逻辑事件已处理，调用者可重画当前状态
+    }
+    if (s->active == UI_TASKS_APP && (key == AIRI_KEY_UP || key == AIRI_KEY_DOWN)) {  // Tasks的上下键只调整任务快照选择，Editor光标不受影响
+        if (key == AIRI_KEY_UP && s->selected_task)  // 选中任务不在第0项时才向前一项移动
+            --s->selected_task;  // 沿当前操作方向调整当前任务快照的选中下标
+        if (key == AIRI_KEY_DOWN && s->selected_task + 1 < s->task_count)  // 下一个任务下标仍小于快照有效条数时才增加选择
+            ++s->selected_task;  // 沿当前操作方向调整当前任务快照的选中下标
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }
     if (s->active != UI_EDITOR)  // 除Editor之外的应用没有多行文本编辑行为，到这里结束普通字符处理
@@ -275,10 +282,10 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
         if (s->cursor < len)  // 当前位置严格在文尾之前时才允许向右移动
             ++s->cursor;  // 光标向后移动一个ASCII字节间隙
     } else if (key == UI_HOME) {  // 向前扫描到本行第一个字符之前，前一字节的换行作为停止边界
-        while (s->cursor && s->editor[s->cursor - 1] != '\n')  // 从光标向前找本行首间隙；到文首或前一字节为换行时停止
+        while (s->cursor && s->editor[s->cursor - 1] != '\n')  // 扫描光标前的ASCII字节，换行决定行列转换
             --s->cursor;  // 光标向前移动一个ASCII字节间隙
     } else if (key == UI_END) {  // 向后扫描到本行换行之前或文档结尾，不跨到下一行
-        while (s->cursor < len && s->editor[s->cursor] != '\n')  // 从光标向后找本行尾间隙；到文尾或当前字节为换行时停止
+        while (s->cursor < len && s->editor[s->cursor] != '\n')  // 从当前光标向后扫描，遇本行换行或文档末尾就停止
             ++s->cursor;  // 光标向后移动一个ASCII字节间隙
     } else if (key == AIRI_KEY_UP || key == AIRI_KEY_DOWN) {  // 上下移动先求当前行首和原列，再把该列限制在目标行长度内
         unsigned start = s->cursor;  // 从光标间隙开始向前找当前行首，start始终是文档字节偏移

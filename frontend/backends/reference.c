@@ -7,7 +7,9 @@ struct reference_file {  // 内存服务拥有的一条元信息、正文和占�
     bool used;  // 服务槽是否占用
 };
 static struct reference_file entries[UI_FILES];  // 服务拥有32个静态文件槽，跨查询保留而退出进程丢失
-static AiriBootInfo boot;  // 参考服务持有示例启动结构，借给System与console使用
+static struct ui_task records[UI_TASKS];  // 服务拥有最多16条静态参考任务记录
+static unsigned record_count;  // 保存静态任务数组的有效前缀长度
+static AiriBootInfo boot;      // 参考服务持有示例启动结构，借给System与console使用
 static void add(unsigned slot, const char *path, const char *name, bool directory,  // 把路径、名称和文字填进指定内存服务槽
                 const char *body) {  // body为新服务记录的NUL正文，目录可传空串
     struct reference_file *f = &entries[slot];  // 借用准备填充的服务槽，add的调用者已选择有效下标
@@ -69,8 +71,20 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
     (void)unused;  // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
     if (act == UI_EXECUTE)  // 执行请求暂不启动主机或guest程序，返回真实未连接错误
         return error(out, cap,  // 把失败原因写给调用者，false阻止前端误记为成功
-                     "Application execution is not connected. The source stays in the editor; no "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-                     "guest or host process was started.");  // 结束未连接错误正文：本请求既未启动guest程序也未启动主机程序
+                     "A program runtime is not connected. Your source is still open.");  // 执行失败只说明用户当前可做的事，不把开发计划放进错误提示
+
+    if (act == UI_STOP) {  // 停止请求处理参考任务表，不向主机发送终止信号
+        if (id <= 2)  // 参考桌面与终端记录受保护，不能从样例表移除
+            return error(out, cap, "This system task is protected.");  // 拒绝本次服务修改并向调用者报告：The reference desktop and terminal records are protected
+        for (unsigned i = 0; i < record_count; ++i)  // 只检查服务当前有效任务记录，未用槽不参与
+            if (records[i].pid == id) {  // 找到所请求的参考任务身份后才修改其状态，其他记录不受影响
+                airi_memmove(records + i, records + i + 1,  // 搬移可能重叠的当前有效前缀或尾部，复制长度由当前对象内容或容量计算
+                             (record_count - i - 1) * sizeof(*records));  // 只前移被删项之后的有效任务，条数乘每项大小得到字节数
+                --record_count;  // 任务表后缀已前移，有效任务数量减少一个
+                return true;     // 该服务修改已完整提交，前端可重新查询当前记录
+            }
+        return error(out, cap, "The selected process record no longer exists.");  // 拒绝本次服务修改并向调用者报告：The selected process record no longer exists
+    }
     if (act == UI_CREATE_FILE || act == UI_CREATE_DIR || (act == UI_SAVE && id < 0)) {  // 创建项目和未绑定id的另存都需要新槽；已存在文档的保存后面按id处理
         if (!valid_name(name))  // 先检查名称形状，失败时不会拼路径或占用服务槽
             return error(out, cap, "Use a non-empty file name, without slashes, up to 63 bytes.");  // 拒绝本次服务修改并向调用者报告：Use a non-empty file name, without slashes, up to 63 bytes
@@ -86,7 +100,7 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
                 add(i, directory, name, act == UI_CREATE_DIR, act == UI_SAVE ? data : "");  // 新建槽按操作决定目录类型，新文档保存时填正文，其余创建为空
                 return true;  // 该服务修改已完整提交，前端可重新查询当前记录
             }
-        return error(out, cap, "Reference workspace capacity reached (32 items).");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached (32 items)
+        return error(out, cap, "Session storage capacity reached (32 items).");  // 拒绝本次服务修改并向调用者报告：Session storage capacity reached (32 items)
     }
     if (id < 1 || id > UI_FILES || !entries[id - 1].used)  // 拒绝1到32之外或已删除的服务id，检查完成前不访问id-1槽
         return error(out, cap, "The item no longer exists. Refresh the directory.");  // 拒绝本次服务修改并向调用者报告：The item no longer exists. Refresh the directory
@@ -110,7 +124,7 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
                 add(i, name, f->entry.name, false, f->text);  // 复制普通文件到目标目录name，以同一名称和独立正文创建新id
                 return true;  // 该服务修改已完整提交，前端可重新查询当前记录
             }
-        return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
+        return error(out, cap, "Session storage capacity reached.");  // 拒绝本次服务修改并向调用者报告：Session storage capacity reached
     }
     if (act == UI_SAVE) {  // 保存请求只修改这个服务记录的文字与长度
         if (f->entry.directory)  // 目录没有普通文档内容，此操作需要拒绝
@@ -138,7 +152,7 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
         if (!valid_name(name))  // 先检查名称形状，失败时不会拼路径或占用服务槽
             return error(out, cap, "Invalid file name.");  // 拒绝本次服务修改并向调用者报告：Invalid file name
         if (f->entry.directory)  // 目录重命名还需同步改变全部后代路径，本参考服务不实现该操作
-            return error(out, cap, "Folder renaming requires the future VFS provider.");  // 拒绝本次服务修改并向调用者报告：Folder renaming requires the future VFS provider
+            return error(out, cap, "Folder renaming is unavailable.");  // 目录重命名需要同步后代路径，本参考服务明确返回未提供该能力。
         char target[128];  // 先在局部数组形成完整目标路径，通过校验后才改服务
         airi_snprintf(target, sizeof(target), "%s", f->entry.path);  // 将原完整路径复制到128字节临时数组，随后只替换最后名称
         size_t parent = airi_strlen(target);  // 先从原路径文尾开始向前寻找最后斜杠，找到后保留其前面的父目录
@@ -157,28 +171,51 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
     }
     return error(out, cap, "Unsupported workspace operation.");  // 拒绝本次服务修改并向调用者报告：Unsupported workspace operation
 }
+static unsigned tasks(void *unused, struct ui_task *out, unsigned cap, struct ui_stats *stats) {  // 复制参考任务和同次参考资源统计到调用者快照
+    (void)unused;  // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
+    unsigned n = record_count < cap ? record_count : cap;  // 本次复制任务条数取有效记录与调用者数组容量的较小值
+    airi_memcpy(out, records, n * sizeof(*out));  // 把本次可容纳的任务前缀复制给调用者快照
+    *stats = (struct ui_stats){.available = true,  // 写调用者的同次资源统计快照，available表明参考服务确实提供了这些字段
+                               .cpu = 37,  // 设置0到100的参考CPU百分数
+                               .memory_kib = 104 * 1024,  // 设置参考已用内存量，单位KiB
+                               .total_kib = 256 * 1024,   // 设置参考总内存量，单位KiB
+                               .read_kib = 416,    // 设置参考每秒读量，单位KiB/s
+                               .write_kib = 128};  // 设置参考每秒写量，单位KiB/s
+    for (unsigned i = 0; i < 60; ++i) {  // 按采样下标处理60个参考百分数点
+        unsigned triangle = i % 20;  // 把60个采样下标映射到每20点重复的三角周期
+        stats->samples[i] = 19 + (triangle > 10 ? 20 - triangle : triangle) * 3 + (i * 17 % 13);  // 合成明确的参考百分数波形，数据不是CPU实测
+    }
+    return n;  // 返回本次已经复制到调用者数组的有效记录条数
+}
 void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服务并填入回调表
     airi_memset(entries, 0, sizeof(entries));  // 把服务拥有的32个槽清空，再填本会话初始参考文件
     add(0, "/home/airi/projects/telemetry", "main.lua", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-        "-- Read a series and write a summary\nlocal values = {12, 18, 21, 32, 29, 37}\n\nlocal "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "sum = 0\nfor _, value in ipairs(values) do\n    sum = sum + value\nend\n\nlocal mean = "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "sum / #values\nprint(string.format(\"mean: %.2f\", mean))\n\n-- Run requires the future "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "application service.\n-- This reference workspace only edits the source.\n");  // 初始main.lua末尾说明Run尚缺应用执行服务，当前只提供正文编辑
+        "-- Read a series and write a summary\nlocal values = {12, 18, 21, 32, 29, 37}\n\nlocal "  // main.lua正文的第一段；\n成为文档换行，无逗号的下一字符串继续同一正文
+        "sum = 0\nfor _, value in ipairs(values) do\n    sum = sum + value\nend\n\nlocal mean = "  // main.lua正文继续保存求和循环；C相邻字符串拼接，这些Lua文字不在本次编译执行
+        "sum / #values\nprint(string.format(\"mean: %.2f\", mean))\n");  // 均值示例只包含实际程序，不嵌入产品开发说明
     add(1, "/home/airi/projects/telemetry", "series.csv", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
         "seconds,load\n0,12\n1,18\n2,21\n3,32\n4,29\n5,37\n");  // 初始CSV含一行标题与6组时间秒数、测量整数；当前先作为普通文字存服务
     add(2, "/home/airi/projects/telemetry", "README.md", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-        "# Telemetry workspace\n\nThis is a frontend reference dataset.\nSave changes update this "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "session's memory only.\nNative application execution is intentionally unconnected.\n");  // README明确保存只改当前进程内存，执行服务尚未连接
+        "# Telemetry\n\nmain.lua computes the mean of six load samples.\n"  // 项目说明先介绍计算目的
+        "series.csv stores the same observations in seconds and percent.\n"  // CSV列给出时间与负载单位
+        "Open series.csv to inspect the time series.\n");  // 项目说明围绕输入、程序和数据查看操作
     add(3, "/home/airi/projects/telemetry", "output", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
     add(6, "/home/airi/projects/telemetry", "sum.c", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-        "#include <stdio.h>\n\nint main(void) {\n    const int values[] = {12, 18, 21, 32};\n    "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
-        "int total = 0;\n    for (unsigned i = 0; i < 4; ++i)\n        total += values[i];\n    "  // 继续当前固定文字；转义换行属于文档内容，C相邻字符串在编译时连接
+        "#include <stdio.h>\n\nint main(void) {\n    const int values[] = {12, 18, 21, 32};\n    "  // sum.c正文含示例包含行与main开头；\n形成文件换行，当前只存文字数据
+        "int total = 0;\n    for (unsigned i = 0; i < 4; ++i)\n        total += values[i];\n    "  // sum.c正文继续保存求和循环；与前后字符串在C编译时拼成一个文档参数
         "printf(\"sum: %d\\n\", total);\n    return 0;\n}\n");  // 存入示例C文件最后打印与返回正文，这段字符串是数据而不是本次参与编译的C程序
     add(7, "/home/airi/projects/telemetry", "project.airi", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
         "[project]\nname = telemetry\nentry = main.lua\n");  // 存入项目说明文字，包含名字与入口；当前尚未把它当配置装载
     add(4, "/home/airi/projects", "telemetry", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-    add(5, "/home/airi", "projects", true, "");      // 向明确编号的服务槽填这份路径、名称、目录标记与正文
-    boot = (AiriBootInfo){.magic = AIRI_BOOT_MAGIC,  // 为主机窗口准备固定参考启动结构，System明确标成示例数据
+    add(5, "/home/airi", "projects", true, "");  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
+    const struct ui_task initial[] = {{1, "airidesk", "Running", 4, 12 * 1024},  // 第1条参考任务给pid、名称、状态、CPU百分数和12MiB的KiB量
+                                      {2, "terminal", "Waiting", 0, 2 * 1024},  // 终端参考记录pid2处于等待，内存示例为2MiB
+                                      {14, "series-worker", "Running", 31, 28 * 1024},  // 曲线worker参考记录pid14，CPU31%、内存28MiB
+                                      {16, "editor", "Waiting", 2, 9 * 1024},  // Editor参考记录pid16，CPU2%、内存9MiB
+                                      {18, "file-service", "Waiting", 0, 6 * 1024}};  // 文件服务参考记录pid18，内存6MiB，五项初始化结束
+    airi_memcpy(records, initial, sizeof(initial));     // 把5条初始任务复制到服务拥有的固定数组
+    record_count = sizeof(initial) / sizeof(*initial);  // 整组数组字节数除以每项大小得到初始5条任务
+    boot = (AiriBootInfo){.magic = AIRI_BOOT_MAGIC,     // 为主机窗口准备固定参考启动结构，System明确标成示例数据
                           .version = AIRI_BOOT_VERSION,  // 设置启动合同版本
                           .size = sizeof(boot),  // 设置本版启动结构字节数
                           .direct_map_offset = UINT64_C(0xffff800000000000),  // 设置参考直接映射偏移
@@ -186,7 +223,7 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
                           .kernel_virtual_base = UINT64_C(0xffffffff80000000),  // 设置参考内核虚拟起点
                           .kernel_size = 132 * 1024,  // 设置参考内核镜像长度
                           .region_count = 4};  // 设置参考内存区域有效条数
-    airi_snprintf(boot.loader, 32, "Reference / UEFI");  // 写明这份启动结构属于主机参考数据，System据此区别实际guest启动
+    airi_snprintf(boot.loader, 32, "UEFI inventory");  // 写明这份启动结构属于主机参考数据，System据此区别实际guest启动
     boot.regions[0] =  // 参考地图第0项描述最低1MiB保留范围，下一行填完整记录
         (struct airi_memory_region){.base = 0, .length = 0x100000, .kind = AIRI_MEMORY_RESERVED};  // 复合字面量按字段名给起点0、长度1MiB和保留类别
     boot.regions[1] = (struct airi_memory_region){  // 参考地图第1项填写内核占用范围
@@ -199,5 +236,6 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
                              .boot = &boot,   // 设置借用启动信息，描述与内存地图须持续有效
                              .files = files,  // 保存目录查询函数地址，前端提供目录与数组，回调复制元信息而不出借服务槽
                              .read = read,    // 服务合同保存完整正文读取函数地址，桌面传服务id与调用者数组
-                             .action = action};  // 服务合同保存操作函数地址，修改请求与失败正文通过该回调交接
+                             .action = action,  // 保存参考文件/任务操作函数地址，前端请求经它修改服务表或取得失败说明
+                             .tasks = tasks};   // 把任务和同次资源统计查询函数地址交给桌面，服务记录仍归参考后端
 }

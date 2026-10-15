@@ -1,6 +1,68 @@
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
 static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
+static void monitor(struct ui_desktop *s) {  // 共享资源仪表，全部数值来自同一次backend快照
+    int x = s->width - UI_MONITOR_W, left = x + 24, width = UI_MONITOR_W - 48;  // 单一内边距对齐标题、数值与坐标轴
+    char value[96];  // 临时格式化数值，不持有另一个统计状态
+    u_rect(x, UI_TOP, UI_MONITOR_W, s->height - UI_TOP - UI_BOTTOM, U_BG);  // 仪表与应用正文分离
+    u_rect(x, UI_TOP, 1, s->height - UI_TOP - UI_BOTTOM, U_EDGE);  // 系统侧栏边界
+    u_label(left, 60, "SYSTEM / RESOURCES", U_MUTED);  // 与窗口身份统一的短标签
+    u_text(left, 88, "Resource monitor", U_LABEL, U_TEXT);  // 可理解的区域标题
+    u_rect(left, 123, width, 1, U_CONTROL);  // 模块的共同基准线
+    u_text(left, 138, s->backend.mode == UI_REFERENCE ? "Recorded session" : "Current session", U_SMALL, U_MUTED);  // 明确实际数据来源
+    if (s->stats.available) {  // 只有快照存在才绘制数值和曲线
+        u_label(left, 174, "CPU LOAD", U_BLUE);  // 蓝色对应CPU测量
+        airi_snprintf(value, sizeof(value), "%u", s->stats.cpu);  // 读取已有百分比
+        u_text(left, 191, value, U_DISPLAY, U_TEXT);   // 大字号突出当前值，图表解释历史
+        u_text(left + 58, 212, "%", U_BODY, U_MUTED);  // 单位与数值分层
+        u_text(left + width - 54, 209, "60 sec", U_SMALL, U_MUTED);  // 横轴的采样跨度
+        int top = 255, bottom = 355, graphw = width - 28;  // 纵轴固定0..100%，不根据当前曲线自动放大
+        for (int i = 0; i <= 4; ++i) {  // 五条刻度线对应0、25、50、75、100
+            int y = top + i * 25;  // 每百分比一个像素
+            for (int gx = 0; gx < graphw; gx += 8)  // 每8像素取一个CPU网格短线起点
+                u_rect(left + gx, y, 2, 1, U_EDGE);  // 每个起点写2×1像素，形成对应真实刻度的点线
+            u_rect(left - 4, y, 4, 1, U_CONTROL);  // 轴端刻度确定实际读数位置
+        }
+        u_text(left + graphw + 6, top - 6, "100", U_SMALL, U_MUTED);   // 上界百分比
+        u_text(left + graphw + 6, top + 44, "50", U_SMALL, U_MUTED);   // 中线百分比
+        u_text(left + graphw + 6, bottom - 6, "0", U_SMALL, U_MUTED);  // 下界百分比
+        for (unsigned i = 1; i < 60; ++i) {  // 用backend已有60个历史点连接折线
+            unsigned prev = s->stats.samples[i - 1], now = s->stats.samples[i];  // 借用同一统计快照
+            if (prev > 100)  // 前一个采样超过百分数上界时限制高度
+                prev = 100;  // 顶点最多落在100%刻度处
+            if (now > 100)  // 当前采样也按相同上界限制
+                now = 100;  // 当前顶点最多落在图表顶部
+            int px = left + (int)(i - 1) * graphw / 59, nx = left + (int)i * graphw / 59;  // 时间均匀映射到横轴
+            u_line(px, bottom - (int)prev, nx, bottom - (int)now, U_BLUE);  // 蓝色走势与CPU标签保持一致
+        }
+        u_rect(left, bottom + 1, graphw, 1, U_CONTROL);  // 明确时间轴
+        u_text(left, bottom + 10, "-60s", U_SMALL, U_MUTED);  // 过去的时间端点
+        u_text(left + graphw - 24, bottom + 10, "now", U_SMALL, U_MUTED);  // 当前时间端点
+        u_rect(left, 401, width, 1, U_EDGE);     // CPU与内存使用同一列宽
+        u_label(left, 420, "MEMORY", U_ACCENT);  // 内存沿用粉色类别
+        airi_snprintf(value, sizeof(value), "%u", s->stats.memory_kib / 1024);  // 实际KiB换算MiB
+        u_text(left, 437, value, U_DISPLAY, U_TEXT);  // 已使用量为主读数
+        airi_snprintf(value, sizeof(value), "/ %u MiB", s->stats.total_kib / 1024);  // 容量保留明确单位
+        u_text(left + 75, 458, value, U_BODY, U_MUTED);  // 与CPU单位共享同一文字基准
+        u_rect(left, 493, width, 12, U_RAISED);  // 连续容量条不虚构内存分段
+        if (s->stats.total_kib) {  // 无总量时避免除零
+            uint64_t used = s->stats.memory_kib < s->stats.total_kib ? s->stats.memory_kib : s->stats.total_kib;  // 限制异常比例
+            u_rect(left, 493, (int)(used * width / s->stats.total_kib), 12, U_ACCENT);  // 宽度线性表达已使用量
+        }
+        u_rect(left, 537, width, 1, U_EDGE);  // I/O区沿相同栅格排列
+        u_label(left, 556, "I/O THROUGHPUT", U_MUTED);  // 速率与容量明确分区
+        airi_snprintf(value, sizeof(value), "%u", s->stats.read_kib);  // 读取当前读速率
+        u_text(left, 582, value, U_TITLE, U_BLUE);  // 读操作的颜色与标记一致
+        airi_snprintf(value, sizeof(value), "%u", s->stats.write_kib);  // 读取当前写速率
+        u_text(left + 116, 582, value, U_TITLE, U_PINK);      // 写操作用独立图表类别色
+        u_text(left, 615, "Read / KiB/s", U_SMALL, U_MUTED);  // 标明读操作和单位
+        u_text(left + 116, 615, "Write / KiB/s", U_SMALL, U_MUTED);  // 标明写操作和单位
+    } else {  // 未采集时保留明确空状态
+        u_text(left, 180, "No runtime samples", U_LABEL, U_TEXT);  // 不用装饰图形冒充测量
+        u_text(left, 212, "CPU and I/O collection is offline.", U_SMALL, U_MUTED);  // 指出具体缺失能力
+    }
+    u_button((struct ui_rect){left, s->height - 96, width, 32}, "Open task manager", false, false);  // 与既有点击区域一致
+}
 void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按窗口层次画整帧，并将对话框留在最后
     if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
         return;  // 当前按窗口层次画整帧，并将对话框留在最后在本分支结束，后续语句不执行
@@ -33,7 +95,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         if (s->windows[i].open)  // 已打开应用即使最小化也保留侧栏打开标记
             u_rect(25, y + 25, 6, 2, U_ACCENT);  // 用会话强调色写矩形，起点(25,y + 25)，尺寸6×2像素
     }
-    int right = 0;  // 本阶段还没有资源侧栏，窗口可用区不需预留右侧宽度
+    int right = s->monitor && s->width >= UI_MONITOR_MIN ? 268 : 0;  // 资源栏开启且屏幕够宽才预留268像素，否则窗口可用至右边
     unsigned first = 0;  // 默认从最底层窗口开始绘制，后面找可遮挡底层的最大化窗口
     for (unsigned n = 0; n < s->order_count; ++n) {  // 按有效窗口层次遍历，数组后部不作窗口身份
         struct ui_window *w = &s->windows[s->order[n]];  // 先由绘图次序取得应用编号，再借用对应窗口，不把层次n当应用id
@@ -97,6 +159,8 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
         u_line(r.x + r.w - 10, r.y + r.h - 4, r.x + r.w - 4, r.y + r.h - 10, U_EDGE);  // 用分隔线色连接像素端点(r.x + r.w - 10,r.y + r.h - 4)到(r.x + r.w - 4,r.y + r.h - 10)
     }
+    if (right)  // 资源栏占用宽度非零时才绘制它，本轮窗口已为其留空间
+        monitor(s);  // 资源栏启用时读取同次统计，显示当前可用数据或未采集状态
     u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
     u_rect(0, s->height - UI_BOTTOM, s->width, 30, U_PANEL);  // 用工具栏底色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×30像素
     u_rect(0, s->height - UI_BOTTOM, s->width, 1, U_EDGE);  // 用分隔线色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×1像素

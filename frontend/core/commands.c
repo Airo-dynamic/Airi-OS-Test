@@ -21,6 +21,8 @@ void ui_confirm(struct ui_desktop *s) {  // 把当前对话框确认转换成明
         ui_command(s, UI_RENAME, s->dialog_target, s->dialog_input, "");  // 向固定目标服务id提交新名称，正文未参与重命名
     if (kind == UI_DIALOG_DELETE)  // 删除确认提交目标id，服务仍会检查它存在且目录可删除
         ui_command(s, UI_DELETE, s->dialog_target, "", "");  // 提交已确认的目标id删除请求，名称与正文均不需要
+    if (kind == UI_DIALOG_STOP)  // 停止确认提交当前参考任务pid，服务只移除此记录而不结束真实进程
+        ui_command(s, UI_STOP, s->dialog_target, "", "");  // 把已确认参考pid交给停止动作，只移除服务记录，不结束真实进程
     if (kind == UI_DIALOG_SAVE_AS)  // 另存提交id为-1的新文档请求，成功后刷新并重新绑定Editor身份
         ui_command(s, UI_SAVE, s->editor_id, s->dialog_input, s->editor);  // 提交另存名称与当前正文，未绑定时id为-1，成功后前端从新快照绑定新id
 }
