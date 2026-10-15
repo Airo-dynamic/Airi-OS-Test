@@ -39,3 +39,9 @@ airi_storage_elf_end: /* 文件半开右端。 */
 airi_pipes_elf_start: /* 文件起点。 */
 .incbin AIRI_PIPES_ELF /* 当前配置的真实ELF。 */
 airi_pipes_elf_end: /* 文件右端。 */
+
+.section .rodata /* 阻塞用户程序映像。 */
+.global airi_waits_elf_start, airi_waits_elf_end /* 边界只供内核装载。 */
+airi_waits_elf_start: /* 文件开始。 */
+.incbin AIRI_WAITS_ELF /* 本配置独立ELF。 */
+airi_waits_elf_end: /* 半开右端。 */

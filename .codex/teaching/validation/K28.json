@@ -134,5 +134,11 @@
     "Only nonblocking=1 is published",
     "Current readiness query is not a subscription",
     "Linux L04 still unverified"
-  ]
+  ],
+  "reconstruction": {
+    "directory": "/tmp/airios-k28-followalong",
+    "build_exit": 0,
+    "boot_exit": 0,
+    "log": "/tmp/airios-k28-replay-run.log"
+  }
 }

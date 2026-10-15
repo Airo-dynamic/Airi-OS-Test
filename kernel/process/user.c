@@ -12,7 +12,8 @@
 #define STACK_BASE 0xffffe10000000000ull // 所有进程陷入栈位于同一长期内核分支。
 #define USER_HEAP 0x10000000ull // ELF静态范围之外的用户页分配起点。
 #define PROCESS_COUNT 8u // 有界进程表，不做动态扩容。
-enum user_state { USER_UNUSED, USER_RUNNABLE, USER_RUNNING, USER_WAITING, USER_ZOMBIE, USER_REAP_PENDING }; // 退出与回收是两个不同状态。
+enum user_state { USER_UNUSED, USER_RUNNABLE, USER_RUNNING, USER_WAITING, USER_IO_WAIT, USER_ZOMBIE, USER_REAP_PENDING }; // 退出与回收是两个不同状态。
+enum io_operation { IO_NONE, IO_READ, IO_WRITE, IO_READY }; // 等待保存操作条件，不保留内核局部buffer。
 struct user_page { uint64_t address, physical; unsigned flags; }; // fork需要把同一VA映射到另一个物理页。
 struct user_process { // 所有权和调度状态由内核持有，用户只能看到PID。
     struct airi_fd_table files; // exec转移表项，fork增加同一打开对象的引用。
@@ -25,12 +26,17 @@ struct user_process { // 所有权和调度状态由内核持有，用户只能�
     enum user_state state; // 只有RUNNABLE可被调度器选中。
     int64_t wait_target; // 正PID表示指定孩子，-1表示任意孩子。
     uint64_t wait_status; // 已验证的父进程用户输出地址，阻塞期间父进程不会修改映射。
+    enum io_operation io; // 只有USER_IO_WAIT消费下面的请求副本。
+    unsigned io_fd, io_events; // FD属于本进程表，events只用于就绪等待。
+    uint64_t io_address, io_bytes, io_deadline; // 用户页在阻塞期间仍由进程拥有，deadline按真实tick。
     struct airi_trap_frame initial; // 尚未运行时的寄存器值，不依赖临时C对象。
     struct airi_trap_frame *frame; // 运行后指向本进程内核栈的实际现场。
 };
 static struct user_process processes[PROCESS_COUNT]; // 槽可以复用，PID单调增长，不等于槽下标。
 static struct user_process *current; // 只在完整陷入边界改变当前身份。
 static unsigned next_pid = 1, root_pid, timer_switches, wait_blocks; // 每次运行会话的根身份和实际行为计数。
+static unsigned io_block_count, io_wake_count, idle_halt_count; // 会话真实I/O阻塞与唤醒次数。
+static bool session_idle, service_from_timer; // 是否暂回启动栈服务，和整个会话结束分开。
 static bool session_active; // 只有用户会话活动时才接受用户IRQ或系统调用。
 static int session_result; // 根用户退出结果，不用最后一个孩子的结果覆盖。
 static struct airi_trap_frame *kernel_return; // 启动栈一直保留到整个用户会话结束。
@@ -40,6 +46,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_waits_elf_start[], airi_waits_elf_end[]; // 真正阻塞与超时工作负载。
 extern const uint8_t airi_pipes_elf_start[], airi_pipes_elf_end[]; // 非阻塞管道用户程序。
 extern const uint8_t airi_storage_elf_start[], airi_storage_elf_end[]; // 写入和恢复共用一份明确分支的用户ELF。
 extern const uint8_t airi_files_elf_start[], airi_files_elf_end[]; // 内存文件用户工作负载。
@@ -50,6 +57,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
     {"worker", airi_worker_elf_start, airi_worker_elf_end},
+    {"waits", airi_waits_elf_start, airi_waits_elf_end}, // 阻塞流和就绪条件等待。
     {"pipes", airi_pipes_elf_start, airi_pipes_elf_end}, // 有界FIFO与关闭语义。
     {"storage", airi_storage_elf_start, airi_storage_elf_end}, // 显式提交记录。
     {"recover", airi_storage_elf_start, airi_storage_elf_end}, // 只读取已恢复记录。
@@ -100,6 +108,52 @@ static bool copy_user(struct user_process *p, void *buffer, uint64_t address, si
         done += part; // 推进下一段。
     }
     return true; // 同步结束，不借出buffer指针。
+}
+static long file_transfer(struct user_process *p, uint64_t fd, uint64_t address, size_t bytes, bool write, bool positioned, uint64_t offset) { // 允许在另一根的阻塞进程上重试，同步副本属于当前内核栈。
+    char buffer[256]; // 一次有界副本，不跨调度保留。
+    if (fd >= AIRI_FD_COUNT) // 完整64位编号先检查再转换。
+        return -9; // -EBADF。
+    if (bytes > sizeof(buffer)) // 不让用户长度覆盖内核栈。
+        return -22; // -EINVAL。
+    if (!user_access(p, address, bytes, !write)) // 输出在消费流或偏移之前完整验证。
+        return -14; // -EFAULT。
+    if (write) { // 用户内容在本次尝试内复制。
+        copy_user(p, buffer, address, bytes, false); // 通过目标自己的页表，不解引用原始用户VA。
+        if (!positioned && airi_fd_console(&p->files, (unsigned)fd)) { // 固定终端同步发送。
+            airi_serial_write_bytes(buffer, bytes); // 不保存局部buffer给设备。
+            return (long)bytes; // 返回逻辑进展。
+        }
+        return airi_fd_write(&p->files, (unsigned)fd, buffer, bytes, positioned, offset); // 满管道可返回EAGAIN。
+    }
+    long result = airi_fd_read(&p->files, (unsigned)fd, buffer, bytes, positioned, offset); // EOF和暂不可读分开。
+    if (result > 0 && !copy_user(p, buffer, address, (size_t)result, true)) // 目标阻塞且单线程，已检查映射不应变化。
+        airi_panic("validated file output mapping changed"); // 内部错误不丢字节后假装成功。
+    return result; // 完成前缀或明确负错误。
+}
+static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身不复制、分配或打印。
+    for (unsigned i = 0; i < PROCESS_COUNT; ++i) { // 本阶段有界等待队列由进程槽直接表示。
+        struct user_process *p = &processes[i]; // 控制块在等待期间不会回收。
+        if (p->state != USER_IO_WAIT) // 不碰正在运行、wait孩子或已退出者。
+            continue; // 检查下一个等待槽。
+        long result; // 恢复到用户同一次调用的结果。
+        if (p->io == IO_READY) { // 订阅的是条件，不是一次成功read的承诺。
+            result = airi_fd_ready(&p->files, p->io_fd); // 当前条件可能被其他进程消费或改变。
+            if (result >= 0) // 负错误必须原样唤醒，不能按位筛掉。
+                result &= p->io_events | AIRI_READY_HUP | AIRI_READY_ERROR; // 对端关闭即使未显式请求也应可见。
+            if (!result && airi_timer_ticks() < p->io_deadline) // 无条件成立且尚未超时。
+                continue; // 保持等待，之后由状态变化或PIT服务重查。
+        } else { // 阻塞read/write重新尝试同一个有界请求。
+            result = file_transfer(p, p->io_fd, p->io_address, (size_t)p->io_bytes, p->io == IO_WRITE, false, 0); // 用户buffer仍由p持有。
+            if (result == -11) // 暂时依旧没有进展。
+                continue; // 不把原系统调用提前返回给用户忙等。
+        }
+        p->frame->rax = (uint64_t)result; // 用户返回位置仍在原调用之后。
+        p->io = IO_NONE; // 这一次等待不再持有请求地址。
+        p->io_address = p->io_bytes = p->io_deadline = 0; // 清过期的用户对象与截止值。
+        p->state = USER_RUNNABLE; // 结果就绪之后才发布运行资格。
+        ++io_wake_count; // 实际唤醒，不把查询次数计成完成。
+        airi_log("[WAIT_WAKE] pid=%u result=%ld", p->pid, result); // 普通内核服务栈输出，不在IRQ里打印。
+    }
 }
 static void cleanup(struct user_process *p) { // 目标根必须不活动，而且当前不能使用目标内核栈。
     airi_fd_close_all(&p->files, false); // 回滚或已退出空表均安全，不能遗留全局引用。
@@ -227,7 +281,7 @@ static void collect_pending(void) { // 只在新的用户陷入入口调用，�
         if (&processes[i] != current && processes[i].state == USER_REAP_PENDING) // 当前真正运行的内核栈不能在此回收。
             cleanup(&processes[i]); // 非活动根和已离开的内核栈可安全解除。
 }
-enum schedule_reason { REASON_TIMER, REASON_YIELD, REASON_WAIT, REASON_EXIT }; // 原因用于验证真实抢占，不混成主动yield。
+enum schedule_reason { REASON_TIMER, REASON_YIELD, REASON_WAIT, REASON_EXIT, REASON_IO }; // 原因用于验证真实抢占，不混成主动yield。
 static struct airi_trap_frame *select_user(struct user_process *p) { // 只在完整陷入现场边界切根和TSS。
     current = p; // 之后的IRQ和系统调用归属这个身份。
     p->state = USER_RUNNING; // 新用户即将获得CPU。
@@ -236,25 +290,39 @@ static struct airi_trap_frame *select_user(struct user_process *p) { // 只在�
         airi_panic("cannot activate selected user root"); // 不返回到缺映射的调用链。
     return airi_user_resume(p->frame); // 用户返回地址与标志必须仍符合边界。
 }
-static struct airi_trap_frame *schedule(enum schedule_reason reason) { // 内核中断门保持IF关闭，不在半次分配中切换。
-    struct user_process *old = current; // 当前C函数还暂时使用old的内核栈。
-    if (old->state == USER_RUNNING) // 等待和退出不能被这里误改回可运行。
-        old->state = USER_RUNNABLE; // 普通时间片或yield结束后仍可再次获得CPU。
-    for (unsigned n = 1; n <= PROCESS_COUNT; ++n) { // 轮流扫描一圈，必要时仍选择原任务。
-        struct user_process *next = &processes[(slot(old) + n) % PROCESS_COUNT]; // 槽位轮转不改变PID。
-        if (next->state == USER_RUNNABLE) { // WAITING/ZOMBIE均没有可直接恢复的运行资格。
-            if (next != old && reason == REASON_TIMER) // 只有真实IRQ导致换身份才计入抢占证据。
-                ++timer_switches; // 不在IRQ中分配、回收或输出串口。
-            return select_user(next); // C返回后汇编才真正换到next现场。
+static struct airi_trap_frame *pause_for_service(bool from_timer) { // 完整用户frame已保存，暂回长期启动栈做可延后工作。
+    session_idle = true; // 会话仍active，不是用户程序已经退出。
+    service_from_timer = from_timer; // 真正IRQ导致的换身份计数另记。
+    airi_memory_use_kernel(); // 启动服务不依赖某个用户根。
+    kernel_return->rax = 0; // 暂停结果不当成应用最终退出值。
+    return kernel_return; // 汇编离开当前进程栈，之后才能安全服务其他等待者。
+}
+static struct airi_trap_frame *schedule(enum schedule_reason reason) { // 当前完整frame边界可切换，但IRQ不直接执行复杂I/O。
+    struct user_process *old = current; // 仍暂用old的内核栈。
+    if (old->state == USER_RUNNING) // 等待或退出不能误改回可运行。
+        old->state = USER_RUNNABLE; // 时间片结束仍可运行。
+    if (reason != REASON_TIMER) // 普通内核边界可重试等待条件。
+        poll_waiters(); // 已有字节、关闭或错误形成后再唤醒。
+    else // IRQ只检查状态，并把可延后服务交给启动栈。
+        for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 即使另有纯计算用户，也不能饿死超时与未来设备完成。
+            if (processes[i].state == USER_IO_WAIT) // 有等待源需要周期服务。
+                return pause_for_service(true); // 不在IRQ C链里复制用户数据或输出。
+    for (unsigned n = 1; n <= PROCESS_COUNT; ++n) { // 从old之后轮转一圈。
+        struct user_process *next = &processes[(slot(old) + n) % PROCESS_COUNT]; // PID与槽仍分开。
+        if (next->state == USER_RUNNABLE) { // 仅可运行者有可返回的用户现场。
+            if (next != old && reason == REASON_TIMER) // 真IRQ切不同身份。
+                ++timer_switches; // 主动阻塞不冒充抢占。
+            return select_user(next); // 汇编恢复目标frame。
         }
     }
-    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 本阶段尚无设备等待源，全部阻塞表示内部死锁。
-        if (processes[i].state == USER_WAITING) // 孩子链应有可运行叶子，不应全部只等待。
-            airi_panic("all users blocked without an event source"); // 后续I/O阶段再加入真正空闲等待。
-    session_active = false; // 没有可运行或等待的用户，整个会话结束。
-    airi_memory_use_kernel(); // 回启动现场前切离最后一个用户根。
-    kernel_return->rax = (uint64_t)(int64_t)session_result; // 保留根进程结果，不覆盖成最后一个孩子结果。
-    return kernel_return; // 此处仍不释放old内核栈，回启动栈后统一回收。
+    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 没有可运行者时检查仍在等待的活进程。
+        if (processes[i].state == USER_WAITING || processes[i].state == USER_IO_WAIT) // 可能正在等设备、超时或未来对端。
+            return pause_for_service(false); // 允许启动栈hlt等待真实IRQ，不PANIC用户死锁。
+    session_active = false; // 所有用户均结束，此时才算完整会话退出。
+    session_idle = false; // 不再保留暂停身份。
+    airi_memory_use_kernel(); // 最后一个用户根也变成不活动。
+    kernel_return->rax = (uint64_t)(int64_t)session_result; // 根用户的真实退出结果。
+    return kernel_return; // 回启动栈后统一回收残留资源。
 }
 static struct airi_trap_frame *exit_current(int code) { // CPU还在当前进程内核栈上，先结束身份而不释放栈。
     struct user_process *p = current; // 当前退出者的稳定控制块。
@@ -417,8 +485,9 @@ struct airi_trap_frame *airi_user_timer(struct airi_trap_frame *f) { // IRQ路�
     return airi_user_resume(f); // 也不能跳过坏返回检查。
 }
 struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍不可抢占，只在完整用户陷入边界处理进程状态。
-    if (f->vector == 129 && f->cs == 8 && !session_active && current && current->state == USER_RUNNABLE) { // 内核启动一组已经准备好的用户。
+    if (f->vector == 129 && f->cs == 8 && (!session_active || session_idle) && current && current->state == USER_RUNNABLE) { // 内核启动一组已经准备好的用户。
         kernel_return = f; // 启动栈的继续位置一直保留。
+        session_idle = false; // 当前int129重新登记了仍在启动栈上的继续位置。
         session_active = true; // 之后的CS3陷入有会话归属。
         return select_user(current); // 按目标根和TSS进入首个用户。
     }
@@ -431,31 +500,21 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         airi_log("[USER_FAULT] pid=%u vector=%llu error=0x%llx rip=0x%llx cr2=0x%llx", current->pid, (unsigned long long)f->vector, (unsigned long long)f->error, (unsigned long long)f->rip, (unsigned long long)(f->vector == 14 ? airi_trap_fault_address() : 0)); // PF才读取本次CR2。
         return exit_current(-(128 + (int)f->vector)); // 自有故障编码，不宣称Linux信号ABI。
     }
-    if (f->rax == 1 || f->rax == 10 || f->rax == 15 || f->rax == 16) { // write/read/pread/pwrite共享检查与副本边界。
-        char buffer[256]; // 内核只在本次同步调用持有副本。
-        bool write = f->rax == 1 || f->rax == 16; // 用户到文件为写，文件到用户为读。
-        bool positioned = f->rax == 15 || f->rax == 16; // 显式偏移来自第四参数R10。
-        size_t bytes = (size_t)f->rdx; // 请求长度先有界再校验跨度。
-        long result; // 自有ABI直接返回负错误或实际字节数。
-        if (f->rdi >= AIRI_FD_COUNT) // 全64位FD必须先验证，不能截断高位后访问另一个编号。
-            result = -9; // -EBADF。
-        else if (bytes > sizeof(buffer)) // 不允许覆盖内核栈。
-            result = -22; // -EINVAL。
-        else if (!user_access(current, f->rsi, bytes, !write)) // read必须先验证整个输出区，失败不能消费偏移。
-            result = -14; // -EFAULT。
-        else if (write) { // 输入完整有效后才能发生文件或串口副作用。
-            copy_user(current, buffer, f->rsi, bytes, false); // 复制当前进程的输入字节。
-            if (!positioned && airi_fd_console(&current->files, (unsigned)f->rdi)) { // 被dup的终端FD也可发送。
-                airi_serial_write_bytes(buffer, bytes); // 同步设备适配，不借出用户指针。
-                result = (long)bytes; // 返回逻辑字节数。
-            } else // RAM文件或不支持的定位设备操作。
-                result = airi_fd_write(&current->files, (unsigned)f->rdi, buffer, bytes, positioned, f->r10); // 文件层维护共享偏移。
-        } else { // 内核副本先承接实际读取结果。
-            result = airi_fd_read(&current->files, (unsigned)f->rdi, buffer, bytes, positioned, f->r10); // EOF为0，错误为负。
-            if (result > 0 && !copy_user(current, buffer, f->rsi, (size_t)result, true)) // 前置完整检查后映射不能变化。
-                airi_panic("validated file output mapping changed"); // 不吞内部错误。
+    if (f->rax == 1 || f->rax == 10 || f->rax == 15 || f->rax == 16) { // 同步文件与流的完整副本边界。
+        bool write = f->rax == 1 || f->rax == 16; // 输出到流或文件。
+        bool positioned = f->rax == 15 || f->rax == 16; // 显式偏移不支持阻塞流。
+        long result = file_transfer(current, f->rdi, f->rsi, (size_t)f->rdx, write, positioned, f->r10); // 先实际尝试一次。
+        if (result == -11 && !positioned && !airi_fd_nonblocking(&current->files, (unsigned)f->rdi)) { // 阻塞流暂不可完成，用户不能提前看到EAGAIN。
+            current->io = write ? IO_WRITE : IO_READ; // 保存需要重试的操作种类。
+            current->io_fd = (unsigned)f->rdi; // 此时FD已由file_transfer完整验证。
+            current->io_address = f->rsi; // 用户页继续归此进程所有，不借内核局部buffer。
+            current->io_bytes = f->rdx; // 一次最多256字节，已经验证跨度。
+            current->state = USER_IO_WAIT; // 条件和数据先登记，再移出可运行集合。
+            ++io_block_count; // 实际阻塞计数。
+            airi_log("[WAIT_REGISTER] pid=%u operation=%s fd=%u", current->pid, write ? "write" : "read", current->io_fd); // 普通系统调用上下文记录。
+            return schedule(REASON_IO); // 选择别的用户或进入真正内核空闲等待。
         }
-        f->rax = (uint64_t)result; // 调用者必须按实际完成数推进。
+        f->rax = (uint64_t)result; // 非阻塞仍把EAGAIN交给用户，其他结果直接返回。
     } else if (f->rax == 2) // 退出后不再恢复此用户指令。
         return exit_current((int)(f->rdi & 255)); // 普通退出码0–255。
     else if (f->rax == 3) // getpid查询当前身份。
@@ -522,23 +581,45 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     else if (f->rax == 20) { // pipe原子创建并返回两个整数，不暴露内部环。
         unsigned ends[2]; // 内核副本，发布前用户输出已验证。
         long result; // 0或负错误。
-        if (f->rsi != 1) // 本节只发布非阻塞模式，阻塞接下一阶段。
+        if (f->rsi > 1) // 明确接受阻塞0与非阻塞1，其他参数拒绝。
             result = -22; // -EINVAL。
         else if (!user_access(current, f->rdi, sizeof(ends), true)) // 坏输出不能创建无法交给用户的FD。
             result = -14; // -EFAULT。
         else { // 没有半次FD分配的用户可见状态。
-            result = airi_fd_pipe(&current->files, ends, true); // 两端和缓冲都齐后才成功。
+            result = airi_fd_pipe(&current->files, ends, f->rsi != 0); // 两端和缓冲都齐后才成功。
             if (!result && !copy_user(current, ends, f->rdi, sizeof(ends), true)) // 映射在本次调用中不应变化。
                 airi_panic("validated pipe output mapping changed"); // 明确内核不变量。
         }
         f->rax = (uint64_t)result; // 失败输出保持原值。
     } else if (f->rax == 21) // 当前就绪条件查询，不保存通知事件。
         f->rax = f->rdi < AIRI_FD_COUNT ? (uint64_t)airi_fd_ready(&current->files, (unsigned)f->rdi) : (uint64_t)-9ll; // 完整64位编号先限制。
+    else if (f->rax == 22) { // 等待管道条件，有限tick超时，0表示只查询。
+        long result; // 事件掩码、0超时或负错误。
+        if (f->rdi >= AIRI_FD_COUNT || !f->rsi || (f->rsi & ~3ull) || f->rdx > 500) // 只接受READ/WRITE请求，最多五秒。
+            result = -22; // -EINVAL。
+        else { // 先看当前条件，避免已经满足还去睡眠。
+            result = airi_fd_ready(&current->files, (unsigned)f->rdi); // FD错误原样返回。
+            if (result >= 0) // 负错误不参与位运算。
+                result &= (long)f->rsi | AIRI_READY_HUP | AIRI_READY_ERROR; // 关闭与错误始终报告。
+            if (!result && f->rdx) { // 条件未满足且愿意有限等待。
+                current->io = IO_READY; // 不读写任何字节，只重查条件。
+                current->io_fd = (unsigned)f->rdi; // 属于此进程的稳定表项。
+                current->io_events = (unsigned)f->rsi; // 保存订阅条件。
+                current->io_deadline = airi_timer_ticks() + f->rdx; // 真实时钟截止，不靠循环次数。
+                current->state = USER_IO_WAIT; // 原frame已保存在进程中。
+                ++io_block_count; // 这次调用确实阻塞。
+                airi_log("[WAIT_REGISTER] pid=%u operation=ready fd=%u", current->pid, current->io_fd); // 由普通内核上下文记录。
+                return schedule(REASON_IO); // 返回到同一次wait调用之后。
+            }
+        }
+        f->rax = (uint64_t)result; // 立即就绪、纯查询、错误统一返回。
+    }
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
+    poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。
     return airi_user_resume(f); // 普通调用继续同一用户，仍检查RSP与标志。
 }
-struct user_result { int code; unsigned ticks, switches, blocks; uint64_t fault_error; }; // 启动任务只取得数值，不借已回收控制块。
+struct user_result { int code; unsigned ticks, switches, blocks; uint64_t fault_error; unsigned io_blocks, io_wakes, idle_halts; }; // 启动任务只取得数值，不借已回收控制块。
 static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf, struct user_result *result) { // 可用于启动演示或串口命令，程序失败不等于内核失败。
     if (session_active) // 当前只有一个由启动栈收拢的用户会话。
         return -16; // -EBUSY，不能覆盖已有kernel_return。
@@ -564,9 +645,33 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     timer_switches = 0; // 这次会话实际抢占计数。
     wait_blocks = 0; // 这次会话实际阻塞计数。
     current = root; // 内核启动门选择此根。
+    io_block_count = io_wake_count = idle_halt_count = 0; // 本次I/O阻塞统计独立于wait孩子。
+    session_idle = false; // 首次int129创建新活动会话。
     long code; // 根结束结果由启动现场RAX交回。
-    __asm__ volatile("int $0x81" : "=a"(code) :: "memory", "cc"); // 全部用户结束后才真正回启动栈。
-    *result = (struct user_result){(int)code, root->user_ticks, timer_switches, wait_blocks, root->fault_error}; // 回收前复制必要数值。
+    for (;;) { // 每次返回启动栈，先区分暂时服务和整个会话结束。
+        __asm__ volatile("int $0x81" : "=a"(code) :: "memory", "cc"); // 用户运行期间启动栈与继续现场保持完整。
+        if (!session_active) // 只有所有用户结束才离开launch。
+            break; // code此时才是根用户真实退出值。
+        collect_pending(); // 当前确在启动栈，仍保守跳过current槽。
+        for (;;) { // 暂无可运行者时在长期内核根上服务等待条件。
+            poll_waiters(); // 可复制用户结果和记录日志，不在IRQ C链里做。
+            struct user_process *next = NULL; // 每次重查后重新选择。
+            for (unsigned n = 1; n <= PROCESS_COUNT; ++n) // 轮转保持公平，不总挑槽0。
+                if (processes[(slot(current) + n) % PROCESS_COUNT].state == USER_RUNNABLE) { // 等待者可能刚被唤醒。
+                    next = &processes[(slot(current) + n) % PROCESS_COUNT]; // 保存控制块，不提前切根。
+                    break; // 首个可运行者获得下一次int129。
+                }
+            if (next) { // 服务后已有用户可继续。
+                if (service_from_timer && next != current) // 只有来自真实IRQ的身份改变才计抢占。
+                    ++timer_switches; // 不把用户主动阻塞算成IRQ切换。
+                current = next; // int129随后正式设置TSS与目标根。
+                break; // 回外层重新登记新的启动继续现场。
+            }
+            ++idle_halt_count; // 统计真正没有可运行用户后执行的空闲等待。
+            __asm__ volatile("sti; hlt" ::: "memory"); // CPU真正空闲等PIT，醒后仍在启动服务栈。
+        }
+    }
+    *result = (struct user_result){(int)code, root->user_ticks, timer_switches, wait_blocks, root->fault_error, io_block_count, io_wake_count, idle_halt_count}; // 回收前复制必要数值。
     for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 当前不在任何用户内核栈上。
         if (processes[i].state != USER_UNUSED) // wait已回收槽不重复处理。
             cleanup(&processes[i]); // 收拢剩余僵尸和未被父wait的资源。
@@ -594,13 +699,17 @@ void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回�
     run_one(airi_process_elf_start, (size_t)((uintptr_t)airi_process_elf_end - (uintptr_t)airi_process_elf_start), "processes", 0, true, false, true); // 真实多进程复制、抢占、阻塞与回收。
     run_one(airi_files_elf_start, (size_t)((uintptr_t)airi_files_elf_end - (uintptr_t)airi_files_elf_start), "files", 0, true, false, false); // 文件内容、共享偏移与exec引用回收。
     run_one(airi_pipes_elf_start, (size_t)((uintptr_t)airi_pipes_elf_end - (uintptr_t)airi_pipes_elf_start), "pipes", 0, true, false, false); // 真实FIFO、背压、关闭和fork共享。
+    struct user_result waits_result; // 数值证据不借已回收控制块。
+    if (launch(airi_waits_elf_start, (size_t)((uintptr_t)airi_waits_elf_end - (uintptr_t)airi_waits_elf_start), "waits", true, &waits_result) || waits_result.code || waits_result.io_blocks < 4 || waits_result.io_wakes < 4 || !waits_result.idle_halts) // 读、写、空闲与纯计算并行超时四种实际等待均须发生。
+        airi_panic("blocking I/O did not preserve waiting semantics"); // 不把用户循环重试当内核阻塞。
+    airi_log("[WAIT_DEMO_OK] blocked=%u woken=%u idle_halts=%u", waits_result.io_blocks, waits_result.io_wakes, waits_result.idle_halts); // 统计来自真实状态变化。
     airi_log("[USER_DEMO_OK] ring=3 syscall=int80 bad_pointers=2 user_gp=13 user_pf=14 bad_rsp=rejected reclaimed=1"); // 完整会话结束，仍回串口命令。
 }
 
 bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
     size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
     if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
-        airi_console_print(console, "programs: hello processes worker broken files storage recover pipes"); // broken是明确损坏的演示输入。
+        airi_console_print(console, "programs: hello processes worker broken files storage recover pipes waits"); // broken是明确损坏的演示输入。
         return true; // 已处理，不再交给图形扩展。
     }
     if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。

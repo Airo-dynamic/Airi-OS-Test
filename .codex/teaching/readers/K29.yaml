@@ -1,0 +1,26 @@
+checkpoint: K29
+baseline: baseline.yaml
+start: K28
+current_operation: read/write真正阻塞，空闲与纯计算并行两种情形仍能PIT超时并恢复原调用
+already_explained:
+- concept: 管道条件与端点引用
+  at: ../../../dev-log/core/28-pipes.md#pipe-conditions
+  establishes: EAGAIN不等于EOF，HUP仍排空，ready只是当前条件
+- concept: 完整用户frame边界
+  at: ../../../dev-log/core/22-processes.md#timer-process-switch
+  establishes: CS3切换，CS0不抢占，用户栈和内核栈分别持有
+first_use:
+- concept: 保存等待请求
+  at: ../../../dev-log/core/29-wait-queues.md#wait-saved-request
+  establishes: 登记操作与用户地址，重查后先写frame结果再发布RUNNABLE，不保存局部buffer
+- concept: 可重复登记的启动继续位置
+  at: ../../../dev-log/core/29-wait-queues.md#wait-kernel-continuation
+  establishes: active与idle分开，IRQ暂回启动服务，int129重建继续frame，无用户时hlt等PIT
+- concept: 有限条件等待
+  at: ../../../dev-log/core/29-wait-queues.md#wait-ready-condition
+  establishes: 0tick纯查询，有限截止，HUP/ERROR总报告，返回后仍需处理I/O结果
+not_assumed:
+- 多CPU锁、Linux epoll ABI、futex或磁盘异步已实现
+limits:
+- 单CPU不可抢占内核，有界八槽扫描
+- 普通阻塞流无隐藏超时，用户无事件可能永久等待，内核不伪造完成

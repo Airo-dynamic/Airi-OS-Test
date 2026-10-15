@@ -80,3 +80,7 @@ long airi_pipe(unsigned ends[2], unsigned nonblocking) { // 内核先验证输�
 long airi_ready(unsigned fd) { // 仅查询当前管道条件。
     return call3(21, fd, 0, 0); // 返回掩码或负错误，不能把负数当事件位。
 }
+
+long airi_wait_ready(unsigned fd, unsigned events, unsigned ticks) { // 条件满足返回事件位，超时0，负值是错误。
+    return call3(22, fd, events, ticks); // 内核保存现场并在同一次调用后恢复。
+}

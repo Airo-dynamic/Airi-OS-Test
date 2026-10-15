@@ -184,6 +184,11 @@
       "id": "K28",
       "title": "K28 · 非阻塞管道、背压、端点引用与当前就绪",
       "document": "dev-log/core/28-pipes.md"
+    },
+    {
+      "id": "K29",
+      "title": "K29 · 阻塞管道、条件等待与可恢复的内核服务栈",
+      "document": "dev-log/core/29-wait-queues.md"
     }
   ]
 }

@@ -205,11 +205,11 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -DAIRI_WAITS_ELF='"$(OUT)/user/waits.elf"' -c $< -o $@
 
 # 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
 USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
@@ -267,3 +267,14 @@ $(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h
 $(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
 # 保持相同低地址ELF布局。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/pipes.o -o $@
+
+# 阻塞和就绪等待工作负载独立于非阻塞管道程序。
+$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h
+# 仍按配置隔离用户对象。
+	@mkdir -p $(dir $@)
+# 只使用自有用户库与整数寄存器。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# ELF只选择waits的main。
+$(OUT)/user/waits.elf: $(USER_COMMON) $(OUT)/user/waits.o labs/airios/program.ld
+# 低地址静态链接，不借宿主入口。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/waits.o -o $@

@@ -36,6 +36,7 @@ long airi_log_count(void); // 已恢复有效前缀，错误为负。
 #define AIRI_WRITABLE 2u // 当前有读者和空位。
 #define AIRI_HANGUP 4u // 最后写者关闭，仍应排空已有数据。
 #define AIRI_ERROR 8u // 最后读者关闭，写将EPIPE。
-long airi_pipe(unsigned ends[2], unsigned nonblocking); // 本节仅支持nonblocking=1。
+long airi_pipe(unsigned ends[2], unsigned nonblocking); // nonblocking=0阻塞，1暂不可完成时返回-11。
 long airi_ready(unsigned fd); // 管道当前条件查询，不是Linux epoll ABI。
+long airi_wait_ready(unsigned fd, unsigned events, unsigned ticks); // READ/WRITE条件，0纯查询，最多500tick，超时返回0。
 #endif // 结束包含保护。

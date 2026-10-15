@@ -1,0 +1,24 @@
+{
+  "phase": "P4 kernel",
+  "date": "2026-10-15",
+  "checkpoint": "K28",
+  "gui_merge": "gui into isolated detached K28, no main frontend paths",
+  "gui_tests": {
+    "boot_profiles": 9,
+    "console_paths": 3,
+    "storage_restart_boots": 2,
+    "passed": true
+  },
+  "gui_ui": {
+    "snapshots": 84,
+    "contrast": 58,
+    "ASan_UBSan": true,
+    "passed": true
+  },
+  "screenshots": "artifacts/p4-graphics-regression/day.png and night.png visually reviewed",
+  "linux": "L04 SSH255; Linux branch compile/runtime unverified",
+  "limits": [
+    "GUI reference Files is still a host reference backend",
+    "No physical host power loss experiment"
+  ]
+}
