@@ -1,0 +1,35 @@
+checkpoint: '05'
+baseline: baseline.yaml
+start: '04'
+current_operation: 验证两个相邻内存区域，并拒绝错误版本、重叠与空范围
+already_explained:
+- concept: 字节指针与对象大小
+  at: ../../../dev-log/core/03-bytes.md#byte-pointers
+  establishes: 指针定位调用者准备的字节；const 限制写入，size_t 表示大小
+- concept: 容量与格式参数
+  at: ../../../dev-log/core/04-format.md#format-capacity
+  establishes: 数组容量包含 NUL，返回长度计算完整字符数；格式决定可变参数的取值类型
+first_use:
+- concept: 内存地图与地址映射
+  at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
+  establishes: 地图记录物理范围及用途；页表将虚拟地址映射到物理地址；HHDM 按固定偏移直接映射
+- concept: 启动结构与帧缓冲
+  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
+  establishes: 固定字段ABI保存地图与可选显示描述；复制地址不复制像素，缺显示描述不影响必需启动结构验证，pitch与宽度分别描述行距和像素数
+borrowed: []
+feedback:
+- source: author independent replay/review, not a reader mastery test
+  observation: 独立复敲发现复合字面量/指定初始化前提缺失，已就地主体说明值对象、零初始化与复制。
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 交接结构、检查条件与内存观察需要从同一数据格式展开。
+  revision: 先定义地址和容量，再用相邻两个区域分别演示合法与拒绝路径。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 像素跨度与颜色位掩码
+  at: ../../../dev-log/core/05-boot-contract.md#code-kernel-boot-info-c-1
+  establishes: width 乘像素字节数不能超过 pitch；height 乘 pitch 先核对乘法范围；三个颜色掩码的位数和起点不能超过像素宽度
+  status: 本版就地解释；不推断读者已掌握
+- concept: 地图数量与物理范围溢出
+  at: ../../../dev-log/core/05-boot-contract.md#code-kernel-boot-info-c-2
+  establishes: 有效区域循环以 region_count 为终点；先用最大整数减长度核对 base 加 length，拒绝超出可表示范围的地址
+  status: 本版就地解释；不推断读者已掌握

@@ -29,6 +29,11 @@
       "id": "04",
       "title": "04 · 在容量有限的数组里形成一行日志",
       "document": "dev-log/core/04-format.md"
+    },
+    {
+      "id": "05",
+      "title": "05 · 把启动信息变成可检查的数据",
+      "document": "dev-log/core/05-boot-contract.md"
     }
   ]
 }

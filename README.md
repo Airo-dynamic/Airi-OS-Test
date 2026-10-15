@@ -1,4 +1,4 @@
-# AiriOS · 04
+# AiriOS · 05
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -7,3 +7,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [02 · 让外部引导材料有可验证的身份](dev-log/02-dependencies.md)
 - [03 · 让字节复制在重叠时仍然正确](dev-log/core/03-bytes.md)
 - [04 · 在容量有限的数组里形成一行日志](dev-log/core/04-format.md)
+- [05 · 把启动信息变成可检查的数据](dev-log/core/05-boot-contract.md)
