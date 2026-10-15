@@ -11,3 +11,13 @@ airi_hello_elf_end: /* 解析器只允许读取边界之内。 */
 airi_process_elf_start: /* 包含独立文件头与程序表。 */
 .incbin AIRI_PROCESS_ELF /* 路径由本配置的Make依赖提供。 */
 airi_process_elf_end: /* 内核不能读过此边界。 */
+.section .rodata.user_elf,"a" /* 第三个独立ELF作为exec目标。 */
+.balign 8 /* 原始输入边界固定。 */
+.global airi_worker_elf_start, airi_worker_elf_end /* 新用户映像范围。 */
+airi_worker_elf_start: /* 解析从文件头开始。 */
+.incbin AIRI_WORKER_ELF /* Make提供同一配置刚生成的文件。 */
+airi_worker_elf_end: /* 输入长度不包括后续损坏夹具。 */
+.global airi_broken_elf_start, airi_broken_elf_end /* 受控截断ELF不需要外部文件。 */
+airi_broken_elf_start: /* 只有魔数与少量标识，不足64字节头。 */
+.byte 0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0 /* 解析器必须拒绝，不能改掉旧进程。 */
+airi_broken_elf_end: /* 失败输入恰好八字节。 */

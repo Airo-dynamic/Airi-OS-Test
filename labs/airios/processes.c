@@ -22,8 +22,14 @@ int main(int argc, char **argv) { // 同一个ELF入口会在fork后沿两个返
             return 84; // 不只复制寄存器。
         value[0] = 99; // 不能影响父页面。
         busy_ticks(5); // 给父进程机会进入真正阻塞的wait。
-        airi_puts("[FORK_CHILD_OK] private_value=99\n"); // 真实用户输出。
-        return 23; // 用户_start通过exit交回普通退出码。
+        long pid = airi_getpid(); // exec前保存孩子身份，不使用父分支返回的0冒充PID。
+        if (airi_exec("missing") != -2 || value[0] != 99 || airi_getpid() != pid) // 未知名称不能改变旧映像或身份。
+            return 75; // 失败原子性不符。
+        if (airi_exec("broken") != -8 || value[0] != 99 || airi_getpid() != pid) // 截断ELF也必须保持旧用户内存和调用链。
+            return 76; // 不能先销毁旧空间再发现格式错误。
+        airi_puts("[EXEC_FAILURE_OK] old_image=alive pid=preserved\n"); // 两种失败后仍由旧ELF输出。
+        airi_exec("worker"); // 成功只会从新worker_start继续，父仍等待同一个孩子PID。
+        return 77; // 若回到这里，成功替换未发生。
     }
     const char *readonly = "read-only wait output"; // ELF只读段不能作为内核写结果的目标。
     if (airi_waitpid(child, (int *)(uintptr_t)readonly) != -14) // 内核应在阻塞和回收前拒绝不可写页。

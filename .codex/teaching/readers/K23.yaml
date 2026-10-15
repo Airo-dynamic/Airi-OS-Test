@@ -1,0 +1,23 @@
+checkpoint: K23
+baseline: baseline.yaml
+start: K22
+current_operation: 先准备新ELF再保留PID替换，坏映像保持旧程序，串口可反复运行真实用户程序
+already_explained:
+- concept: 用户根和内核栈生命周期
+  at: ../../../dev-log/core/22-processes.md#timer-process-switch
+  establishes: 完整frame边界切根，离开栈后才可回收
+first_use:
+- concept: exec事务提交与内核栈转移
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 失败只清next，成功保留PID父关系，先切新根再清old，当前栈明确转移
+- concept: 应用结果与内核失败
+  at: ../../../dev-log/core/23-exec-and-monitor.md#launch-result
+  establishes: launch返回装载错误与数值结果，普通退出23不PANIC
+- concept: 系统命令和图形扩展分派
+  at: ../../../dev-log/core/23-exec-and-monitor.md#system-command-consumer
+  establishes: service不被GUI extension覆盖，主线可无图形运行程序
+not_assumed:
+- 通用FD、信号、Linux execve兼容、动态链接、FPU/SIMD上下文或完整TTY
+limits:
+- 当前exec只有目录名与单项argv，stdout走UART，图形只显示命令结果摘要
+- Linux远端实测另记，运行不记录为读者掌握

@@ -20,6 +20,7 @@ enum airi_key {  // 按顺序编号当前airi_key可接受的状态或事件
 };
 /* Fixed storage owned by the kernel. No heap, process or filesystem dependency. */
 struct airi_console {  // 独立保存文本输入、历史与输出环。
+    bool (*service)(struct airi_console *, const char *); // 内核服务先分派，GUI扩展不能替换它。
     bool (*extension)(struct airi_console *, const char *, void *);  // 可选命令消费者；true 表示已经处理，NULL 表示没有扩展。
     void (*read_memory)(struct airi_memory_stats *); // 可选同步查询；宿主纯文本观察可保持NULL。
     void *extension_context;   // 借用扩展拥有者的数据，必须活过回调调用。

@@ -58,7 +58,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     (work/'command.json').write_text(json.dumps(cmd,indent=2))  # 保存实际参数列表供本轮复现。
     case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
-    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P2_READY]'  # 正常配置等完整内存阶段，P1标记仍供早期输入观察。
+    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]'  # 正常配置等完整进程阶段，旧阶段标记只保留兼容。
     if case in ('trap-fatal', 'stack-guard'): # 未处理异常镜像必须进入具体停止路径。
         expected = '[AIRI_PANIC] unhandled CPU exception' # 不以 QEMU 存活推断故障已处理。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
@@ -74,6 +74,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                             assert '[STACK_GUARD_PROBE]' in text and '[EXCEPTION] vector=8 error=0x0 ' in text # 不能把任意PANIC冒充保护页演示。
                         assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
                     else:  # 按当前profile的另一条完整验证路径处理。
+                        assert '[EXEC_FAILURE_OK]' in text and '[EXEC_WORKER_OK]' in text and '[EXEC_COMMIT]' in text # 坏映像保持与成功替换都须实际运行。
                         assert '[PROCESS_FORK_WAIT_OK]' in text and '[PROCESS_DEMO_OK]' in text # 复制、真实阻塞、timer换身份和回收都须完成。
                         assert '[ELF_LOAD]' in text and '[ELF_USER_OK]' in text # 独立ELF段、BSS与用户libc必须真正运行。
                         assert '[USER_DEMO_OK]' in text # 用户输出、指针拒绝和用户故障后内核必须继续。

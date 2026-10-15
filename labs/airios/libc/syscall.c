@@ -33,3 +33,6 @@ uint64_t airi_ticks(void) { // 用来观察真实用户时间片。
 void airi_yield(void) { // 可主动让出，但抢占工作负载不使用它。
     call3(4, 0, 0, 0); // 由内核在完整陷入现场选择其他用户。
 }
+long airi_exec(const char *name) { // 成功进入新_start，只有失败才返回这条旧调用链。
+    return call3(7, (uintptr_t)name, 0, 0); // 当前只传程序名，argv由内核建立单项。
+}

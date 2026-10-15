@@ -43,6 +43,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_task_demo(); // 当前只在正常内核上下文主动切换，IRQ不抢占内核任务。
     airi_user_demo(); // 正常与非法用户程序结束后仍回到启动栈和串口。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
+    console.service = airi_user_command; // 系统程序服务独立于可选主题/窗口扩展。
     console.read_memory = airi_memory_snapshot; // 文本查询只读取数值，不持有分配器内部对象。
     bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
     if (graphics) {  // 有效图形路径才输出图形参数。
@@ -56,6 +57,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
              (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
     airi_log("[AIRI_P2_READY] exceptions=1 pages=1 own_cr3=1 heap=1"); // 所有内存演示和控制台初始化结束后才发布阶段完成。
+    airi_log("[AIRI_P3_READY] user=ring3 elf=static fork=copy exec=transaction wait=blocked"); // 完整内核进程路径结束并恢复后才发布。
     airi_serial_write("airi> ");  // 输出首个串口提示符。
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。

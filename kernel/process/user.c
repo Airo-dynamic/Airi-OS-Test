@@ -1,3 +1,4 @@
+#include <airi/console.h> // 内核命令消费服务结果，不依赖主题和绘图。
 #include <airi/elf.h> // 独立用户ELF检查器。
 #include <airi/user.h> // 完整陷入与安全用户返回。
 #include <airi/memory.h> // 页面、内核栈与长期根的所有权。
@@ -36,6 +37,22 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_worker_elf_start[], airi_worker_elf_end[]; // exec目标是另一个独立静态ELF。
+extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控损坏输入，验证旧进程保持。
+struct executable { const char *name; const uint8_t *start, *end; }; // 初始映像目录尚不是通用文件系统。
+static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
+    {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
+    {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
+    {"worker", airi_worker_elf_start, airi_worker_elf_end}, // 替换成功后从自己的_start开始。
+    {"broken", airi_broken_elf_start, airi_broken_elf_end}, // 用于完整的坏ELF失败演示。
+};
+static const struct executable *find_program(const char *name) { // 输入是内核已复制的短NUL字符串。
+    size_t bytes = airi_strlen(name); // 只读当前有效字符串，不保存其指针。
+    for (unsigned i = 0; i < sizeof(executables) / sizeof(executables[0]); ++i) // 遍历固定目录。
+        if (airi_strlen(executables[i].name) == bytes && !airi_memcmp(executables[i].name, name, bytes)) // 长度与全部名称字节都相同才匹配。
+            return &executables[i]; // 只借长期静态目录项。
+    return NULL; // 未知名称不触碰任何用户地址空间。
+}
 static unsigned slot(const struct user_process *p) { // 只接受processes中的真实槽，不接受临时复制对象。
     return (unsigned)(p - processes); // 同一数组内指针差得到稳定槽号。
 }
@@ -126,15 +143,15 @@ static bool owned_page(struct user_process *p, uint64_t address, unsigned flags)
     p->owned[p->count++] = (struct user_page){address, physical, flags | AIRI_VM_USER}; // 保存VA/PA/权限供fork复制与精确回收。
     return true; // 每个已登记数据页都有对应映射。
 }
-static bool prepare_elf(struct user_process *p, const uint8_t *image, size_t bytes, const char *name) { // 当前还没有exec，先在空上下文中完成事务装载。
+static int prepare_elf(struct user_process *p, const uint8_t *image, size_t bytes, const char *name, bool make_stack) { // 空目标只拥有新用户资源；exec不另建正在使用的内核栈。
     struct airi_elf_view view; // 只借输入ELF直到复制结束。
     const char *error = airi_elf_inspect(image, bytes, &view); // 在任何资源分配前校验整个输入。
     if (error) { // 损坏格式不能触发后续内存写入。
         airi_log("[ELF_REJECTED] %s", error); // 给出精确范围/权限原因。
-        return false; // 旧输出和当前空上下文都未改变。
+        return -8; // -ENOEXEC，旧输出和调用者原上下文都未改变。
     }
-    if (!create_stack(p)) // 内核陷入栈先完成，再借高半区。
-        return false; // 区域接口已回滚失败。
+    if (make_stack && !create_stack(p)) // 内核陷入栈先完成，再借高半区。
+        return -12; // -ENOMEM，区域接口已回滚失败。
     if (!airi_memory_user_space(&p->space)) // 创建独立低半区。
         goto failed; // 后续失败均收回所有已持有资源。
     for (unsigned i = 0; i < view.count; ++i) { // 每段独立赋予对应权限。
@@ -160,10 +177,10 @@ static bool prepare_elf(struct user_process *p, const uint8_t *image, size_t byt
         goto failed; // 失败仍统一回滚。
     initial_frame(p, view.entry, name); // 用户_start接收最小argc/argv协议。
     airi_log("[ELF_LOAD] entry=0x%llx segments=%u data_pages=%u argc=1", (unsigned long long)view.entry, view.count, p->count); // 不含页表与内核栈的用户数据页数量。
-    return true; // 还未切CR3，运行入口统一由int129交接。
+    return 0; // 只准备新空间，尚未切CR3或覆盖旧现场。
 failed: // 长期根仍活动，用户空间从未开始执行。
     cleanup(p); // 页表、用户数据和内核栈全部回收。
-    return false; // 不提供部分映像。
+    return -12; // -ENOMEM，不提供部分映像。
 }
 static void place_frame(struct user_process *p) { // 初始寄存器值完成后复制到自己拥有的内核栈。
     uint64_t top = p->stack.virtual_address + p->stack.count * 4096ull; // TSS以后从同一个栈顶压入真实现场。
@@ -327,6 +344,44 @@ rollback: // 已有用户页面不受本次耗尽影响。
     }
     return -12; // 不返回半段用户范围。
 }
+static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用户调用，失败必须保持旧PID、空间和现场。
+    char name[64]; // 先把用户名称复制到当前内核栈，后续不再借旧用户页。
+    bool terminated = false; // 不能把未终止输入交给strlen。
+    for (unsigned i = 0; i < sizeof(name); ++i) { // 有界逐字节读取，允许跨用户页但不越过上限。
+        if (f->rdi > UINT64_MAX - i || !copy_user(current, &name[i], f->rdi + i, 1, false)) // 名称本身也可能是坏指针。
+            return -14; // -EFAULT，旧用户继续。
+        if (!name[i]) { // 取得完整NUL字符串后才查目录。
+            terminated = true; // 后续strlen有明确终止界限。
+            break; // 不读取字符串后无关字节。
+        }
+    }
+    if (!terminated) // 超过本项目名称预算。
+        return -36; // -ENAMETOOLONG。
+    const struct executable *image = find_program(name); // 不存在目标不用分配新根。
+    if (!image) // 和损坏格式是两种不同失败。
+        return -2; // -ENOENT。
+    struct user_process next = {0}; // 临时所有者不在进程表中，尚不能被调度。
+    int error = prepare_elf(&next, image->start, (size_t)((uintptr_t)image->end - (uintptr_t)image->start), name, false); // 不创建第二条内核栈，先完整准备新用户空间。
+    if (error) // 构造器已回滚next，current所有字段和旧f不变。
+        return error; // -ENOEXEC或-ENOMEM。
+    struct user_process old = *current; // 暂存旧用户资源，稍后在切离旧根之后归还。
+    unsigned old_pages = old.count; // 归还前保留实际替换规模用于记录。
+    next.pid = old.pid; // exec保持进程身份。
+    next.parent = old.parent; // 父仍等待同一个孩子。
+    next.user_ticks = old.user_ticks; // 同一身份的已运行计数不丢失。
+    next.heap_next = USER_HEAP; // 新映像的动态用户页从空开始。
+    next.stack = old.stack; // 明确转移正在使用的内核栈所有权，VA和物理内容都不变。
+    airi_memset(&old.stack, 0, sizeof(old.stack)); // old清理者不再拥有这组栈，不能重复释放。
+    next.frame = f; // 真实返回现场仍在同一内核栈上，不能留下指向next.initial局部对象的指针。
+    *f = next.initial; // 事务提交时才覆盖旧用户RIP/RSP和寄存器。
+    next.state = USER_RUNNING; // 此身份继续运行，但从新_start开始。
+    *current = next; // 把新所有权发布到原进程槽，PID不变。
+    if (!airi_vm_activate(&current->space)) // 新根已借到当前内核栈及内核映射。
+        airi_panic("cannot activate committed exec image"); // 硬件不变量失败不能回旧用户继续。
+    cleanup(&old); // 旧根已经不活动，旧数据可回收；当前内核栈已转移所以不释放。
+    airi_log("[EXEC_COMMIT] pid=%u program=%s old_pages=%u new_pages=%u", current->pid, name, old_pages, current->count); // 名称是内核副本，不引用刚释放用户页。
+    return 0; // 调用者直接恢复新f，不把这个0写回旧用户调用。
+}
 struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // 所有用户iretq路径使用同一规范地址和标志策略。
     if (f->cs != 27 || f->ss != 35 || f->rip >= AIRI_USER_LIMIT || f->rsp >= AIRI_USER_LIMIT) { // 坏返回不能变成内核GP。
         airi_log("[USER_RETURN_REJECTED] pid=%u rip=0x%llx rsp=0x%llx", current->pid, (unsigned long long)f->rip, (unsigned long long)f->rsp); // 不解引用错误地址。
@@ -382,46 +437,63 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = airi_timer_ticks(); // IRQ在用户执行期间更新。
     else if (f->rax == 6) // fork复制所有用户页与返回现场。
         f->rax = (uint64_t)fork_current(f); // 父得到子PID，孩子自己的frame已经设为0。
-    else if (f->rax == 8) // wait可直接回收或真的阻塞。
+    else if (f->rax == 7) { // exec失败保留旧现场，成功已把f替换成新入口。
+        long result = exec_current(f); // 名称复制与新空间事务在不可抢占内核完成。
+        if (result < 0) // 只有失败才向旧用户调用返回错误。
+            f->rax = (uint64_t)result; // PID和旧地址空间仍保持。
+        return airi_user_resume(f); // 成功恢复新_start，失败恢复旧调用下一条指令。
+    } else if (f->rax == 8) // wait可直接回收或真的阻塞。
         return wait_current(f); // 结果恢复到父同一次调用之后。
     else if (f->rax == 9) // 申请零填充用户页。
         f->rax = (uint64_t)allocate_user((size_t)f->rdi); // 不成功不前移堆游标。
-    else // 其他接口包括尚未实现的exec都明确拒绝。
+    else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     return airi_user_resume(f); // 普通调用继续同一用户，仍检查RSP与标志。
 }
-static void run_one(const uint8_t *image, size_t bytes, const char *name, int expected, bool elf, bool require_ticks, bool require_scheduler) { // 每次会话从一个根用户开始，可以产生孩子。
-    struct airi_memory_stats before, after; // 包括所有子根、数据页和两种栈。
-    airi_memory_snapshot(&before); // 会话前真实空闲基准。
-    struct user_process *root = unused(); // 上次会话必须已经全部回收。
-    if (!root) // 没有空槽就不覆盖旧身份。
-        airi_panic("no slot for root user"); // 教学演示明确失败。
-    bool prepared = elf ? prepare_elf(root, image, bytes, name) : prepare_flat(root, image, bytes); // 输入路径各有明确格式边界。
-    if (!prepared) // 失败已经回滚本根资源。
-        airi_panic("cannot prepare root user"); // 不启动半份映像。
-    root->pid = next_pid++; // 完整资源之后分配身份。
-    root->heap_next = USER_HEAP; // 动态用户页不与ELF静态段重叠。
-    place_frame(root); // 初始值复制进实际内核返回栈。
-    root->state = USER_RUNNABLE; // 直到此处才发布可运行者。
-    root_pid = root->pid; // 会话结果只跟踪这个根身份。
-    session_result = 0; // 不继承上一故障演示的负结果。
-    timer_switches = 0; // 本次实际timer换身份次数。
-    wait_blocks = 0; // 本次真实阻塞wait次数。
-    current = root; // 内核int129将选择这个已准备根。
-    long code; // 由启动现场RAX交回整个会话结果。
-    __asm__ volatile("int $0x81" : "=a"(code) :: "memory", "cc"); // 所有用户结束后才回这条启动调用链。
-    if (code != expected || (require_ticks && root->user_ticks < 2) || (expected == -142 && root->fault_error != 5) || (require_scheduler && (!timer_switches || !wait_blocks))) // 验证行为而非只要求QEMU存活。
-        airi_panic("user session ended without expected process semantics"); // 抢占、阻塞或退出任意不符都失败。
-    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 当前已回启动栈和长期根，可回收全部僵尸或孤儿。
-        if (processes[i].state != USER_UNUSED) // 已在wait中回收的槽不重复释放。
-            cleanup(&processes[i]); // 目标根不活动，目标内核栈也不再执行。
-    current = NULL; // 不保留刚清掉的当前槽身份。
-    kernel_return = NULL; // 下个会话重新登记启动现场。
-    airi_memory_snapshot(&after); // 包括孩子资源的全部回收后取统计。
-    if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 临时页和共享路径空表都必须恢复。
-        airi_panic("user process session leaked memory"); // 不把僵尸资源泄漏藏到下一阶段。
-    if (require_scheduler) // 只为真正多用户工作负载报告抢占与阻塞结果。
-        airi_log("[PROCESS_DEMO_OK] fork=copy wait=blocked timer_switches=%u wait_blocks=%u reclaimed=1", timer_switches, wait_blocks); // 计数来自实际IRQ和阻塞分支。
+struct user_result { int code; unsigned ticks, switches, blocks; uint64_t fault_error; }; // 启动任务只取得数值，不借已回收控制块。
+static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf, struct user_result *result) { // 可用于启动演示或串口命令，程序失败不等于内核失败。
+    if (session_active) // 当前只有一个由启动栈收拢的用户会话。
+        return -16; // -EBUSY，不能覆盖已有kernel_return。
+    struct airi_memory_stats before, after; // 包含根、所有孩子和内核栈。
+    airi_memory_snapshot(&before); // 在任何资源分配前取基准。
+    struct user_process *root = unused(); // 上次会话已回收的空槽。
+    if (!root) // 仍有未回收身份就明确失败。
+        return -11; // -EAGAIN。
+    int error = elf ? prepare_elf(root, image, bytes, name, true) : (prepare_flat(root, image, bytes) ? 0 : -12); // ELF保留格式与资源错误之别。
+    if (error) { // 失败构造也必须完整恢复资源。
+        airi_memory_snapshot(&after); // 不能只看错误码忽略泄漏。
+        if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 半份新映像不应改变空闲数量。
+            airi_panic("failed user launch leaked resources"); // 内部错误与普通坏文件分开。
+        return error; // 调用者可以继续命令，不停机。
+    }
+    root->pid = next_pid++; // 完整准备后才取得运行身份。
+    root->heap_next = USER_HEAP; // 动态用户页初始为空。
+    place_frame(root); // 寄存器值进入本进程真实内核栈。
+    root->state = USER_RUNNABLE; // 发布首次运行资格。
+    root_pid = root->pid; // 会话根身份不会被孩子exit覆盖。
+    session_result = 0; // 不继承上次结果。
+    timer_switches = 0; // 这次会话实际抢占计数。
+    wait_blocks = 0; // 这次会话实际阻塞计数。
+    current = root; // 内核启动门选择此根。
+    long code; // 根结束结果由启动现场RAX交回。
+    __asm__ volatile("int $0x81" : "=a"(code) :: "memory", "cc"); // 全部用户结束后才真正回启动栈。
+    *result = (struct user_result){(int)code, root->user_ticks, timer_switches, wait_blocks, root->fault_error}; // 回收前复制必要数值。
+    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 当前不在任何用户内核栈上。
+        if (processes[i].state != USER_UNUSED) // wait已回收槽不重复处理。
+            cleanup(&processes[i]); // 收拢剩余僵尸和未被父wait的资源。
+    current = NULL; // 不保留已清掉的身份指针。
+    kernel_return = NULL; // 下次会话重新登记。
+    airi_memory_snapshot(&after); // 全部页和栈回收后验证。
+    if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 用户程序退出码可以任意，但内核资源必须恢复。
+        airi_panic("user process session leaked memory"); // 不把泄漏当成应用错误跳过。
+    return 0; // 表示已完整启动与收拢，程序结果另在result.code。
+}
+static void run_one(const uint8_t *image, size_t bytes, const char *name, int expected, bool elf, bool require_ticks, bool require_scheduler) { // 作者启动演示使用具体预期，不控制普通命令的合法退出码。
+    struct user_result result; // 会话结束只消费数值副本。
+    if (launch(image, bytes, name, elf, &result) || result.code != expected || (require_ticks && result.ticks < 2) || (expected == -142 && result.fault_error != 5) || (require_scheduler && (!result.switches || !result.blocks))) // 同时验证真正执行、故障、抢占和等待。
+        airi_panic("user session ended without expected semantics"); // 固定演示有误才拒绝发布READY。
+    if (require_scheduler) // 实际多用户会话单独报告行为证据。
+        airi_log("[PROCESS_DEMO_OK] fork=copy exec=transaction wait=blocked timer_switches=%u wait_blocks=%u reclaimed=1", result.switches, result.blocks); // 计数来自真实IRQ与状态转换。
 }
 void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回归。
     run_one(airi_user_probe_start, (size_t)((uintptr_t)airi_user_probe_end - (uintptr_t)airi_user_probe_start), NULL, 0, false, true, false); // 原有非法指针与用户IRQ验证。
@@ -431,4 +503,27 @@ void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回�
     run_one(airi_hello_elf_start, (size_t)((uintptr_t)airi_hello_elf_end - (uintptr_t)airi_hello_elf_start), "hello", 0, true, false, false); // 独立C和自有用户库。
     run_one(airi_process_elf_start, (size_t)((uintptr_t)airi_process_elf_end - (uintptr_t)airi_process_elf_start), "processes", 0, true, false, true); // 真实多进程复制、抢占、阻塞与回收。
     airi_log("[USER_DEMO_OK] ring=3 syscall=int80 bad_pointers=2 user_gp=13 user_pf=14 bad_rsp=rejected reclaimed=1"); // 完整会话结束，仍回串口命令。
+}
+
+bool airi_user_command(struct airi_console *console, const char *command) { // 系统命令消费者独立于图形主题扩展。
+    size_t bytes = airi_strlen(command); // 先取得有效长度，固定前缀比较不能越过短字符串。
+    if (bytes == 8 && !airi_memcmp(command, "programs", 8)) { // 显示当前初始ELF目录。
+        airi_console_print(console, "programs: hello processes worker broken"); // broken是明确损坏的演示输入。
+        return true; // 已处理，不再交给图形扩展。
+    }
+    if (bytes < 4 || airi_memcmp(command, "run ", 4)) // 只接受明确的run空格前缀。
+        return false; // 其他命令继续原分派链。
+    const char *name = command + 4; // 只在本次调用期借控制台的命令副本。
+    const struct executable *image = find_program(name); // 目前目录名不是通用文件系统路径。
+    if (!image) { // 错别字不影响内核继续输入。
+        airi_console_print(console, "program not found: %s", name); // 给出当前名称。
+        return true; // 请求已得到明确结果。
+    }
+    struct user_result result; // 子进程都结束后取得数值退出状态。
+    int error = launch(image->start, (size_t)((uintptr_t)image->end - (uintptr_t)image->start), name, true, &result); // 同步执行并完整回收，不借回调局部对象给用户。
+    if (error) // 例如坏ELF返回-8，不是PANIC。
+        airi_console_print(console, "cannot load %s: error=%d", name, error); // 串口详细日志还给出解析原因。
+    else // 程序可以合法返回非零，例如worker的23。
+        airi_console_print(console, "program %s exited %d", name, result.code); // 不把应用结果当成内核停止。
+    return true; // GUI是否存在都不影响服务执行。
 }

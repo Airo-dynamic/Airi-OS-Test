@@ -89,7 +89,7 @@ void airi_map_line(const struct airi_console *c, unsigned i, char *s, size_t n) 
                   (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把当前64位字段转成格式要求的unsigned long long
 }
 static void system_info(struct airi_console *c) {  // 将启动身份和内核尺寸加入命令输出
-    airi_console_print(c, "AiriOS 0.1 / x86_64 / bootstrap kernel");  // 将AiriOS 0.1 / x86_64 / bootstrap kernel保存为一条命令说明或身份记录
+    airi_console_print(c, "AiriOS 0.1 / x86_64 / learning kernel");  // 将AiriOS 0.1 / x86_64 / learning kernel保存为一条命令说明或身份记录
     airi_console_print(c, "Console: local    CPU: single    Boot: UEFI / %s", c->boot->loader);  // 把本次查询字段按Console: local    CPU: single    Boot: UEFI / %s的格式保存到输出环
     airi_console_print(c, "Kernel image: %llu KiB    Boot ABI: v%u",  // 把本次查询字段按Kernel image: %llu KiB    Boot ABI: v%u的格式保存到输出环
          (unsigned long long)(c->boot->kernel_size / 1024), c->boot->version);  // 字节除1024转KiB，再按%llu约定提供unsigned long long
@@ -131,6 +131,8 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
         airi_console_print(c, "COMMAND    OPERATION");  // 将COMMAND    OPERATION保存为一条命令说明或身份记录
         airi_console_print(c, "sys        Kernel and boot identity");  // 将sys        Kernel and boot identity保存为一条命令说明或身份记录
         airi_console_print(c, "mem        Usable / held physical memory summary");  // 将mem        Usable / held physical memory summary保存为一条命令说明或身份记录
+        if (c->service) // 只有绑定真实内核服务时才宣传可运行程序。
+            airi_console_print(c, "programs / run NAME  Run a bundled user program"); // 主题与宿主参考模型不冒充进程服务。
         airi_console_print(c, "mem map    Complete physical address inventory");  // 将mem map    Complete physical address inventory保存为一条命令说明或身份记录
         airi_console_print(c, "devices    Registered console hardware endpoints");  // 将devices    Registered console hardware endpoints保存为一条命令说明或身份记录
         airi_console_print(c, "log        Boot journal (ordered events, no wall clock)");  // 将log        Boot journal (ordered events, no wall clock)保存为一条命令说明或身份记录
@@ -177,7 +179,9 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
         c->line_count = 0;  // 清除可见历史行数，累计逻辑行号仍保留
     else if (!airi_memcmp(start, "echo ", length < 5 ? length : 5) && length >= 5)  // 最多比较当前长度与5的较小值，再要求至少5字节，确认echo加空格前缀
         airi_console_print(c, "%s", start + 5);  // 略过echo和空格这5字节，将余部作为本条输出
-    else if (c->extension && c->extension(c, start, c->extension_context)) {  // 同步调用可选消费者；它自己形成输出，不能保留局部命令指针。
+    else if (c->service && c->service(c, start)) { // 系统命令同步完成，结果写入同一文字环。
+        /* Service owns this command; the optional graphical extension is separate. */
+    } else if (c->extension && c->extension(c, start, c->extension_context)) {  // 同步调用可选消费者；它自己形成输出，不能保留局部命令指针。
         /* 扩展已处理本条命令，不再生成未知命令错误。 */
     } else  // 没有扩展或扩展不认识本命令时，保留原来的具体错误。
         airi_console_print(c, "%s: unknown command. Type help.", start);  // 把本次查询字段按%s: unknown command. Type help.的格式保存到输出环

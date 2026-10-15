@@ -62,7 +62,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                             continue  # 等后续读取取得完整换行再检查这条记录。
                         record=line.removeprefix('airi> ').removesuffix('\n').removesuffix('\r')  # 只移除已知提示符与CRLF，保留字段本身。
                         matches=record==marker  # CONSOLE_UPDATE要求完整等值，page=1不会匹配page=10。
-                        if marker=='[AIRI_P1_READY]':  # READY后还有graphics与内存字段，按标记后的空格确定边界。
+                        if marker in ('[AIRI_P1_READY]', '[AIRI_P3_READY]'):  # 阶段READY后还有机制字段，按标记后的空格确定边界。
                             matches=record.startswith(marker+' ')  # 接受带字段的完整READY行，不接受相似标记名称。
                         if matches:  # 本次输出中已取得完整且匹配的状态记录。
                             return text[after:]  # 把本次动作的新结果交回调用者继续核对正文。
@@ -70,7 +70,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                         raise RuntimeError('Guest exited during console test')  # 报告真实guest生命周期失败。
                     time.sleep(.05)  # 暂停50毫秒给设备或日志处理时间，再重复本次检查。
                 raise RuntimeError(f'Console timeout waiting for {marker}; see {serial}')  # 明确给出缺少的标记和已有日志路径。
-            wait('[AIRI_P1_READY]',timeout=35)  # 输入前先等内核初始化与首帧结束，最多35秒。
+            wait('[AIRI_P3_READY]',timeout=35)  # 输入前先等内核初始化与首帧结束，最多35秒。
             def key(*codes):  # 形参*把多个键名收集成元组，可同时发送ctrl或shift组合。
                 qmp_execute(qmp,'send-key',{'keys':[{'type':'qcode','data':c} for c in codes],'hold-time':20})  # 每个键名转qcode字典，列表作为keys，按住时间单位毫秒。
                 time.sleep(.12)  # 两次虚拟键事件间隔120毫秒，轮询内核有时间逐次消费。
@@ -107,7 +107,13 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                 wire.sendall(b'mem\n') # 同一串口主线查询真实页池与堆。
                 tail=wait(update(0,4),offset) # 等第四次提交的完整状态。
                 assert 'page pool: total=' in tail and 'kernel heap: bytes=65536' in tail # 不能只返回启动地图。
-                cases=['UART receive / command dispatch','serial-only device report']  # 结果只记录此路径实际运行的两项观察。
+                for number, text, expected in [(5, 'programs', 'programs: hello processes worker broken'), (6, 'run hello', 'program hello exited 0'), (7, 'run broken', 'cannot load broken: error=-8'), (8, 'run worker', 'program worker exited 23'), (9, 'run processes', 'program processes exited 0'), (10, 'run missing', 'program not found: missing'), (11, 'echo after-programs', 'after-programs')]: # 正常、坏ELF、非零退出和未知名称都不破坏后续会话。
+                    offset=len(output()) # 当前命令只消费新日志。
+                    wire.sendall((text + '\n').encode()) # 发送真正UART输入，而不是直接调用内核函数。
+                    tail=wait(update(0,number),offset) # 程序会话全部收拢后才完成控制台命令。
+                    assert expected in tail # 核对当前请求结果，不能复用旧标记。
+                    assert '[AIRI_PANIC]' not in tail # 应用格式或退出错误不能停掉内核。
+                cases=['UART receive / command dispatch' ,'serial-only device report']  # 结果只记录此路径实际运行的两项观察。
             else:  # 按当前profile的另一条完整验证路径处理。
                 capture(work/'terminal.ppm')  # READY已到达后保存初始终端画面。
                 run('help','mem map    Complete physical address inventory')  # 验证帮助输出包含完整物理地图命令说明。
@@ -149,7 +155,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                 key('s')     # 补成sys。
                 key('ret')   # 提交修复后的命令。
                 commands+=1  # 本次实际提交也计入预期数。
-                assert 'bootstrap kernel' in wait(update(0,commands),offset)  # 修复后的sys命令应报告当前内核身份。
+                assert 'learning kernel' in wait(update(0,commands),offset)  # 修复后的sys命令应报告当前内核身份。
                 offset=len(output())  # 先记录旧文本长度，后续只消费它之后的完成与结果。
                 for c in 'echo ':     # 逐个字符准备echo前缀。
                     key('spc' if c==' ' else c)  # 空格转spc键名。

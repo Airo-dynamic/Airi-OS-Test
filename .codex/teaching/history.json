@@ -144,6 +144,11 @@
       "id": "K22",
       "title": "K22 · 用户抢占、复制fork与阻塞wait",
       "document": "dev-log/core/22-processes.md"
+    },
+    {
+      "id": "K23",
+      "title": "K23 · 事务exec与可持续运行的串口程序命令",
+      "document": "dev-log/core/23-exec-and-monitor.md"
     }
   ]
 }
