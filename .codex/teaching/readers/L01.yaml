@@ -1,0 +1,53 @@
+checkpoint: 'L01'
+baseline: baseline.yaml
+start: 'K13'
+current_operation: 沿ordinary的同一组参数和raw的47字节写请求，比较Linux用户程序与本机内核入口
+already_explained:
+- concept: I/O 端口、CPU 寄存器与内联汇编
+  at: ../../../dev-log/core/06-entry.md#port-registers
+  establishes: AL 保存字节，DX 保存端口；设备寄存器与 CPU 寄存器不同；约束交代汇编的输入输出
+- concept: ELF 入口与栈
+  at: ../../../dev-log/core/06-entry.md#entry-stack
+  establishes: 引导器跳到 ELF 指定入口；RSP 定位自有 BSS 栈，lea 计算地址不解引用
+- concept: C 调用约定
+  at: ../../../dev-log/core/06-entry.md#call-abi
+  establishes: call 压入返回地址；入口满足对齐和方向标志，C 调用依赖这些前提
+- concept: 进程、环境变量和搜索结果
+  at: ../../../dev-log/00-first-tool.md#tool-process
+  establishes: 可执行文件与一次运行不同；PATH 搜索返回路径字符串或 None；异常把失败交回入口
+first_use:
+- concept: 运行时到 main
+  at: ../../../dev-log/linux/01-entry.md#runtime-main
+  establishes: 带PT_INTERP的动态程序先经装载器再到程序入口；运行时取得初始栈参数再调用main，返回后处理退出；argv数组以空指针结束、各项字符串以NUL结束
+- concept: 系统调用与文件描述符
+  at: ../../../dev-log/linux/01-entry.md#syscall-boundary
+  establishes: syscall请求内核服务；fd是进程句柄，寄存器分别传调用号、句柄、用户地址和47字节长度；短写或负错误在本例选择失败退出而不重试
+- concept: 调试位置与源码映射
+  at: ../../../dev-log/linux/01-entry.md#remote-debug
+  establishes: 远端GDB经反向转发控制本机QEMU；-S停在复位，hbreak按准确指令地址观察换栈与RDI首参数；符号与源码映射只辅助解释地址，读取帧缓冲字段不表示已经绘图
+- concept: 本轮证据与失败位置
+  at: ../../../dev-log/linux/01-entry.md#linux-evidence
+  establishes: 连接失败可能仅有终端错误；远端执行和GDB会话分别产生记录，复用目录里的旧result.json不能证明本次成功；作者2026-10-15尝试停在SSH返回255
+borrowed:
+- component: 个人 Linux 主机、SSH 与 GDB
+  contract: 远端需x86-64 Linux和既有非交互SSH访问及cc/Binutils/GDB/Python；调试对象在本机QEMU，连接失败不建立ABI观察结论
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 三个执行环境与两种调用的角色需要持续区分。
+  revision: 分别追踪普通main、Linux syscall与本机内核入口；区分动态装载器与程序入口、用户态单步与内核源码调试，并准确说明SSH失败前没有新记录。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: Linux 入口和寄存器参数
+  at: ../../../dev-log/linux/01-entry.md#code-labs-linux-p1-raw-start-s-1
+  establishes: 初始 RSP 指向 argc 而不是 C 参数；RAX 为调用号，RDI/RSI/RDX 为 write 实参，syscall 改写 RCX/R11，位置差是字节长度
+  status: 本版就地解释；不推断读者已掌握
+- concept: 定长观察与超时字节
+  at: ../../../dev-log/linux/01-entry.md#code-labs-linux-p1-run-sh-2
+  establishes: raw消息没有NUL，x/47cb只观察47个单字节；x/4gx读取argc及三个参数地址；si越过系统调用后核对返回值和用户态RIP
+  status: 本版就地解释；不推断读者已掌握
+- concept: 远端会话的进程清理
+  at: ../../../dev-log/linux/01-entry.md#code-scripts-kernel-debug-py-2
+  establishes: 端口0选择本地候选端口，SSH反向转发可能另因远端占用失败；GDB超时保存异常持有的bytes输出，finally终止并等待本地QEMU，detach本身不关闭虚拟机
+  status: 本版就地解释；不推断读者已掌握
+
+route_note: 在K13后运行，无图形前置。

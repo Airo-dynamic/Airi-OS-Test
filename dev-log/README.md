@@ -1,4 +1,4 @@
-# AiriOS · K13
+# AiriOS · L01
 
 This is a reconstructed teaching checkpoint. Follow the available chapters in order; later kernel mechanisms are not implemented here. GUI is maintained separately and has explicit prerequisites.
 
@@ -16,3 +16,4 @@ This is a reconstructed teaching checkpoint. Follow the available chapters in or
 - [K11 · 让串口构建独立于图形支线](core/11-serial-build.md)
 - [K12 · 用完成标记核对真实启动与输入](core/12-boot-tests.md)
 - [K13 · 把已有构建、运行与观察收拢为统一入口](core/13-commands.md)
+- [L01 · 对照 Linux 的函数调用、系统调用与内核入口](linux/01-entry.md)

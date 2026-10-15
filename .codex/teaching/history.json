@@ -74,6 +74,11 @@
       "id": "K13",
       "title": "K13 · 把已有构建、运行与观察收拢为统一入口",
       "document": "dev-log/core/13-commands.md"
+    },
+    {
+      "id": "L01",
+      "title": "L01 · 对照 Linux 的函数调用、系统调用与内核入口",
+      "document": "dev-log/linux/01-entry.md"
     }
   ]
 }
