@@ -1,0 +1,31 @@
+checkpoint: '03'
+baseline: baseline.yaml
+start: '02'
+current_operation: 用ABCDE数组观察左右重叠移动，为命令历史腾槽准备字节函数
+already_explained:
+- concept: 进程、环境变量和搜索结果
+  at: ../../../dev-log/00-first-tool.md#tool-process
+  establishes: 可执行文件与一次运行不同；PATH 搜索返回路径字符串或 None；异常把失败交回入口
+first_use:
+- concept: 字节指针与对象大小
+  at: ../../../dev-log/core/03-bytes.md#byte-pointers
+  establishes: 指针定位调用者准备的字节；const 限制写入，size_t 表示大小
+- concept: 重叠复制
+  at: ../../../dev-log/core/03-bytes.md#overlap-copy
+  establishes: 目标高于源时倒序搬运，保住尚未读取的字节；地址比较依赖固定目标
+- concept: NUL 字符串
+  at: ../../../dev-log/core/03-bytes.md#nul-string
+  establishes: NUL 是零字节；strlen 不计终止零，字节复制不会自动补零
+borrowed: []
+feedback:
+- source: author independent replay/review, not a reader mastery test
+  observation: 独立复敲发现首次cc选项未解释，已在第一条编译命令之前说明每个选项。
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 字节函数需要以一次真实重叠复制建立方向与结果关系。
+  revision: 沿 ABCDE 数组解释正反方向、NUL 和零长度，再运行两个方向。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 无类型地址与字节下标
+  at: ../../../dev-log/core/03-bytes.md#code-kernel-lib-base-c-1
+  establishes: void 指针转换为 unsigned char 指针后，d[i] 和 s[i] 以字节偏移定位；i 递增而 n 保持总长度，零长度不访问数组，不依赖 NUL
+  status: 本版就地解释；不推断读者已掌握

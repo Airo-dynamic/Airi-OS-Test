@@ -19,6 +19,11 @@
       "id": "02",
       "title": "02 · 让外部引导材料有可验证的身份",
       "document": "dev-log/02-dependencies.md"
+    },
+    {
+      "id": "03",
+      "title": "03 · 让字节复制在重叠时仍然正确",
+      "document": "dev-log/core/03-bytes.md"
     }
   ]
 }
