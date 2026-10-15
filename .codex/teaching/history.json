@@ -14,6 +14,11 @@
       "id": "01",
       "title": "01 · 让构建使用正确的一份工具",
       "document": "dev-log/01-tools.md"
+    },
+    {
+      "id": "02",
+      "title": "02 · 让外部引导材料有可验证的身份",
+      "document": "dev-log/02-dependencies.md"
     }
   ]
 }

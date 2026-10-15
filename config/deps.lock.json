@@ -1,0 +1,34 @@
+{
+  "limine": {
+    "version": "12.9.2",
+    "url": "https://github.com/Limine-Bootloader/Limine/releases/download/v12.9.2/limine-binary.tar.gz",
+    "sha256": "047e7eeae7de4de62fca4fc3740b621aa37a2038b208f4d0ac993750a18eed86",
+    "files": {
+      "BOOTX64.EFI": "7513f15f174bb0d4028d6231b7e76570c4fa60321965846a33cab16dac718210",
+      "limine-uefi-cd.bin": "a0f31cb9333ca1af07844307c770fa6ec650625e5ff76bc07c5be95bb8410a9a"
+    }
+  },
+  "protocol": {
+    "commit": "3a0526b700e356f0eac1b71a77697b3fd1c707a3",
+    "url": "https://raw.githubusercontent.com/Limine-Bootloader/limine-protocol/3a0526b700e356f0eac1b71a77697b3fd1c707a3/include/limine.h",
+    "sha256": "0aadf2633c85d8cb145344c968add158aeb1deb68af567d55ba8431c492b6d4c"
+  },
+  "qemu_reference_version": "11.1.2",
+  "firmware": [
+    {
+      "name": "edk2-x86_64-code.fd",
+      "sha256": "33090cc07675baa5190d9f1e84bf5176b33bcbfa9bacac522961150cdb6dbb2a"
+    },
+    {
+      "name": "edk2-i386-vars.fd",
+      "sha256": "5d2ac383371b408398accee7ec27c8c09ea5b74a0de0ceea6513388b15be5d1e"
+    }
+  ],
+  "frontend_fonts": {
+    "source_commit": "2eb0b48d5f760f62e286216f0859a8c540dbc1bd",
+    "manifest": "frontend/assets/fonts.lock.json",
+    "atlas": "frontend/assets/font-atlas.h",
+    "atlas_sha256": "aaf2aa574cd663809d864aed4d712cc5790cb5b03d9a5935b8481f8091c29f27",
+    "generator": "Pillow 12.3.0 / scripts/font_atlas.py"
+  }
+}
