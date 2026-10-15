@@ -1,0 +1,55 @@
+checkpoint: G11
+baseline: baseline.yaml
+start: K11
+current_operation: 把主机数组按真实布局变成矩形、裁剪线段与PPM
+already_explained:
+- concept: 帧缓冲与借用地址
+  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
+  establishes: 固定描述保存地址与布局，复制描述不复制像素；调用方须提供有效可写映射
+- concept: 字符输入与串口输出
+  at: ../../../dev-log/core/10-input.md#uart-input-path
+  establishes: 父进程向QEMU输入管道写命令字节，UART轮询交给同一console；结果仍从UART发送，图形另取像素输出路径。
+first_use:
+- concept: 半开几何与裁剪
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-canvas
+  establishes: 实际{20,20,280,160}包含列20至299，绘制范围与允许范围分别求交
+- concept: pitch、通道位域与端序
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-pitch
+  establishes: base+row*pitch+col*bytes定位数组，设备布局与PPM通道排列分别处理
+- concept: 整数线段与同轮误差
+  at: ../../../dev-log/graphics/11-pixels.md#code-frontend-render-draw-c-2
+  establishes: 两轴独立使用旧twice，(0,0)至(3,2)的四点演算解释对角步
+- concept: 指针对齐与volatile
+  at: ../../../dev-log/graphics/11-pixels.md#code-frontend-render-draw-c-1
+  establishes: 地址低两位为0才按uint32_t写；否则按字节写，行距包含填充
+- concept: 文件短写与关闭
+  at: ../../../dev-log/graphics/11-pixels.md#code-labs-tutorial-pixels-c-1
+  establishes: PPM每像素三字节，任意短写停止输出但仍关闭，成功才报告文件完成
+borrowed: []
+feedback:
+- source: 用户要求的微语法就近说明与主线连续性
+  observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
+  revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长
+not_inferred: 解释存在与运行成功不证明真实读者已掌握；画像引用须与本章实际表达式核对
+source_reading:
+- concept: 半开几何与裁剪
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-canvas
+  establishes: 实际{20,20,280,160}包含列20至299，绘制范围与允许范围分别求交
+  status: 本章首次就地说明；不推断已掌握
+- concept: pitch、通道位域与端序
+  at: ../../../dev-log/graphics/11-pixels.md#pixel-pitch
+  establishes: base+row*pitch+col*bytes定位数组，设备布局与PPM通道排列分别处理
+  status: 本章首次就地说明；不推断已掌握
+- concept: 整数线段与同轮误差
+  at: ../../../dev-log/graphics/11-pixels.md#code-frontend-render-draw-c-2
+  establishes: 两轴独立使用旧twice，(0,0)至(3,2)的四点演算解释对角步
+  status: 本章首次就地说明；不推断已掌握
+- concept: 指针对齐与volatile
+  at: ../../../dev-log/graphics/11-pixels.md#code-frontend-render-draw-c-1
+  establishes: 地址低两位为0才按uint32_t写；否则按字节写，行距包含填充
+  status: 本章首次就地说明；不推断已掌握
+- concept: 文件短写与关闭
+  at: ../../../dev-log/graphics/11-pixels.md#code-labs-tutorial-pixels-c-1
+  establishes: PPM每像素三字节，任意短写停止输出但仍关闭，成功才报告文件完成
+  status: 本章首次就地说明；不推断已掌握
+route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
