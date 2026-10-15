@@ -1,0 +1,25 @@
+checkpoint: K15
+baseline: baseline.yaml
+start: K14
+current_operation: 从usable完整页建立位图，在HHDM别名写入并归还物理页
+already_explained:
+- concept: 启动地图与地址种类
+  at: ../../../dev-log/core/08-real-boot-info.md
+  establishes: 物理范围和HHDM偏移由稳定BootInfo交给内核
+- concept: CPU异常报告
+  at: ../../../dev-log/core/14-exceptions.md#trap-owner
+  establishes: 意外故障输出现场并停止，不吞掉错误
+first_use:
+- concept: 页帧号、向内舍入与位图所有权
+  at: ../../../dev-log/core/15-physical-pages.md#page-ownership
+  establishes: 只管理完整usable页，借出与可管理分开记位
+- concept: 分配和归还的顺序
+  at: ../../../dev-log/core/15-physical-pages.md#page-allocate
+  establishes: 交地址前标记借出；归还先核对归属和对齐
+- concept: 物理地址与可访问虚拟别名
+  at: ../../../dev-log/core/15-physical-pages.md#page-direct-map
+  establishes: HHDM加法使用已有映射，不自动创造页表
+not_assumed:
+- 自有页表、按需缺页、内核堆、并发页池
+limits:
+- 不记录读者已掌握；主机检查不是guest内存访问

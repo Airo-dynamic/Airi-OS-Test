@@ -99,6 +99,11 @@
       "id": "K14",
       "title": "K14 · 让 CPU 故障成为可以定位的异常报告",
       "document": "dev-log/core/14-exceptions.md"
+    },
+    {
+      "id": "K15",
+      "title": "K15 · 把可用 RAM 交给明确的页面所有者",
+      "document": "dev-log/core/15-physical-pages.md"
     }
   ]
 }

@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -96,6 +96,12 @@ host-test:
 		    -o build/tests/base_test
 # 只有全部assert成立才打印PASS，失败状态返回Make。
 	./build/tests/base_test
+# 独立编译同一物理页算法，主机不解引用 guest 地址。
+	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
+	    -fsanitize=address,undefined -Iinclude tests/unit/pages_test.c \
+	    kernel/mm/pages.c kernel/boot/info.c kernel/lib/base.c -o build/tests/pages_test
+# 验证耗尽、保留范围、重复释放和舍入边界。
+	./build/tests/pages_test
 # 清理仅删除可重建产物，保留运行证据artifacts。
 clean:
 # 调用shutil删除build；ignore_errors允许尚不存在目录。
