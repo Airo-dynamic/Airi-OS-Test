@@ -1,0 +1,32 @@
+checkpoint: 08
+baseline: baseline.yaml
+start: '07'
+current_operation: 将真实引导响应转成自有启动结构
+already_explained:
+- concept: 内存地图与地址映射
+  at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
+  establishes: 地图记录物理范围及用途；页表将虚拟地址映射到物理地址；HHDM 按固定偏移直接映射
+- concept: 启动结构与帧缓冲
+  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
+  establishes: 固定字段 ABI 描述地图和像素内存；复制地址不复制像素；pitch 与宽度分别定位行和限制范围
+- concept: ELF 入口与栈
+  at: ../../../dev-log/core/06-entry.md#entry-stack
+  establishes: 引导器跳到 ELF 指定入口；RSP 定位自有 BSS 栈，lea 计算地址不解引用
+first_use:
+- concept: 引导请求与响应
+  at: ../../../dev-log/core/08-real-boot-info.md#boot-requests
+  establishes: 请求是内核 ELF 中的记录，Limine 按协议填响应；适配层再形成自有结构
+- concept: 启动信息的复制与借用
+  at: ../../../dev-log/core/08-real-boot-info.md#boot-lifetimes
+  establishes: 固定数组复制元数据，帧缓冲地址仍借用原像素；静态描述持续有效，使用地址依赖原映射
+borrowed: []
+feedback:
+- source: 作者全文顺读，响应用户对主线和语言的反馈
+  observation: 真实引导响应与自己的结构之间需要明确复制和借用关系。
+  revision: 沿 response 到 static boot_info 再到主函数；Make 的修改只在对应代码前解释。
+not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
+source_reading:
+- concept: 地址数值与借用内存
+  at: ../../../dev-log/core/08-real-boot-info.md#code-kernel-boot-limine-c-3
+  establishes: 链接标签转换为 uintptr_t 后求地址整数差；地图描述复制到静态数组，framebuffer 的地址仍借用引导器已经映射的像素
+  status: 本版就地解释；不推断读者已掌握

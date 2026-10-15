@@ -8,8 +8,8 @@ HOST_CC := cc
 PROFILE ?= normal
 # 立即将本次 profile 展开为产物目录，防止不同版本共用对象
 OUT := build/$(PROFILE)
-# 列出当前入口路径依赖的四份 C 输入，不提前编入后续模块
-SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c
+# 加入自有启动校验和主函数，链接器才能取得新入口调用的定义
+SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c kernel/boot/info.c kernel/main.c
 # 将每个 .c 路径换成构建目录中的 .o，再加汇编入口对象
 OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
 # 编译 x86-64 ELF，选择 C11、优化及调试信息，并把常见警告作为错误。

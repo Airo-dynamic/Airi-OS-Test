@@ -44,6 +44,11 @@
       "id": "07",
       "title": "07 · 把 ELF 放入 UEFI 镜像并看到第一行",
       "document": "dev-log/core/07-first-boot.md"
+    },
+    {
+      "id": "08",
+      "title": "08 · 将真实引导响应复制到自己的接口",
+      "document": "dev-log/core/08-real-boot-info.md"
     }
   ]
 }
