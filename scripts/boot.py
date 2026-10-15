@@ -19,6 +19,19 @@ def command(profile, work, gui=False, debug=False, debug_port=1234):  # 返回 Q
          '-drive',f'if=pflash,format=raw,unit=1,file={variables}',  # 第1个 pflash 单元使用本轮可写变量副本。
          '-monitor','none','-cdrom',str(ROOT/'build'/profile/'airios.iso'),'-boot','d','-no-reboot',  # 挂载对应配置镜像，从光盘启动，故障时不循环重启。
          '-serial',f'file:{work/"serial.log"}']  # 默认 UART 输出保存到本轮 serial.log。
+    disk = work / 'disk.raw' # 每个运行目录只使用项目自己的独立实验盘。
+    if disk.is_symlink(): # 拒绝把实验写入重定向到外部文件。
+        raise RuntimeError('Experiment disk cannot be a symlink') # 不跟随未知目标。
+    if not disk.exists(): # 保留已有实验盘用于后续重启恢复观察。
+        with disk.open('xb') as stream: # 排他创建，不覆盖竞争产生的文件。
+            stream.truncate(8 * 1024 * 1024) # 稀疏零文件，固定8MiB。
+    if not disk.is_file() or disk.stat().st_size != 8 * 1024 * 1024: # 当前设备容量固定，未知文件不交给guest写。
+        raise RuntimeError('Expected an 8 MiB project experiment disk') # 要求显式处理错误，不自动truncate旧文件。
+    drive = f'if=none,id=airi-disk,format=raw,file={disk},cache=writeback' # QEMU后端可缓存，持久化需客体FLUSH。
+    if profile.removeprefix('desktop-') == 'block-readonly': # 故障演示使用真实只读设备特征。
+        drive += ',readonly=on' # 不修改宿主文件的权限设置。
+    if profile.removeprefix('desktop-') != 'block-missing': # 缺设备配置故意不接实验盘。
+        cmd += ['-drive', drive, '-device', 'virtio-blk-pci,drive=airi-disk,disable-modern=on,vectors=0'] # 固定legacy与无MSI-X布局，现代接口另行学习。
     if not gui: cmd+=['-display','none']  # 无人操作时隐藏显示窗口，guest 仍可绘图并经 QMP 截帧。
     if debug: cmd+=['-S','-gdb',f'tcp:127.0.0.1:{debug_port}']  # -S 暂停CPU，GDB只监听回环地址指定端口。
     return cmd  # 仅返回参数列表，调用者决定何时启动与回收进程。
@@ -59,6 +72,8 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
     expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]'  # 正常配置等完整进程阶段，旧阶段标记只保留兼容。
+    if case == 'block-missing': # 缺盘是明确设备初始化失败，不能继续宣称存储可用。
+        expected = '[AIRI_PANIC] virtio block initialization failed' # 错误码另外核对。
     if case in ('trap-fatal', 'stack-guard'): # 未处理异常镜像必须进入具体停止路径。
         expected = '[AIRI_PANIC] unhandled CPU exception' # 不以 QEMU 存活推断故障已处理。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
@@ -69,12 +84,16 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                 text=serial.read_text(errors='replace') if serial.exists() else ''  # 日志尚未创建时取空串；暂时不完整的字节以替代字符读取。
                 complete_lines = text.splitlines(keepends=True)  # 保留行结束符，完整记录与写到一半的标记可区分。
                 if any(line.endswith('\n') and line.startswith(expected) for line in complete_lines):  # 生成器逐行检查，至少一个完整且以预期标记开头才成立。
-                    if case in ('missing-memory', 'trap-fatal', 'stack-guard'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
+                    if case in ('missing-memory', 'trap-fatal', 'stack-guard', 'block-missing'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
+                        if case == 'block-missing': # 必须确认真实枚举结果为缺设备。
+                            assert '[BLOCK_INIT_ERROR] error=-19' in text # 不能用其他初始化失败充数。
                         if case == 'stack-guard': # 坏栈必须真的转到双重故障的独立栈。
                             assert '[STACK_GUARD_PROBE]' in text and '[EXCEPTION] vector=8 error=0x0 ' in text # 不能把任意PANIC冒充保护页演示。
                         assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
                     else:  # 按当前profile的另一条完整验证路径处理。
                         assert '[EXEC_FAILURE_OK]' in text and '[EXEC_WORKER_OK]' in text and '[EXEC_COMMIT]' in text # 坏映像保持与成功替换都须实际运行。
+                        block_marker = '[BLOCK_TIMEOUT_OK]' if case == 'block-timeout' else '[BLOCK_READONLY_OK]' if case == 'block-readonly' else '[BLOCK_DEMO_OK]' # 不同设备条件分别核对真实结果。
+                        assert '[BLOCK_READY]' in text and block_marker in text # 完成、拒绝或超时必须符合本配置。
                         assert '[FILES_USER_OK]' in text and '[FD_EXEC_OK]' in text # RAM文件和成功exec继承均完成。
                         assert '[PROCESS_FORK_WAIT_OK]' in text and '[PROCESS_DEMO_OK]' in text # 复制、真实阻塞、timer换身份和回收都须完成。
                         assert '[ELF_LOAD]' in text and '[ELF_USER_OK]' in text # 独立ELF段、BSS与用户libc必须真正运行。

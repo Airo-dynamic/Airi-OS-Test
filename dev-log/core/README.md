@@ -27,6 +27,7 @@ K11 把文本会话与显示实现分开，默认构建只链接串口实现。K
 - [K22 · 用户抢占、复制 fork 与阻塞 wait](22-processes.md)
 - [K23 · 事务 exec 与串口运行程序](23-exec-and-monitor.md)
 - [K24 · RAM文件、FD引用与显式偏移读写](24-files.md)
+- [K25 · VirtIO块设备、DMA与超时](25-block-device.md)
 - [后续阶段 · 块设备、日志与等待](next.md)
 
 K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接到当前终端，按 Ctrl-A 后按 X 退出；后者使用独立 QEMU 进程、日志和截止时间，检查启动与输入。默认构建只需主线源码、工具和引导材料。

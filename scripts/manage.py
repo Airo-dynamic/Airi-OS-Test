@@ -8,7 +8,7 @@ from deps import prepare  # 复用外部依赖下载与校验，统一入口先�
 from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard')  # 元组固定六种构建配置，CLI choices 与 test 遍历共用。
+PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
 def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
     subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
 def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。
@@ -70,7 +70,7 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
     parser.add_argument('action',choices=['doctor','build','run','test','debug','kernel-debug','linux-lab','clean','ui-preview','ui-test','docs-check','snapshots'])  # 位置参数限定动作集合，拼错动作不能落到默认运行QEMU。
     parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
     parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
-    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受固定六项。
+    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
     parser.add_argument('--phase',choices=('p1','p2','p3'),default='p1') # Linux阶段显式选择，默认保持P1。
     parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
     parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
@@ -110,18 +110,18 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
         run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
         return  # 调试记录完成后结束本动作。
-    if args.action=='test':  # 完整验证串联主机算法、可选前端、六种启动和三条设备输入。
+    if args.action=='test':  # 完整验证串联主机算法、可选前端、九种启动和三条设备输入。
         run(make_command(target='host-test'))  # 编译同一纯C实现并运行带ASan/UBSan的主机边界检查。
         if args.graphics:  # 普通 test 不导入或验证前端。
             check_frontend(screenshots=False)  # 图形模型检查仍有自己的一组断言。
         results=[]  # 列表依次保存各配置的实际启动结果。
         profiles = [('desktop-' + p) if args.graphics else p for p in PROFILES]  # 呈现方式和故障场景正交。
-        for profile in profiles:  # 按固定六种配置独立编译与启动。
+        for profile in profiles:  # 按固定九种配置独立编译与启动。
             build(profile)  # 生成对应配置的ELF和镜像，产物目录彼此隔离。
             if profile.endswith('normal'):  # 普通目标额外检查ELF结构。
                 inspect_elf(profile)  # 保存机器、类型、依赖与符号报告。
             results.append(check(profile))  # 等待该配置完成标记并保存结果，任一失败异常中止。
-        (ROOT/'artifacts'/('desktop-boot-tests.json' if args.graphics else 'boot-tests.json')).write_text(json.dumps(results,indent=2)+'\n')  # 六种启动结果编码为JSON数组。
+        (ROOT/'artifacts'/('desktop-boot-tests.json' if args.graphics else 'boot-tests.json')).write_text(json.dumps(results,indent=2)+'\n')  # 九种启动结果编码为JSON数组。
         prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
         console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
         (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。

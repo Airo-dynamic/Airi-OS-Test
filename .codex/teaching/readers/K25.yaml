@@ -1,0 +1,26 @@
+checkpoint: K25
+baseline: baseline.yaml
+start: K24
+current_operation: 独立实验盘末扇区DMA往返、FLUSH、只读拒绝、缺盘与发布遗漏超时
+already_explained:
+- concept: RAM文件与同步副本
+  at: ../../../dev-log/core/24-files.md#file-transfer
+  establishes: 返回后不借用buffer，RAM文件重启丢失，与磁盘分开
+- concept: 内核IRQ不抢占
+  at: ../../../dev-log/core/22-processes.md#timer-process-switch
+  establishes: 完整用户现场切换，内核IF临时打开也不切用户
+first_use:
+- concept: PCI与guest物理DMA
+  at: ../../../dev-log/core/25-block-device.md#block-pci-and-dma
+  establishes: 配置端口找到BAR，静态连续内核对象转换PA，不适用于任意堆VA
+- concept: 环发布与设备所有权
+  at: ../../../dev-log/core/25-block-device.md#block-ring-ownership
+  establishes: 描述符和avail先于idx，used后再消费数据，id关联链，方向以设备为准
+- concept: 超时隔离
+  at: ../../../dev-log/core/25-block-device.md#block-timeout-owner
+  establishes: 临时开IRQ等待PIT不抢占CS0，超时reset并保留静态DMA，后续不复用
+not_assumed:
+- 现代VirtIO、IOMMU、非一致缓存DMA、多队列或设备中断完成
+limits:
+- 单在途同步请求，尚非用户阻塞异步I/O
+- FLUSH虚拟后端完成不冒充主机掉电实测
