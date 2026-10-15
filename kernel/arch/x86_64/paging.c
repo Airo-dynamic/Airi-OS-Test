@@ -18,7 +18,7 @@ static uint64_t *table(const struct airi_address_space *s, uint64_t physical) { 
 }
 static void invalidate(const struct airi_address_space *s, uint64_t address) { // 只使当前活动映射的旧翻译失效。
 #ifndef AIRI_HOST_TEST // 主机检查不执行特权指令。
-    if (active_root == s->root) // 未激活的页表尚无当前 CPU 的缓存翻译。
+    if (active_root == s->root || (!s->borrowed_kernel && address >= AIRI_USER_LIMIT)) // 内核高半区被用户根借用，即使当前CR3不同也必须失效共享映射。
         __asm__ volatile("invlpg (%0)" :: "r"(address) : "memory"); // 同时阻止编译器把相关内存访问跨过失效动作。
 #else // 主机只观察表项和所有权。
     (void)s; // 不使用宿主 CPU 的页表。

@@ -189,8 +189,21 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -c $< -o $@
+
+# 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
+USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
+# 普通用户C工作负载仍使用相同低地址编译约束。
+$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h
+# 创建当前配置目录。
+	@mkdir -p $(dir $@)
+# 只读取用户库头，不引入内核实现。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 多进程工作负载有自己的独立静态ELF。
+$(OUT)/user/processes.elf: $(USER_COMMON) $(OUT)/user/processes.o labs/airios/program.ld
+# 入口与库复用，main只选择processes.o。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/processes.o -o $@

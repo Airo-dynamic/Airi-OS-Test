@@ -139,6 +139,11 @@
       "id": "K21",
       "title": "K21 · 装载静态ELF并运行自己的用户C库",
       "document": "dev-log/core/21-user-elf.md"
+    },
+    {
+      "id": "K22",
+      "title": "K22 · 用户抢占、复制fork与阻塞wait",
+      "document": "dev-log/core/22-processes.md"
     }
   ]
 }

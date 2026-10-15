@@ -1,0 +1,29 @@
+checkpoint: K22
+baseline: baseline.yaml
+start: K21
+current_operation: 多用户根并存，IRQ轮转，fork复制用户页，wait阻塞唤醒并安全回收
+already_explained:
+- concept: ELF与用户返回现场
+  at: ../../../dev-log/core/21-user-elf.md#elf-load-owner
+  establishes: 准备完成后才运行，用户栈与内核栈分别持有
+first_use:
+- concept: 运行资格、僵尸与延迟回收
+  at: ../../../dev-log/core/22-processes.md#process-state
+  establishes: 退出不等于可释放栈，父取得结果与离开旧栈分别处理
+- concept: 共享高半区缓存失效
+  at: ../../../dev-log/core/22-processes.md#shared-kernel-tlb
+  establishes: 当前用户根不同也可能使用内核共享映射，修改必须失效
+- concept: 用户时间片与完整frame切换
+  at: ../../../dev-log/core/22-processes.md#timer-process-switch
+  establishes: 设置目标身份TSS和CR3，汇编返回后才真正换栈
+- concept: 直接复制fork与wait条件
+  at: ../../../dev-log/core/22-processes.md#fork-copy-wait
+  establishes: 子RAX0父正PID，输出可写验证在阻塞前，结束结果按身份关联
+- concept: 不可抢占内核的当前保证
+  at: ../../../dev-log/core/22-processes.md#nonpreemptible-kernel
+  establishes: IRQ只抢占CS3，不重入半次内核分配或等待状态操作
+not_assumed:
+- exec、COW、信号、线程同步、SMP、通用FD与Linux wait ABI
+limits:
+- 八槽与64用户页有界，会话结束统一回收未被wait收拢的剩余资源
+- 运行不记录为读者掌握

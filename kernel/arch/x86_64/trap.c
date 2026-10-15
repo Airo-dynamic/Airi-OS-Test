@@ -64,8 +64,8 @@ struct airi_trap_frame *airi_trap_dispatch(struct airi_trap_frame *f) { // 汇�
     if (f->vector == 32) { // PIC重映射后的时钟，不能作为CPU故障停止。
         airi_timer_interrupt(); // 计数并确认IRQ，保持当前任务现场不变。
         if ((f->cs & 3) == 3) // IRQ真正打断了ring3执行。
-            airi_user_tick(); // 当前仅计数，不提前宣称多进程抢占。
-        return (f->cs & 3) == 3 ? airi_user_resume(f) : f; // 用户返回仍检查规范地址和标志，kernel直接恢复。
+            return airi_user_timer(f); // 用户时间片结束时可返回另一个完整现场。
+        return f; // 内核上下文始终不可抢占。
     }
     uint64_t cr2; // 读取最近页故障的线性地址，非 PF 时仅作为附带状态。
     __asm__ volatile("mov %%cr2,%0" : "=r"(cr2)); // =r 请求输出到编译器分配的通用寄存器。
