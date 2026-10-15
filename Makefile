@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -46,6 +46,10 @@ ifeq ($(CASE),missing-memory)
 # 模拟必需内存地图缺失，内核应打印具体PANIC。
 CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
 endif # 结束 missing-memory 的编译条件
+# 时钟故障镜像仅供K18作者演示超时，不进入正常启动配置集合。
+ifeq ($(CASE),timer-masked)
+CPPFLAGS += -DAIRI_TEST_TIMER_MASKED # PIT仍计数，但PIC阻止IRQ0到达CPU。
+endif # 结束时钟故障条件。
 # 作者故障配置不登记恢复，应报告真实异常后停止。
 ifeq ($(CASE),trap-fatal)
 CPPFLAGS += -DAIRI_TEST_FATAL_TRAP # 仅此构建目录触发未处理 UD2。

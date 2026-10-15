@@ -59,6 +59,7 @@ TRAP 28 /* Hypervisor 注入异常，不带错误码。 */
 TRAP 29, 1 /* VMM 通信异常。 */
 TRAP 30, 1 /* 安全异常。 */
 TRAP 31 /* 保留向量。 */
+TRAP 32 /* 主PIC IRQ0对应的时钟入口，无硬件错误码。 */
 TRAP 255 /* 未使用的 IDT 项统一停止；可屏蔽中断仍关闭。 */
 airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
     cld /* C ABI 要求字符串方向标志为零；iretq 会恢复原标志。 */

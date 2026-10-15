@@ -119,6 +119,11 @@
       "id": "L02",
       "title": "L02 · 在 Linux 分开观察虚拟范围、驻留和访问权限",
       "document": "dev-log/linux/02-memory.md"
+    },
+    {
+      "id": "K18",
+      "title": "K18 · 用真实时钟IRQ唤醒CPU",
+      "document": "dev-log/core/18-timer.md"
     }
   ]
 }

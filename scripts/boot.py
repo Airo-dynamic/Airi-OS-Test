@@ -72,6 +72,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                     if case in ('missing-memory', 'trap-fatal'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
                         assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
                     else:  # 按当前profile的另一条完整验证路径处理。
+                        assert '[TIMER_DEMO_OK]' in text # 时钟必须在真实IRQ唤醒后完成。
                         assert '[AIRI_P2_READY]' in text # 当前主线还必须完成页池、自有页表和堆。
                         assert '[TRAP_DEMO_OK] ud=6 gp=13 resumed=2' in text # 正常启动必须真的从两种异常栈返回。
                         assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。

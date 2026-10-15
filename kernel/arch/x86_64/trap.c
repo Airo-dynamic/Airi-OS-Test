@@ -1,3 +1,4 @@
+#include <airi/timer.h> // 唯一开放的设备IRQ交给架构时钟驱动。
 #include <airi/trap.h> // 异常现场的 C 布局。
 #include <airi/kernel.h> // 日志、清零和停止接口。
 struct table_pointer { uint16_t limit; uint64_t base; } __attribute__((packed)); // CPU 要求 2+8 字节，中间不能有填充。
@@ -21,6 +22,7 @@ static struct idt_gate idt[256]; // 整张表属于内核静态内存，安装�
 static struct task_state tss; // TSS 也必须在 ltr 后持续存在。
 static uint8_t double_fault_stack[16384] __attribute__((aligned(16))); // 原栈损坏时 DF 换这块栈。
 extern const uintptr_t airi_trap_entries[32]; // 汇编产生的异常入口地址表。
+extern void airi_trap_32(void); // IRQ0也复用完整通用寄存器保存入口。
 extern void airi_trap_255(void); // 未启用的向量转到统一停止路径。
 extern void airi_tables_load(const void *, const void *); // 汇编依次加载 GDT/TSS/IDT。
 extern void airi_probe_ud(void), airi_probe_gp(void); // 两个由作者明确触发的故障函数。
@@ -41,6 +43,8 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     tss.io_offset = sizeof(tss); // 当前 TSS 内没有 I/O 权限位图。
     for (unsigned i = 0; i < 256; ++i) { // 全部项目初始化，避免继承加载器状态。
         uintptr_t address = i < 32 ? airi_trap_entries[i] : (uintptr_t)airi_trap_255; // 未使用向量也有明确停止入口。
+        if (i == 32) // 唯一开放的设备向量有自己的编号，不能冒充未知255。
+            address = (uintptr_t)airi_trap_32; // 指向TRAP32生成的入口。
         idt[i] = (struct idt_gate){(uint16_t)address, 8, i == 8 ? 1 : 0, 0x8e, (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0}; // DPL0 中断门，只有 DF 使用 IST1。
     }
     struct table_pointer gdtr = {sizeof(gdt) - 1, (uintptr_t)gdt}; // CPU 复制描述符值，不保留这个局部对象指针。
@@ -49,6 +53,10 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     airi_log("[TRAP_READY] vectors=32 cs=8 double_fault_ist=1 interrupts=off"); // 该标记只表示异常设施，不宣称调度或 IRQ 完成。
 }
 void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
+    if (f->vector == 32) { // PIC重映射后的时钟，不能作为CPU故障停止。
+        airi_timer_interrupt(); // 计数并确认IRQ，保持当前任务现场不变。
+        return; // 仍由同一汇编入口恢复全部寄存器和RFLAGS。
+    }
     uint64_t cr2; // 读取最近页故障的线性地址，非 PF 时仅作为附带状态。
     __asm__ volatile("mov %%cr2,%0" : "=r"(cr2)); // =r 请求输出到编译器分配的通用寄存器。
     airi_log("[EXCEPTION] vector=%llu error=0x%llx rip=0x%llx cs=0x%llx rsp=0x%llx cr2=0x%llx", // 保存实际 CPU 返回现场，便于反汇编定位。

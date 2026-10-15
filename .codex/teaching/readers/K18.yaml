@@ -1,0 +1,23 @@
+checkpoint: K18
+baseline: baseline.yaml
+start: K17 + L02
+current_operation: PIT事件经PIC和IDT32进入CPU，EOI后iretq，hlt等待真实五tick
+already_explained:
+- concept: 完整异常现场
+  at: ../../../dev-log/core/14-exceptions.md#trap-entry
+  establishes: 保存全部GPR并对齐调用C，iretq恢复原现场
+first_use:
+- concept: IRQ线、向量和IF
+  at: ../../../dev-log/core/18-timer.md#pit-pic-route
+  establishes: 设备、控制器、CPU三层都允许才交付；PIC路线当前关闭本地APIC
+- concept: PIC ICW、掩码、EOI和PIT分频
+  at: ../../../dev-log/core/18-timer.md#timer-config
+  establishes: 配置完成才sti，IRQ里只计数与确认，不调用分配器或日志
+- concept: 屏蔽故障与有界拒绝
+  at: ../../../dev-log/core/18-timer.md#masked-timer
+  establishes: 先到实际配置再超时，不能把UEFI未完成混作驱动失败
+not_assumed:
+- 任务切换、用户态抢占、等待队列、APIC路由和SMP
+limits:
+- 固定单核q35兼容PIC时钟，非Linux现代时钟实现
+- 运行不记录为读者掌握
