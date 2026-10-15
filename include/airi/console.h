@@ -1,5 +1,6 @@
 #ifndef AIRI_CONSOLE_H  // 第一次包含控制台接口时保留以下声明，重复包含时跳过
 #define AIRI_CONSOLE_H  // 标记本编译单元已经读取控制台接口
+#include <airi/memory.h> // 消费稳定内存数值快照，不链接分配器实现。
 #include <airi/boot.h>  // 引入启动结构、固定宽整数和内存范围接口
 #define AIRI_CONSOLE_LINES 256  // 输出环最多保存256条文字记录
 #define AIRI_CONSOLE_WIDTH 128  // 一条输出的数组容量为128字节，含终止零
@@ -20,6 +21,7 @@ enum airi_key {  // 按顺序编号当前airi_key可接受的状态或事件
 /* Fixed storage owned by the kernel. No heap, process or filesystem dependency. */
 struct airi_console {  // 独立保存文本输入、历史与输出环。
     bool (*extension)(struct airi_console *, const char *, void *);  // 可选命令消费者；true 表示已经处理，NULL 表示没有扩展。
+    void (*read_memory)(struct airi_memory_stats *); // 可选同步查询；宿主纯文本观察可保持NULL。
     void *extension_context;   // 借用扩展拥有者的数据，必须活过回调调用。
     const AiriBootInfo *boot;  // 借用启动信息，描述与内存地图须持续有效
     enum airi_view view;  // 当前命令视图编号

@@ -1,4 +1,4 @@
-#include <airi/pages.h> // 在稳定内存地图上建立物理页所有权。
+#include <airi/memory.h> // 通过内存服务建立页池、页表、堆并查询快照。
 #include <airi/trap.h> // 安装异常表并演示处理器现场。
 #include <airi/arch.h>     // 通过架构边界使用忙等提示。
 #include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
@@ -37,6 +37,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
     airi_memory_init(info); // 只借出完整 usable 页，并在真实 RAM 演示写入与归还。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
+    console.read_memory = airi_memory_snapshot; // 文本查询只读取数值，不持有分配器内部对象。
     bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
     if (graphics) {  // 有效图形路径才输出图形参数。
         const struct airi_framebuffer *fb = &info->framebuffer;  // 借用刚用于绘图的同一份帧缓冲描述。
@@ -48,6 +49,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     /* Written AFTER all drawing, so tests can take a completed screenshot. */
     airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
              (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
+    airi_log("[AIRI_P2_READY] exceptions=1 pages=1 own_cr3=1 heap=1"); // 所有内存演示和控制台初始化结束后才发布阶段完成。
     airi_serial_write("airi> ");  // 输出首个串口提示符。
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。

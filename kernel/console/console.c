@@ -149,7 +149,13 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
              (unsigned long long)(airi_memory_bytes(c->boot, AIRI_MEMORY_BOOT_RECLAIM) / 1024));  // 字节除1024转KiB，再按%llu约定提供unsigned long long
         airi_console_print(c, "kernel / modules      %llu",  // 把本次查询字段按kernel / modules      %llu的格式保存到输出环
              (unsigned long long)(airi_memory_bytes(c->boot, AIRI_MEMORY_KERNEL) / 1024));  // 字节除1024转KiB，再按%llu约定提供unsigned long long
-        airi_console_print(c, "%u firmware regions. No allocator accounting yet.", c->boot->region_count);  // 把本次查询字段按%u firmware regions. No allocator accounting yet.的格式保存到输出环
+        if (c->read_memory) { // guest 内存服务初始化后提供真实分配状态。
+            struct airi_memory_stats stats; // 本次查询只借用同步填好的数值。
+            c->read_memory(&stats); // 回调返回前复制，不借出页池或堆块指针。
+            airi_console_print(c, "page pool: total=%u free=%u held=%u", stats.pages_total, stats.pages_free, stats.pages_total - stats.pages_free); // 页表和堆backing都计入held。
+            airi_console_print(c, "kernel heap: bytes=%zu free_payload=%zu", stats.heap_bytes, stats.heap_free); // 区分页级backing与对象级空闲。
+        } else // 较早检查点与宿主纯模型尚未绑定分配器。
+            airi_console_print(c, "%u firmware regions. No allocator accounting yet.", c->boot->region_count); // 未接入就明确不提供伪造统计。
     } else if (equal(start, "mem map")) {  // 完整匹配mem map时逐条输出实际物理范围
         airi_console_print(c, "ID  PHYSICAL START   PHYSICAL END     TYPE");  // 将ID  PHYSICAL START   PHYSICAL END     TYPE保存为一条命令说明或身份记录
         for (unsigned i = 0; i < c->boot->region_count; ++i) {  // 只遍历启动地图有效前缀，每项形成一行范围说明

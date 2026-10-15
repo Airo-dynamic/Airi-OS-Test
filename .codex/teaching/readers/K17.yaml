@@ -1,0 +1,22 @@
+checkpoint: K17
+baseline: baseline.yaml
+start: K16
+current_operation: 在自有映射的固定backing中分配、归还、合并小对象，并通过mem查询数值
+already_explained:
+- concept: 物理页和映射所有权
+  at: ../../../dev-log/core/16-virtual-memory.md#lookup-unmap
+  establishes: 先断开和失效再归还，数据页与页表分别由调用者持有
+first_use:
+- concept: backing、块头与payload
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-backing
+  establishes: 堆持有页面，对象只借payload；free不自动归还物理页
+- concept: 首次适配、分割和相邻合并
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-split
+  establishes: 先接住旧后继，归还只接受精确对象起点，合并恢复块头容量
+- concept: 只读数值快照与消费者
+  at: ../../../dev-log/core/17-kernel-heap.md#memory-consumer
+  establishes: 回调同步填快照，console不持有分配器内部指针
+not_assumed:
+- 完整malloc ABI、用户堆、并发分配、自动扩容、页面回收策略
+limits:
+- 自有堆固定64KiB；运行与复敲不记录为读者掌握

@@ -103,11 +103,15 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                 wire.sendall(b'theme day\n')  # 串口目标没有主题扩展，应明确拒绝。
                 wait(update(0,3),offset)      # 等待第三次真实提交。
                 assert 'unknown command' in output()[offset:]  # 不把无消费者的主题设置伪装成功。
+                offset=len(output()) # 内存查询使用本次命令之后的新记录。
+                wire.sendall(b'mem\n') # 同一串口主线查询真实页池与堆。
+                tail=wait(update(0,4),offset) # 等第四次提交的完整状态。
+                assert 'page pool: total=' in tail and 'kernel heap: bytes=65536' in tail # 不能只返回启动地图。
                 cases=['UART receive / command dispatch','serial-only device report']  # 结果只记录此路径实际运行的两项观察。
             else:  # 按当前profile的另一条完整验证路径处理。
                 capture(work/'terminal.ppm')  # READY已到达后保存初始终端画面。
                 run('help','mem map    Complete physical address inventory')  # 验证帮助输出包含完整物理地图命令说明。
-                run('mem','No allocator accounting yet.')     # 验证实际内存描述，不假装已有分配器占用统计。
+                run('mem','page pool: total=')     # 验证实际内存描述，不假装已有分配器占用统计。
                 run('unknown','unknown command. Type help.')  # 未知命令必须得到具体错误文本。
                 run('echo ready','ready')  # 检查文字参数到输出的正常命令通路。
                 for code,view,name in [('f2',1,'memory'),('f3',2,'devices'),('f4',3,'journal'),('f1',0,'terminal-active')]:  # 每个三元组同时指定按键、预期视图和截图名称，循环解包三项。
