@@ -238,9 +238,23 @@
     "created": true,
     "credentials": "private ~/.cloudflared, not in Git or guest image",
     "dns_route_created": false,
-    "proxy_started": false,
     "native_client_interop_verified": false,
-    "authorization": "user explicitly authorized creating dedicated test Tunnel"
+    "authorization": "user explicitly authorized creating dedicated test Tunnel",
+    "ongoing_proxy_running": false,
+    "native_proxy_started": false,
+    "reference_probe": {
+      "date": "2026-10-23",
+      "reference_client": "cloudflared 2026.7.3",
+      "tunnel_name": "airios-lab-20261023",
+      "http2_registered": true,
+      "elapsed_seconds": 6.67,
+      "bounded_seconds": 40,
+      "dns_route_created": false,
+      "ingress": "http_status:404",
+      "native_airios_or_cpp_client_verified": false,
+      "credentials": "private ~/.cloudflared; never copied into repo or guest",
+      "diagnostic": "private ~/.cloudflared/airios-lab-20261023-reference.log"
+    }
   },
   "linux": "P1 retry SSH255; L01-L08 remain unverified",
   "artifacts": "artifacts/k36",

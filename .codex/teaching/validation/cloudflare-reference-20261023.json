@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-23",
+  "reference_client": "cloudflared 2026.7.3",
+  "tunnel_name": "airios-lab-20261023",
+  "http2_registered": true,
+  "elapsed_seconds": 6.67,
+  "bounded_seconds": 40,
+  "dns_route_created": false,
+  "ingress": "http_status:404",
+  "native_airios_or_cpp_client_verified": false,
+  "credentials": "private ~/.cloudflared; never copied into repo or guest",
+  "diagnostic": "private ~/.cloudflared/airios-lab-20261023-reference.log"
+}

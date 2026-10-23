@@ -6,7 +6,7 @@ K36 完整默认 test 通过八组主机 ASan/UBSan、九种启动、三条输�
 
 在 `/tmp/airios-k36-gui-20261023` 的临时克隆中合入原 gui，并接入本轮内核变更；main 与 gui 分支本身保持独立。图形 test 的九种启动、三条输入和三次 I/O 会话通过；ui-test 通过 84 张快照、58 项颜色组合，实际检查 guest Day/Night 画面。额外输入 run init，确认得到 UART 指引且后续桌面 echo 仍可运行。图形克隆中的全部 129 份主线实现与最终 K36 源哈希相同，图形仅增加自己的路径。
 
-48 个检查点、129 份实现可由正文重建；433 个源码块的旁注审查均通过，并顺读新增机制说明。Linux 仍未验证。用户授权后已创建专用 Cloudflare Tunnel `airios-lab-20261023`，凭据仅在本机私有目录；尚未设置 DNS 路由、启动代理或验证原生 HTTP/2 客户端。[K36记录](../.codex/teaching/validation/K36.json)保存本轮实际范围，P7 的内存容量、正式启动和设备中断工作仍在后续。
+48 个检查点、129 份实现可由正文重建；433 个源码块的旁注审查均通过，并顺读新增机制说明。Linux 仍未验证。用户授权后已创建专用 Cloudflare Tunnel `airios-lab-20261023`，凭据仅在本机私有目录；随后官方 cloudflared 2026.7.3 以内置 404 服务短时连接，在 6.67 秒内观察到真实 HTTP/2 注册后结束；未设置 DNS 路由，没有留下运行的代理。这个对照尚未验证宿主 C++ 或 AiriOS 原生客户端，详见[参考记录](../.codex/teaching/validation/cloudflare-reference-20261023.json)。[K36记录](../.codex/teaching/validation/K36.json)保存本轮实际范围，P7 的内存容量、正式启动和设备中断工作仍在后续。
 
 
 ## K35：同一用户地址空间中的页面复用（2026-10-23）
