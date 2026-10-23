@@ -110,3 +110,7 @@ long airi_io_state_get(struct airi_io_state *state) { // 状态快照不会消�
 long airi_programs(char *names, size_t capacity) { // 完整目录复制到用户输出，不借内核指针。
     return call3(30, (uintptr_t)names, capacity, 0); // 返回不含NUL长度或负错误。
 }
+
+long airi_release(void *address, size_t bytes) { // 调用后用户不能继续解引用已归还范围。
+    return call3(31, (uintptr_t)address, bytes, 0); // 自有页接口返回0或负错误，不设置POSIX errno。
+}

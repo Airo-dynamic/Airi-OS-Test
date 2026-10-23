@@ -234,6 +234,11 @@
       "id": "K34",
       "title": "K34 · 孤儿托管与持续会话中的资源回收",
       "document": "dev-log/core/34-orphan-reaper.md"
+    },
+    {
+      "id": "K35",
+      "title": "K35 · 用户页归还、空洞复用与真实解除映射",
+      "document": "dev-log/core/35-user-page-release.md"
     }
   ]
 }

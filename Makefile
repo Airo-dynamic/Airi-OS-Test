@@ -323,3 +323,12 @@ $(OUT)/user/orphans.elf: $(USER_COMMON) $(OUT)/user/orphans.o labs/airios/progra
 $(OUT)/labs/airios/images.o: $(OUT)/user/orphans.elf
 # 汇编只读当前文件路径，不能复用另一配置产物。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_ORPHANS_ELF='"$(OUT)/user/orphans.elf"'
+
+# 动态页工作负载与其他用户main分别链接。
+$(OUT)/user/memory.elf: $(USER_COMMON) $(OUT)/user/memory.o labs/airios/program.ld
+# 静态ELF只使用自有用户入口与库。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/memory.o -o $@
+# 当前包装对象要等本配置的新映像完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/memory.elf
+# 文件名作为C字符串宏传入预处理汇编。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MEMORY_ELF='"$(OUT)/user/memory.elf"'

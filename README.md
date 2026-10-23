@@ -23,7 +23,7 @@ run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、d
 
 | 分支 | 检查点 | 内容与运行条件 |
 | --- | --- | --- |
-| main | 46 个：00–10、K11–K34、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
+| main | 47 个：00–10、K11–K35、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
 | gui | 15 个：G11–G24、G26 | 从 main 的 00 根提交分叉，只增加图形自己的路径；合入任一现有 main 阶段均不覆盖主线文件 |
 
 合入源码与开始运行是两件事。图形代码可以先合入较早的 main 检查点，运行需主线到 K11；G24 的 guest 接入需 K13。G11–G23 先提供宿主观察，G26 提供完整图形检查。默认构建继续选择串口实现，不读取字体，也不链接 Cocoa。
@@ -72,4 +72,4 @@ Linux/GDB 默认只连接个人主机 airi@ssh.airi-dynamic.top。运行证据�
 
 P2 带敲入口：[K14 异常](dev-log/core/14-exceptions.md) → [K15 物理页](dev-log/core/15-physical-pages.md) → [K16 页表与权限](dev-log/core/16-virtual-memory.md) → [K17 内核堆](dev-log/core/17-kernel-heap.md) → [L02 Linux 内存](dev-log/linux/02-memory.md)。`./airios linux-lab --phase p2` 保存本轮实际连接与运行状态，连接失败不记为 Linux 验证成功。
 
-P7 升级入口：[K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)。最终部署目标与自有网络、Server-Lib、Cloudflare 和多核阶段见[部署路线](docs/deployment-roadmap.md)。
+P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md) 接到 [K35 用户页归还与复用](dev-log/core/35-user-page-release.md)。最终部署目标与自有网络、Server-Lib、Cloudflare 和多核阶段见[部署路线](docs/deployment-roadmap.md)。

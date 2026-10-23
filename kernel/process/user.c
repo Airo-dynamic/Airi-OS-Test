@@ -13,6 +13,7 @@
 #define USER_STACK 0x70000000ull // 当前每进程一页初始用户栈。
 #define STACK_BASE 0xffffe10000000000ull // 所有进程陷入栈位于同一长期内核分支。
 #define USER_HEAP 0x10000000ull // ELF静态范围之外的用户页分配起点。
+#define USER_HEAP_END 0x20000000ull // 动态用户页只占这段独立范围，不接近初始用户栈。
 #define PROCESS_COUNT 8u // 有界进程表，不做动态扩容。
 enum user_state { USER_UNUSED, USER_RUNNABLE, USER_RUNNING, USER_WAITING, USER_IO_WAIT, USER_ZOMBIE, USER_REAP_PENDING }; // 退出与回收是两个不同状态。
 enum io_operation { IO_NONE, IO_READ, IO_WRITE, IO_READY, IO_ASYNC }; // 等待保存操作条件，不保留内核局部buffer。
@@ -24,7 +25,7 @@ struct user_process { // 所有权和调度状态由内核持有，用户只能�
     struct airi_kernel_region stack; // 不能在仍使用它的C调用中释放。
     struct user_page owned[64]; // 所有用户数据页，含代码、静态数据、堆页和栈。
     unsigned count, pid, parent, user_ticks; // 资源数量、身份、父PID和本进程实际IRQ数。
-    uint64_t fault_error, heap_next; // 用户故障证据与下一次有界用户页地址。
+    uint64_t fault_error; // 用户故障证据；动态页位置由现有映射寻找，不再使用单向游标。
     int exit_code; // 自有wait接口返回普通退出码或负故障编码。
     enum user_state state; // 只有RUNNABLE可被调度器选中。
     int64_t wait_target; // 正PID表示指定孩子，-1表示任意孩子。
@@ -49,6 +50,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_memory_elf_start[], airi_memory_elf_end[]; // 用户页面归还与空洞复用工作负载。
 extern const uint8_t airi_orphans_elf_start[], airi_orphans_elf_end[]; // 持续会话中的孤儿回收与槽复用演示。
 extern const uint8_t airi_shell_elf_start[], airi_shell_elf_end[]; // 真正用户shell，不是内核命令别名。
 extern const uint8_t airi_demo_elf_start[], airi_demo_elf_end[]; // 用户页分配与异步存储贯通演示。
@@ -62,6 +64,7 @@ extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控�
 struct executable { const char *name; const uint8_t *start, *end; }; // 初始映像目录尚不是通用文件系统。
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
+    {"memory", airi_memory_elf_start, airi_memory_elf_end}, // 同一地址空间内释放与重新申请。
     {"orphans", airi_orphans_elf_start, airi_orphans_elf_end}, // 不结束根会话也能回收退出的孤儿。
     {"demo", airi_demo_elf_start, airi_demo_elf_end}, // 页、任务和设备完成串联。
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
@@ -431,7 +434,6 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
     child->initial.rax = 0; // 子分支看到fork返回0。
     child->pid = next_pid++; // 全部内存成功后才分配PID。
     child->parent = parent->pid; // 关系用身份而不是可能复用的槽指针表示。
-    child->heap_next = parent->heap_next; // 复制后的用户页分配游标也属于子空间。
     if (airi_async_open(child->pid)) // fork创建空上下文，用户内存里的父handle整数并不授权子访问。
         goto failed; // 其余子资源统一回滚，父不变。
     child->async_owned = true; // 成功后才记资源所有权。
@@ -482,14 +484,28 @@ static long allocate_user(size_t bytes) { // 按页提供有界用户内存，�
     unsigned count = (unsigned)((bytes + 4095) / 4096); // 请求向上取整为完整页。
     if (count > 64 - current->count) // 保留所有权数组容量。
         return -12; // -ENOMEM。
-    uint64_t address = current->heap_next; // 首次从ELF范围之外开始。
+    uint64_t address = USER_HEAP; // 从低端找能容纳本次整段的空洞，不依赖旧分配顺序。
+    for (;;) { // 每次冲突越过至少一个已拥有页，最多被六十四页阻挡。
+        bool conflict = false; // 本候选范围是否撞上现有用户数据页。
+        for (unsigned i = 0; i < current->count; ++i) { // owned可能因释放而换序，不要求按VA排序。
+            uint64_t used = current->owned[i].address; // 当前页仍由此进程拥有。
+            if (used >= address && used < address + count * 4096ull) { // 页对齐后，页起点落入候选即发生重叠。
+                address = used + 4096; // 此页之前的起点都不能容纳本次整段，跳到该页右端。
+                conflict = true; // 新候选须重新从整个owned数组检查。
+                break; // 不沿用旧范围检查结果。
+            }
+        }
+        if (address > USER_HEAP_END - count * 4096ull) // 先减有界长度，不允许候选越过动态范围。
+            return -12; // -ENOMEM；尚未分配页面，也没有修改原映射。
+        if (!conflict) // 所有现有页都不与此候选相交。
+            break; // 后续只为这段空洞创建映射。
+    }
     unsigned before = current->count; // 失败只回滚本次新增映射。
     for (unsigned i = 0; i < count; ++i) // 页物理可以不连续，用户VA连续。
         if (!owned_page(current, address + i * 4096ull, AIRI_VM_WRITE)) // 成功页面已在owned中登记。
             goto rollback; // 游标尚未前移。
-    current->heap_next += count * 4096ull; // 全部成功后再发布新的末端。
     airi_log("[USER_ALLOC] pid=%u address=0x%llx pages=%u zeroed=1", current->pid, (unsigned long long)address, count); // 只记录已完整提交的用户映射。
-    return (long)address; // 当前没有逐对象free，进程结束统一回收。
+    return (long)address; // 用户可显式归还完整页，未归还页仍在exit统一清理。
 rollback: // 已有用户页面不受本次耗尽影响。
     while (current->count > before) { // 只处理新增的成功项。
         const struct user_page *page = &current->owned[--current->count]; // 先退到最后一项。
@@ -497,6 +513,31 @@ rollback: // 已有用户页面不受本次耗尽影响。
             airi_panic("cannot roll back user page allocation"); // 内部所有权错误不能被吞掉。
     }
     return -12; // 不返回半段用户范围。
+}
+static unsigned owned_index(uint64_t address) { // 只在当前单线程进程的不可抢占系统调用中查询。
+    for (unsigned i = 0; i < current->count; ++i) // 有效项之外可能有旧字节，不参与查找。
+        if (current->owned[i].address == address) // 精确页起点，不接受页内指针。
+            return i; // 下标只借给本次操作，不跨状态修改保存。
+    return current->count; // count本身是未找到哨兵，不能作为数组下标解引用。
+}
+static long release_user(uint64_t address, uint64_t bytes) { // 按页解除动态用户映射，不是C malloc对象free。
+    if (!bytes || bytes > 16384 || (bytes & 4095) || (address & 4095) || address < USER_HEAP || address >= USER_HEAP_END || bytes > USER_HEAP_END - address) // 短路先限地址再做右端减法。
+        return -22; // -EINVAL；不舍入无效长度，不动任何页。
+    unsigned count = (unsigned)(bytes / 4096); // 参数已限制为一到四个完整页。
+    for (unsigned i = 0; i < count; ++i) { // 第一遍先验证整段，避免中途坏页留下部分解除。
+        unsigned index = owned_index(address + i * 4096ull); // 当前目标VA属于动态页范围。
+        if (index == current->count || current->owned[index].flags != (AIRI_VM_USER | AIRI_VM_WRITE)) // 既需真实所有权，也只接受RW/NX用户动态页。
+            return -22; // 任何一页不存在，整段保持原样。
+    }
+    for (unsigned i = 0; i < count; ++i) { // 第二遍提交，当前没有其他线程改变本地址空间。
+        unsigned index = owned_index(address + i * 4096ull); // 每次重新查，上一轮可能移动了owned末项。
+        struct user_page page = current->owned[index]; // 在压缩数组前保留当前VA与PA数值。
+        if (!airi_vm_unmap(&current->space, page.address) || !airi_memory_return_page(page.physical)) // 先断开活动根映射并invlpg，才归还物理页。
+            airi_panic("cannot release owned dynamic user page"); // 内部不变量失败不能返回假成功。
+        current->owned[index] = current->owned[--current->count]; // 用最后一项补空位，再缩小有效数量；顺序没有ABI含义。
+    }
+    airi_log("[USER_RELEASE] pid=%u address=0x%llx pages=%u", current->pid, (unsigned long long)address, count); // 只记录整段真正归还后的结果。
+    return 0; // 后续分配可复用空洞，新物理页按原owned_page逻辑清零。
 }
 static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用户调用，失败必须保持旧PID、空间和现场。
     char name[64]; // 先把用户名称复制到当前内核栈，后续不再借旧用户页。
@@ -530,7 +571,6 @@ static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用�
     next.pid = old.pid; // exec保持进程身份。
     next.parent = old.parent; // 父仍等待同一个孩子。
     next.user_ticks = old.user_ticks; // 同一身份的已运行计数不丢失。
-    next.heap_next = USER_HEAP; // 新映像的动态用户页从空开始。
     next.stack = old.stack; // 明确转移正在使用的内核栈所有权，VA和物理内容都不变。
     airi_memset(&old.stack, 0, sizeof(old.stack)); // old清理者不再拥有这组栈，不能重复释放。
     next.frame = f; // 真实返回现场仍在同一内核栈上，不能留下指向next.initial局部对象的指针。
@@ -774,6 +814,8 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         else // 完整复制后才发布有效长度。
             f->rax=used; // 不含末尾NUL，与strlen一致。
     }
+    else if (f->rax == 31) // 只归还调用者自己的动态页面，不能释放ELF或初始栈。
+        f->rax = (uint64_t)release_user(f->rdi, f->rsi); // 负参数错误保持全部原映射。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。
@@ -801,7 +843,6 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     if (name && airi_strlen(name)==2 && !airi_memcmp(name,"sh",2)) // 只有直接启动shell时接入UART输入。
         airi_fd_attach_input(&root->files); // CLOEXEC使既有子程序FD0继续可用于普通文件。
     root->pid = next_pid++; // 完整准备后才取得运行身份。
-    root->heap_next = USER_HEAP; // 动态用户页初始为空。
     int async_error = airi_async_open(root->pid); // 完整映像准备后才登记新进程资源上下文。
     if (async_error) { // 未向用户发布，此时根与栈不活动。
         cleanup(root); // 回滚页面、FD与内核栈，尚未拥有异步owner。

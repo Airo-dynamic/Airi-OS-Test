@@ -67,3 +67,9 @@ airi_demo_elf_end: /* 半开右端。 */
 airi_orphans_elf_start: /* 文件头起点。 */
 .incbin AIRI_ORPHANS_ELF /* 当前配置的独立ELF。 */
 airi_orphans_elf_end: /* 文件半开右端。 */
+
+.section .rodata /* 页释放程序由同一静态ELF装载器处理。 */
+.global airi_memory_elf_start, airi_memory_elf_end /* 内核只保留输入字节边界。 */
+airi_memory_elf_start: /* 文件首。 */
+.incbin AIRI_MEMORY_ELF /* 本配置的新用户映像。 */
+airi_memory_elf_end: /* 文件右端。 */

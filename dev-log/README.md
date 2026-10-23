@@ -35,7 +35,7 @@
 
 ## 组合可选图形停点
 
-main 的基础18节点之后已追加 K14–K34 和 L02–L08，共46节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
+main 的基础18节点之后已追加 K14–K35 和 L02–L08，共47节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
 
 图形的运行前置另行声明：运行需主线到 K11，G24 的 guest 接入需 K13。合并 gui 后出现独立的 graphics.json，learn 才增加图形节点；未合并时，主线列表、导出和快照只处理 main。
 
@@ -54,3 +54,5 @@ main 的基础18节点之后已追加 K14–K34 和 L02–L08，共46节点。gu
 [首轮完整演示](core/33-shell-pipeline.md)与[知识地图](../docs/knowledge-map.md)可用于回查整条路径，Linux实际环境限制见[Linux集合](linux/README.md)。
 
 P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路线](../docs/deployment-roadmap.md)追加升级检查点，旧课程与个人学习位置保留。
+
+[K35 用户页归还](core/35-user-page-release.md)继续处理同一地址空间内的资源复用与解除映射故障。

@@ -1,0 +1,31 @@
+checkpoint: K35
+baseline: baseline.yaml
+start: K34
+current_operation: 同一用户进程内归还动态页、复用连续虚拟洞，并观察子进程访问已解除页的真实故障
+already_explained:
+- concept: 用户页所有权与fork私有复制
+  at: ../../../dev-log/core/22-processes.md#process-state
+  establishes: owned保存VA/PA/权限，用户数据页逐页复制，父子物理所有权分开
+- concept: 共享映射的活动CPU失效
+  at: ../../../dev-log/core/22-processes.md#shared-kernel-tlb
+  establishes: unmap必须使实际活动CPU的旧翻译失效，单核不包含跨核协议
+- concept: 延后安全回收
+  at: ../../../dev-log/core/34-orphan-reaper.md#orphan-handoff
+  establishes: 退出登记与另一条内核栈实际释放分开，当前根的页释放与退出栈回收职责不同
+first_use:
+- concept: 用户主动释放整页范围
+  at: ../../../dev-log/core/35-user-page-release.md#release-order
+  establishes: 全段预检后逐页unmap/invlpg再归还物理页，不接受ELF和初始栈
+- concept: 无序页记录上的首次适配
+  at: ../../../dev-log/core/35-user-page-release.md#release-first-fit
+  establishes: 冲突越过占用页后重查，复用低地址连续VA洞，物理页不要求连续
+- concept: 页面释放的用户ABI
+  at: ../../../dev-log/core/35-user-page-release.md#release-abi
+  establishes: 自有int80调用31传VA数值与字节长度，结果0或负数，不是完整POSIX mmap接口
+- concept: 复用与真实解除映射观察
+  at: ../../../dev-log/core/35-user-page-release.md#release-workload
+  establishes: 128轮跨预算复用；坏范围不先释放有效前缀；子volatile访问已解除页故障而父42保持
+not_assumed:
+- malloc对象级释放、共享地址空间线程、钉住用户页DMA或完整POSIX内存接口
+limits:
+- 固定动态范围、每次一至四页、总六十四数据页；单核单线程，未扩大内存预算
