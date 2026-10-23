@@ -314,3 +314,12 @@ $(OUT)/user/demo.elf: $(USER_COMMON) $(OUT)/user/demo.o labs/airios/program.ld
 $(OUT)/labs/airios/images.o: $(OUT)/user/sh.elf $(OUT)/user/demo.elf
 # target-specific变量只对这个包装对象追加路径宏，单引号保护C字符串。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_SHELL_ELF='"$(OUT)/user/sh.elf"' -DAIRI_DEMO_ELF='"$(OUT)/user/demo.elf"'
+
+# 孤儿工作负载复用用户入口和库，保持独立main。
+$(OUT)/user/orphans.elf: $(USER_COMMON) $(OUT)/user/orphans.o labs/airios/program.ld
+# 独立静态ELF不链接宿主libc。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/orphans.o -o $@
+# 包装必须等待此配置自己的ELF完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/orphans.elf
+# 汇编只读当前文件路径，不能复用另一配置产物。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_ORPHANS_ELF='"$(OUT)/user/orphans.elf"'

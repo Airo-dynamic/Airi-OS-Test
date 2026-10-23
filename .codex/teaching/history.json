@@ -229,6 +229,11 @@
       "id": "L08",
       "title": "L08 · 同负载的同步、epoll与io_uring等待路径",
       "document": "dev-log/linux/08-comparison.md"
+    },
+    {
+      "id": "K34",
+      "title": "K34 · 孤儿托管与持续会话中的资源回收",
+      "document": "dev-log/core/34-orphan-reaper.md"
     }
   ]
 }

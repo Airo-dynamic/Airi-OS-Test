@@ -49,6 +49,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_orphans_elf_start[], airi_orphans_elf_end[]; // 持续会话中的孤儿回收与槽复用演示。
 extern const uint8_t airi_shell_elf_start[], airi_shell_elf_end[]; // 真正用户shell，不是内核命令别名。
 extern const uint8_t airi_demo_elf_start[], airi_demo_elf_end[]; // 用户页分配与异步存储贯通演示。
 extern const uint8_t airi_async_elf_start[], airi_async_elf_end[]; // 用户注册、CQ等待与exec资源轮次。
@@ -61,6 +62,7 @@ extern const uint8_t airi_broken_elf_start[], airi_broken_elf_end[]; // 受控�
 struct executable { const char *name; const uint8_t *start, *end; }; // 初始映像目录尚不是通用文件系统。
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
+    {"orphans", airi_orphans_elf_start, airi_orphans_elf_end}, // 不结束根会话也能回收退出的孤儿。
     {"demo", airi_demo_elf_start, airi_demo_elf_end}, // 页、任务和设备完成串联。
     {"hello", airi_hello_elf_start, airi_hello_elf_end}, // 独立C运行库与BSS观察。
     {"processes", airi_process_elf_start, airi_process_elf_end}, // fork/exec/wait实际工作负载。
@@ -317,8 +319,13 @@ static struct user_process *unused(void) { // 准备中的槽不会被发布为R
 }
 static void collect_pending(void) { // 只在新的用户陷入入口调用，不在旧进程退出的C调用中释放其栈。
     for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 回收父进程已取得状态的孩子。
-        if (&processes[i] != current && processes[i].state == USER_REAP_PENDING) // 当前真正运行的内核栈不能在此回收。
+        if (&processes[i] != current && processes[i].state == USER_REAP_PENDING) { // 当前真正运行的内核栈不能在此回收。
+            unsigned pid = processes[i].pid; // cleanup清零控制块前保存诊断身份。
+            bool orphan = processes[i].parent == 0; // 用户wait回收与内核托管回收分开观察。
             cleanup(&processes[i]); // 非活动根和已离开的内核栈可安全解除。
+            if (orphan) // 不把普通父wait冒充自动托管。
+                airi_log("[ORPHAN_REAP] pid=%u released=1", pid); // 只在内存和FD资源实际释放后发布。
+        }
 }
 enum schedule_reason { REASON_TIMER, REASON_YIELD, REASON_WAIT, REASON_EXIT, REASON_IO }; // 原因用于验证真实抢占，不混成主动yield。
 static struct airi_trap_frame *select_user(struct user_process *p) { // 只在完整陷入现场边界切根和TSS。
@@ -377,7 +384,21 @@ static struct airi_trap_frame *exit_current(int code) { // CPU还在当前进程
     p->state = USER_ZOMBIE; // 不再运行，但资源和状态尚存在。
     if (p->pid == root_pid) // 整个会话的结果以最初根用户为准。
         session_result = code; // 孩子退出不改变根结果。
+    for (unsigned i = 0; i < PROCESS_COUNT; ++i) { // 父退出时交接全部直接孩子，不等待整次会话收拢。
+        struct user_process *child = &processes[i]; // 活孩子和未收的僵尸都可能仍引用此父PID。
+        if (child->state == USER_UNUSED || child->parent != p->pid) // 只接管本次退出者真正拥有的孩子。
+            continue; // 不改其他父子关系。
+        child->parent = 0; // PID0表示内核托管者，不是可运行的用户进程。
+        if (child->state == USER_ZOMBIE) // 父已无法取得这份退出状态。
+            child->state = USER_REAP_PENDING; // 下一条安全内核栈回收，不让僵尸永久占槽。
+        airi_log("[ORPHAN_ADOPT] pid=%u former_parent=%u finished=%u", child->pid, p->pid, child->state == USER_REAP_PENDING); // 活孩子仍正常调度或等待。
+    }
     struct user_process *parent = find_pid(p->parent); // 父身份可能已退出或不存在。
+    if (p->pid != root_pid && (!parent || parent->state == USER_ZOMBIE || parent->state == USER_REAP_PENDING)) { // 会话根的统计保留到launch结束；普通孤儿无需用户wait。
+        p->parent = 0; // 不再保留已失效的用户父PID。
+        p->state = USER_REAP_PENDING; // 当前栈仍在使用，只登记延后回收资格。
+        airi_log("[ORPHAN_EXIT] pid=%u code=%d deferred=1", p->pid, code); // 真正释放发生在离开此栈后。
+    }
     if (parent && parent->state == USER_WAITING && (parent->wait_target == -1 || (uint64_t)parent->wait_target == p->pid)) { // 只有真正等待此孩子的父进程可以被唤醒。
         bool copied = !parent->wait_status || copy_user(parent, &code, parent->wait_status, sizeof(code), true); // 通过父进程自己的页表写结果。
         parent->frame->rax = copied ? p->pid : (uint64_t)-14ll; // 返回子PID或明确地址错误。

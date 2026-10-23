@@ -96,3 +96,7 @@ engine.c管理8个owner、32个512字节注册副本、4个全局QUEUED/ACTIVE�
 UART输入只给直接启动的sh根FD0，CLOEXEC确保子程序成功替换后不再抢shell输入。用户read经过完整指针检查和有界内核副本，无数据用已有IO_READ等待；shell解析行、fork孩子、exec目标并wait。demo从用户页经RAM文件和注册副本走到独立块实验区，WRITE、FLUSH、READ分别等CQ，读回一致后再释放注册资源。用户页在退出时统一回收。
 
 [完整shell操作](../dev-log/core/33-shell-pipeline.md)说明具体序列。[知识地图](knowledge-map.md)区分已经实现的机制、待Linux实测的路径和仍缺的能力。当前有用的可观察边界是数值状态、句柄和请求轨迹；ui_backend内部函数指针仍不能当系统调用或网络协议。
+
+## P7 的持续资源回收
+
+K34 起，父退出时将直接孩子交给内核托管（parent=0），不改变孩子的地址空间、FD 与等待现场。已结束孤儿与后来退出的活孤儿都进入REAP_PENDING，由另一条安全内核栈上的collect_pending回收。当前会话根的统计仍保留到launch收尾，尚未提供永久init入口。后续部署扩展与第三方接入边界见[部署路线](deployment-roadmap.md)。

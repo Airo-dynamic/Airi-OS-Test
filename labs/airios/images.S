@@ -61,3 +61,9 @@ airi_shell_elf_end: /* 半开右端。 */
 airi_demo_elf_start: /* 完整ELF起点。 */
 .incbin AIRI_DEMO_ELF /* 当前配置的真实异步用户程序。 */
 airi_demo_elf_end: /* 半开右端。 */
+
+.section .rodata /* 孤儿回收使用真正用户ELF，不在内核中直接执行。 */
+.global airi_orphans_elf_start, airi_orphans_elf_end /* 初始目录只持有完整输入字节。 */
+airi_orphans_elf_start: /* 文件头起点。 */
+.incbin AIRI_ORPHANS_ELF /* 当前配置的独立ELF。 */
+airi_orphans_elf_end: /* 文件半开右端。 */

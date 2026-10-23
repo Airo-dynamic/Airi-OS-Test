@@ -35,3 +35,9 @@ learning_route:
   current_position: day2；只记录自述停留位置，不推定掌握
   goal: 减少开发BOSS/Taishan时接触系统调用与以下机制的摩擦
   graphics: 可暂停独立支线，不作为内核前置
+
+deployment_extension:
+  source: 用户确认的长驻开发板、Server-Lib与Cloudflare扩展方案
+  implementation: 自有内核与TCP/IP，优先x86单核，后续SMP与异步强化
+  tutorial_categories: 核心机制完整带敲；机械集成提供完整源码和复现；第三方与生成代码提供固定来源、配方和校验
+  continuity: 保留旧课程，K34起追加升级检查点，不由Agent运行结果推定读者掌握

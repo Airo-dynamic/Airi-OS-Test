@@ -1,0 +1,28 @@
+checkpoint: K34
+baseline: baseline.yaml
+start: K33 + L08
+current_operation: 同一用户shell中的二十四轮子孙退出、托管与进程槽复用
+already_explained:
+- concept: 退出状态与栈回收分开
+  at: ../../../dev-log/core/22-processes.md#process-state
+  establishes: ZOMBIE保留退出状态，REAP_PENDING在另一条安全栈上回收
+- concept: 启动服务栈与等待
+  at: ../../../dev-log/core/29-wait-queues.md#wait-kernel-continuation
+  establishes: 用户完整frame可暂停，普通启动栈处理等待后再恢复
+- concept: 用户shell启动子程序
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-user-parser
+  establishes: UART输入由用户shell解析，fork/exec/wait后仍回同一shell
+first_use:
+- concept: 父退出时的孤儿托管
+  at: ../../../dev-log/core/34-orphan-reaper.md#orphan-handoff
+  establishes: 内核PID0标记保留活孩子，僵尸转延后回收，不改变祖父的wait权限
+- concept: 用两根管道安排退出先后
+  at: ../../../dev-log/core/34-orphan-reaper.md#orphan-pipes
+  establishes: 根控制放行、孙报告进展，FD引用独立于父生命，重复二十四轮仍在同一会话
+- concept: 交接、退出和释放的实际记录
+  at: ../../../dev-log/core/34-orphan-reaper.md#orphan-observation
+  establishes: 三种日志对应不同完成条件，回收必须在shell命令完成前发生
+not_assumed:
+- 用户态init、Linux完整孤儿接管语义、信号或网络服务已实现
+limits:
+- 会话根仍由launch末尾收拢，非永久调度器；八进程、单线程、静态ELF沿旧范围

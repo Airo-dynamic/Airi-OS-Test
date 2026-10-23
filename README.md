@@ -17,13 +17,13 @@ AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于�
 
 run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run waits/run async/run storage/run recover。输入 run sh 进入用户态 shell，再输入 programs、demo、storage、recover、exit。按 Ctrl-A 后按 X 退出 QEMU。test 运行八组 ASan/UBSan 主机检查、九种带超时启动、三条 UART/PS/2 输入路径、一组真实用户 shell 会话与三次存储/I/O 会话启动（含跨 QEMU 恢复和真实限速）。
 
-主机需要 Python 3.12+、LLVM/LLD、GNU Make、QEMU、xorriso 和 mtools。macOS 可执行 `brew install llvm lld qemu xorriso mtools make`。虚拟机固定为 q35、单 CPU、256 MiB 和 OVMF UEFI，Apple Silicon 使用 TCG。工具选择、外部来源与依赖校验由教程 00–02 展开。
+主机需要 Python 3.12+、LLVM/LLD、GNU Make、QEMU、xorriso 和 mtools。macOS 可执行 `brew install python llvm lld qemu xorriso mtools make`。虚拟机固定为 q35、单 CPU、256 MiB 和 OVMF UEFI，Apple Silicon 使用 TCG。工具选择、外部来源与依赖校验由教程 00–02 展开。 Apple Silicon 上若 `python3 --version` 仍显示系统旧版，可先执行 `export PATH="/opt/homebrew/bin:$PATH"`，再运行上述命令。
 
 ## 两条分支各自推进
 
 | 分支 | 检查点 | 内容与运行条件 |
 | --- | --- | --- |
-| main | 45 个：00–10、K11–K33、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
+| main | 46 个：00–10、K11–K34、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
 | gui | 15 个：G11–G24、G26 | 从 main 的 00 根提交分叉，只增加图形自己的路径；合入任一现有 main 阶段均不覆盖主线文件 |
 
 合入源码与开始运行是两件事。图形代码可以先合入较早的 main 检查点，运行需主线到 K11；G24 的 guest 接入需 K13。G11–G23 先提供宿主观察，G26 提供完整图形检查。默认构建继续选择串口实现，不读取字体，也不链接 Cocoa。
@@ -71,3 +71,5 @@ Linux/GDB 默认只连接个人主机 airi@ssh.airi-dynamic.top。运行证据�
 [架构](docs/architecture.md)解释服务、文本与显示的边界，[系统实践地图](docs/system-practice.md)连接项目场景，[路线](docs/roadmap.md)列出已实现阶段和扩展边界，[知识地图](docs/knowledge-map.md)区分实现、待实测实验与尚未覆盖内容。[AiriBoot](boot/AiriBoot/README.md)是独立的 UEFI 引导子项目。原始代码采用 MIT 许可，外部来源见 [THIRD_PARTY](THIRD_PARTY.md)。
 
 P2 带敲入口：[K14 异常](dev-log/core/14-exceptions.md) → [K15 物理页](dev-log/core/15-physical-pages.md) → [K16 页表与权限](dev-log/core/16-virtual-memory.md) → [K17 内核堆](dev-log/core/17-kernel-heap.md) → [L02 Linux 内存](dev-log/linux/02-memory.md)。`./airios linux-lab --phase p2` 保存本轮实际连接与运行状态，连接失败不记为 Linux 验证成功。
+
+P7 升级入口：[K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)。最终部署目标与自有网络、Server-Lib、Cloudflare 和多核阶段见[部署路线](docs/deployment-roadmap.md)。
