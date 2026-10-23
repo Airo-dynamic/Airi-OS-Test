@@ -73,3 +73,9 @@ airi_orphans_elf_end: /* 文件半开右端。 */
 airi_memory_elf_start: /* 文件首。 */
 .incbin AIRI_MEMORY_ELF /* 本配置的新用户映像。 */
 airi_memory_elf_end: /* 文件右端。 */
+
+.section .rodata /* 常驻init仍由普通用户ELF装载路径启动。 */
+.global airi_init_elf_start, airi_init_elf_end /* 发布文件边界，不在内核直接调用main。 */
+airi_init_elf_start: /* 文件首。 */
+.incbin AIRI_INIT_ELF /* 当前配置的独立静态ELF。 */
+airi_init_elf_end: /* 文件右端。 */

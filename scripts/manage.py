@@ -6,6 +6,7 @@ import sys  # 取得当前解释器路径、入口参数及标准错误流。
 from tools import ROOT, tool, make_command  # 复用路径、工具查找与构建参数，不另建工具选择规则。
 from deps import prepare  # 复用外部依赖下载与校验，统一入口先调用它。
 from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
+from init_test import check_init # 常驻监督与UART重新授权的真实会话。
 from shell_test import check_shell # 真正用户shell与端到端存储演示。
 from storage_test import check_storage_restart # 跨启动恢复与真实QMP节流下的CQ等待。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
@@ -129,6 +130,7 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
         if not args.graphics: # 当前用户shell只独占串口，图形终端尚无用户TTY接入。
             check_shell() # 同一核心构建实际执行用户解析、fork/exec/wait和慢设备I/O。
+            check_init() # 同一监督者重启十二代shell，不结束会话清空资源。
         check_storage_restart('desktop-normal' if args.graphics else 'normal') # 正式日志双启动恢复，另以第三个guest验证慢设备CQ等待。
     else:  # 普通build/run/debug共用指定配置构建路径。
         build(args.profile)  # build/run/debug先构建调用者选择的配置。

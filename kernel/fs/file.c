@@ -250,9 +250,12 @@ bool airi_fd_nonblocking(const struct airi_fd_table *table, unsigned fd) { // �
     return file && (file->flags & AIRI_OPEN_NONBLOCK); // 不支持或无效对象不会被当成非阻塞流。
 }
 
-void airi_fd_attach_input(struct airi_fd_table *table) { // 调用者保证是刚初始化且槽零为空的新表。
+bool airi_fd_attach_input(struct airi_fd_table *table) { // 首次shell与init重启shell都明确要求空FD0。
+    if (table->entries[0].file) // 不覆盖已有引用，否则会泄漏并改变调用者文件。
+        return false; // 完全保持原表。
     table->entries[0] = (struct airi_fd_entry){.file=&terminal_input, .cloexec=true}; // exec子程序不能继承shell独占的UART输入。
     ++terminal_input.references; // fork/close使用已有共享引用协议。
+    return true; // 引用和表项都完成后报告成功。
 }
 bool airi_fd_input(const struct airi_fd_table *table, unsigned fd) { // 只比较内核已验证表项身份。
     return get(table, fd) == &terminal_input; // 不把用户整数当硬件地址。

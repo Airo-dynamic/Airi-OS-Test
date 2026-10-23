@@ -114,3 +114,7 @@ long airi_programs(char *names, size_t capacity) { // 完整目录复制到用�
 long airi_release(void *address, size_t bytes) { // 调用后用户不能继续解引用已归还范围。
     return call3(31, (uintptr_t)address, bytes, 0); // 自有页接口返回0或负错误，不设置POSIX errno。
 }
+
+long airi_sleep(unsigned ticks) { // 当前只有单调PIT计数，等待期间不消耗用户执行时间。
+    return call3(32, ticks, 0, 0); // 0成功或负错误，截止由内核保存。
+}

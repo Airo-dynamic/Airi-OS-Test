@@ -332,3 +332,12 @@ $(OUT)/user/memory.elf: $(USER_COMMON) $(OUT)/user/memory.o labs/airios/program.
 $(OUT)/labs/airios/images.o: $(OUT)/user/memory.elf
 # 文件名作为C字符串宏传入预处理汇编。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MEMORY_ELF='"$(OUT)/user/memory.elf"'
+
+# init与shell拥有各自用户main，监督策略在ring3运行。
+$(OUT)/user/init.elf: $(USER_COMMON) $(OUT)/user/init.o labs/airios/program.ld
+# 仍使用自有入口和整数用户库，尚未引入POSIX运行时。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/init.o -o $@
+# 用户目录包装等本配置init完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/init.elf
+# init文件路径作为明确的预处理宏。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_INIT_ELF='"$(OUT)/user/init.elf"'

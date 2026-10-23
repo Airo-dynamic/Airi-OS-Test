@@ -32,5 +32,5 @@ long airi_fd_ready(const struct airi_fd_table *table, unsigned fd); // 本阶段
 bool airi_fd_nonblocking(const struct airi_fd_table *table, unsigned fd); // 后续等待层据此决定是否可阻塞。
 unsigned airi_files_open_count(void); // 不含固定终端对象，用于会话回收检查。
 bool airi_fd_input(const struct airi_fd_table *table, unsigned fd); // 判断固定终端输入，设备读取在陷入层。
-void airi_fd_attach_input(struct airi_fd_table *table); // 只给全新shell根的空FD0接入CLOEXEC输入。
+bool airi_fd_attach_input(struct airi_fd_table *table); // 仅空FD0可接入CLOEXEC输入；已有表项时不改变引用。
 #endif // 结束保护。

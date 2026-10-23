@@ -239,6 +239,11 @@
       "id": "K35",
       "title": "K35 · 用户页归还、空洞复用与真实解除映射",
       "document": "dev-log/core/35-user-page-release.md"
+    },
+    {
+      "id": "K36",
+      "title": "K36 · 常驻用户init、唯一UART输入与阻塞重启",
+      "document": "dev-log/core/36-init-supervisor.md"
     }
   ]
 }

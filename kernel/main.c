@@ -85,7 +85,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     for (;;) {  // 没有退出条件，内核持续轮询输入。
         int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
         if (!key) {  // 没有新键时不处理命令和重画。
-            airi_arch_relax();  // 提示当前架构正在忙等；这不是睡眠或调度。
+            airi_arch_idle();  // PIT每10ms唤醒后重查UART/键盘，等待期间暂停CPU。
             continue;  // 跳过当前不适用项，继续检查下一项。
         }
         uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。

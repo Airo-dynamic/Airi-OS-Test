@@ -1,0 +1,34 @@
+checkpoint: K36
+baseline: baseline.yaml
+start: K35
+current_operation: 用户init在同一会话内监督十二代UART shell，logout后真阻塞退避再创建新身份
+already_explained:
+- concept: 根会话与临时服务栈返回
+  at: ../../../dev-log/core/29-wait-queues.md#wait-kernel-continuation
+  establishes: session_active与idle分开，长期普通栈处理等待后重新进入完整用户frame
+- concept: 退出与孤儿回收
+  at: ../../../dev-log/core/34-orphan-reaper.md#orphan-handoff
+  establishes: 父退出后内核托管孩子，实际栈离开后回收；不推断为Linux完整init语义
+- concept: FD0与CLOEXEC
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-stdin
+  establishes: shell接入UART，普通子exec关闭输入引用；监控台同步停在launch
+first_use:
+- concept: 用户监督策略与内核服务位置
+  at: ../../../dev-log/core/36-init-supervisor.md#init-roles
+  establishes: init fork/wait、shell命令与启动服务栈各有职责，身份不硬编码PID1
+- concept: 独立UART消费身份
+  at: ../../../dev-log/core/36-init-supervisor.md#init-input
+  establishes: 固定FD引用不自动授予fork孩子读取权，init直接孩子成功exec sh才取得唯一前台资格
+- concept: 保存绝对截止的用户睡眠
+  at: ../../../dev-log/core/36-init-supervisor.md#init-sleep
+  establishes: IO_SLEEP借已有frame等待，不借用户缓冲，到期写0唤醒，不在轮询中延长截止
+- concept: 退出后退避再重建服务
+  at: ../../../dev-log/core/36-init-supervisor.md#init-user-program
+  establishes: fork失败不wait，exec失败退出交父，父实际等待100tick后重试
+- concept: 常驻会话的真实观察
+  at: ../../../dev-log/core/36-init-supervisor.md#init-observe
+  establishes: 十二代不同shell、同一活监督PID、完整hello与logout、宿主终止测试VM而非guest关机
+not_assumed:
+- 通用TTY、POSIX init/subreaper、信号、tickless、真实板功耗或正式自动启动策略
+limits:
+- run init显式启动；launch保留诊断返回位置；固定一个前台shell，原有八进程与单线程范围

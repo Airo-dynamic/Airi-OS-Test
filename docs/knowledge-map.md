@@ -20,3 +20,5 @@
 尚未实现或实测覆盖的部分包括完整TCP/IP、页缓存/回写实现、信号、SMP、抢占内核、FPU/SIMD上下文、futex、多线程内存模型在真实Linux上的观察、IOMMU/通用DMA分配、设备中断完成、完整文件系统和物理掉电持久性。第二架构和开发板仍未选定；现有arch/驱动边界减少耦合，不自动完成移植。ss、vmstat、iostat、perf尚无本轮实际输出，不能因课程提到名称就记为掌握或验证。
 
 [验证记录](verification.md)记录作者实际结果，[系统实践地图](system-practice.md)把每项机制接回BOSS、Taishan与旧网络库的问题。
+
+P7 已亲手实现的新增路径：[K34](../dev-log/core/34-orphan-reaper.md)孤儿托管、[K35](../dev-log/core/35-user-page-release.md)整页归还与空洞复用、[K36](../dev-log/core/36-init-supervisor.md)常驻用户init、单一UART消费身份与阻塞重启。真实板、网络、线程与C++ runtime仍按[部署路线](deployment-roadmap.md)继续，已提供解释不代表读者已掌握。
