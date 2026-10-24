@@ -205,5 +205,12 @@
     "Full POSIX, stdio/malloc, relative lseek, permission modes, signals, pthread and C++ runtime",
     "Linux labs, real board/native network and tunnel",
     "No new GUI regression for user-only optional library; K43 isolated GUI current base already passed"
-  ]
+  ],
+  "release": {
+    "source": "clean temporary clone /tmp/airios-release-author-20261024 at41d2a13",
+    "snapshots": 56,
+    "export": "/private/tmp/airios-k44-final-release-20261024",
+    "exit": 0,
+    "initial_dirty_source_rejected": true
+  }
 }
