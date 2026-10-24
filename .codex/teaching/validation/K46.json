@@ -214,5 +214,11 @@
     "Linux labs remain unverified after actual SSH255 retry",
     "Real board/native network/tunnel",
     "No new GUI presentation changes or rerun; K45 isolated combination passed"
-  ]
+  ],
+  "release": {
+    "source": "clean temporary clone atc57a628",
+    "snapshots": 58,
+    "export": "/private/tmp/airios-k46-release-20261024",
+    "exit": 0
+  }
 }
