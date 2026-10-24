@@ -25,15 +25,20 @@ enum io_operation { IO_NONE, IO_READ, IO_WRITE, IO_READY, IO_ASYNC, IO_SLEEP }; 
 struct user_page { uint64_t address, physical; unsigned flags; }; // fork需要把同一VA映射到另一个物理页。
 #define PAGE_RECORDS (4096u / sizeof(struct user_page)) // 一物理页放170项，余下16字节不用。
 #define RECORD_CHUNKS ((AIRI_USER_PAGES + PAGE_RECORDS - 1) / PAGE_RECORDS) // 1024项最多借七个记录页。
-struct user_process { // 所有权和调度状态由内核持有，用户只能看到PID。
-    bool async_owned; // 本控制块是否持有当前PID的异步owner，局部旧exec副本必须清除此所有权。
-    struct airi_fd_table files; // exec转移表项，fork增加同一打开对象的引用。
-    struct airi_address_space space; // 根和低半区表自有，高半区借用。
+struct user_memory { // 用户地址空间及其页面所有权，不含CPU现场、内核栈、FD或异步owner。
+    struct airi_address_space space; // 自有根和低半区页表，高半区继续借用。
+    uint64_t records[RECORD_CHUNKS]; // 元数据页记录本地址空间拥有的数据页，不映射给用户。
+    unsigned count; // 包括用户代码、动态页、TLS与用户栈，不包括内核陷入栈或FPU页。
+};
+_Static_assert(sizeof(struct user_memory) <= 128, "user memory owner must stay bounded"); // 按值转移只复制小描述，不复制1024页内容。
+struct user_process { // 当前仍是一进程一执行者；本次分出内存所有者，不宣称已共享线程。
+    struct user_memory memory; // 唯一持有本进程当前地址空间的描述。
+    bool async_owned; // 本进程是否拥有当前PID的异步owner，exec只reset轮次而不复制该所有权。
+    struct airi_fd_table files; // exec原地保留表项，fork增加同一打开对象的引用。
     uint64_t fs_base; // 用户FS基址只保存数值，映射由原用户页所有权管理。
     uint64_t fpu_physical; // 独立状态页不塞进exec局部控制块，也不算用户数据页。
     struct airi_kernel_region stack; // 不能在仍使用它的C调用中释放。
-    uint64_t records[RECORD_CHUNKS]; // 元数据页的物理地址；各页经HHDM访问，不映射给用户。
-    unsigned count, pid, parent, user_ticks; // 资源数量、身份、父PID和本进程实际IRQ数。
+    unsigned pid, parent, user_ticks; // 身份、父PID和本进程实际IRQ数与页数量分开。
     uint64_t fault_error; // 用户故障证据；动态页位置由现有映射寻找，不再使用单向游标。
     int exit_code; // 自有wait接口返回普通退出码或负故障编码。
     enum user_state state; // 只有RUNNABLE可被调度器选中。
@@ -45,7 +50,7 @@ struct user_process { // 所有权和调度状态由内核持有，用户只能�
     struct airi_trap_frame initial; // 尚未运行时的寄存器值，不依赖临时C对象。
     struct airi_trap_frame *frame; // 运行后指向本进程内核栈的实际现场。
 };
-_Static_assert(sizeof(struct user_process) <= 1024, "exec control block must stay small"); // exec的新旧局部副本不能随用户容量膨胀。
+_Static_assert(sizeof(struct user_process) <= 1024, "exec control block must stay small"); // exec候选仍在内核栈上，大小不能随用户容量膨胀。
 static struct user_process processes[PROCESS_COUNT]; // 槽可以复用，PID单调增长，不等于槽下标。
 static struct user_process *current; // 只在完整陷入边界改变当前身份。
 static unsigned next_pid = 1, root_pid, timer_switches, wait_blocks; // 每次运行会话的根身份和实际行为计数。
@@ -133,21 +138,21 @@ static bool create_stack(struct user_process *p) { // 每槽前面留一页保�
     uint64_t address = STACK_BASE + slot(p) * 5 * 4096ull + 4096; // 四页数据与一页保护，PID增长不扩散地址。
     return airi_memory_region_create(&p->stack, address, 4); // 完整成功后才借给用户根。
 }
-static struct user_page *owned_at(const struct user_process *p, unsigned index) { // 下标可等于count供新增项写入，但必须已有记录页。
+static struct user_page *owned_at(const struct user_memory *memory, unsigned index) { // 下标可等于count供新增项写入，但必须已有记录页。
     unsigned chunk = index / PAGE_RECORDS; // 整数除法选出记录页，不要求各物理页连续。
-    if (index >= AIRI_USER_PAGES || !p->records[chunk]) // 所有调用均来自内核已经验证的有效项。
+    if (index >= AIRI_USER_PAGES || !memory->records[chunk]) // 所有调用均来自内核已经验证的有效项。
         airi_panic("user page record is missing"); // 内部越界不能返回任意HHDM指针。
-    struct user_page *entries = airi_memory_direct(p->records[chunk]); // 别名只借用，物理所有权仍在records中。
+    struct user_page *entries = airi_memory_direct(memory->records[chunk]); // 别名只借用，物理所有权仍在records中。
     return &entries[index % PAGE_RECORDS]; // 余数选页内项；单项不会跨物理页。
 }
-static void trim_records(struct user_process *p) { // count已缩小，释放不再容纳任何活记录的尾部元数据页。
-    unsigned needed = (p->count + PAGE_RECORDS - 1) / PAGE_RECORDS; // 零项需要零页，其余向上取整。
+static void trim_records(struct user_memory *memory) { // count已缩小，释放不再容纳任何活记录的尾部元数据页。
+    unsigned needed = (memory->count + PAGE_RECORDS - 1) / PAGE_RECORDS; // 零项需要零页，其余向上取整。
     for (unsigned i = needed; i < RECORD_CHUNKS; ++i) { // 固定七槽，只检查完全位于有效项之外的页。
-        if (!p->records[i]) // 尚未分配的槽没有物理所有权。
+        if (!memory->records[i]) // 尚未分配的槽没有物理所有权。
             continue; // 不把0哨兵交给页池。
-        if (!airi_memory_return_page(p->records[i])) // 没有独立VA映射，HHDM随内核始终存在。
+        if (!airi_memory_return_page(memory->records[i])) // 没有独立VA映射，HHDM随内核始终存在。
             airi_panic("cannot reclaim user page records"); // 归属错误不能静默复用页面。
-        p->records[i] = 0; // 归还后立即撤掉唯一所有权记录。
+        memory->records[i] = 0; // 归还后立即撤掉唯一所有权记录。
     }
 }
 static bool create_fpu(struct user_process *p) { // 构造器只给空控制块建立独立页所有权。
@@ -164,7 +169,7 @@ static bool user_access(const struct user_process *p, uint64_t address, size_t b
         return false; // 零长度也保留本项目地址策略。
     for (size_t done = 0; done < bytes;) { // 跨越的每一页都必须满足权限。
         unsigned flags; // 当前叶子权限。
-        if (!airi_vm_lookup(&p->space, address + done, NULL, &flags) || !(flags & AIRI_VM_USER) || (write && !(flags & AIRI_VM_WRITE))) // 输出指针还要求用户可写。
+        if (!airi_vm_lookup(&p->memory.space, address + done, NULL, &flags) || !(flags & AIRI_VM_USER) || (write && !(flags & AIRI_VM_WRITE))) // 输出指针还要求用户可写。
             return false; // 不先复制有效前缀。
         size_t part = 4096 - ((address + done) & 4095); // 当前页内剩余跨度。
         if (part > bytes - done) // 最后一段只到请求右端。
@@ -178,7 +183,7 @@ static bool copy_user(struct user_process *p, void *buffer, uint64_t address, si
         return false; // 任何页失败都不复制。
     for (size_t done = 0; done < bytes;) { // 每次用HHDM别名处理一页中的有效段。
         uint64_t physical; // 翻译保留页内偏移。
-        airi_vm_lookup(&p->space, address + done, &physical, NULL); // 完整检查后页表在本次内核操作中保持不变。
+        airi_vm_lookup(&p->memory.space, address + done, &physical, NULL); // 完整检查后页表在本次内核操作中保持不变。
         size_t part = 4096 - ((address + done) & 4095); // 当前页边界。
         if (part > bytes - done) // 不超出剩余内容。
             part = bytes - done; // 缩到最后一段。
@@ -310,23 +315,32 @@ static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身�
         airi_log("[WAIT_WAKE] pid=%u result=%ld", p->pid, result); // 普通内核服务栈输出，不在IRQ里打印。
     }
 }
+static void destroy_memory(struct user_memory *memory) { // 目标根必须不活动，调用者已保存完需要的用户数值。
+    if (memory->space.root && !airi_vm_destroy(&memory->space)) // 先去掉自有页表对数据页的映射，借用高半区不归还。
+        airi_panic("cannot destroy inactive user tables"); // 不能继续释放仍被活动根引用的数据页。
+    while (memory->count) // 页表已不再引用这些自有数据页。
+        if (!airi_memory_return_page(owned_at(memory, --memory->count)->physical)) // 先退到最后一个真实有效项。
+            airi_panic("cannot return owned user page"); // 内部归属错误不能静默复用。
+    trim_records(memory); // 最后一个数据项归还后，元数据页不再有消费者。
+    airi_memset(memory, 0, sizeof(*memory)); // 销毁结束不留下可重复归还的根或记录页句柄。
+}
+static struct user_memory take_memory(struct user_memory *source) { // 按值转移所有权，不复制用户页面也不改变CR3。
+    struct user_memory value = *source; // 临时描述保存同一组根和记录页句柄。
+    airi_memset(source, 0, sizeof(*source)); // 返回前撤销来源的归还资格，调用者必须接住返回值。
+    return value; // 只有接收者继续拥有这些资源；转移本身不分配或失败。
+}
 static void cleanup(struct user_process *p) { // 目标根必须不活动，而且当前不能使用目标内核栈。
-    if (p->async_owned) { // 失败构造或最终收拢都只关闭真正拥有的owner。
+    if (p->async_owned) { // 失败构造或最终收拢只关闭真正拥有的owner。
         airi_async_close(p->pid); // ACTIVE副本归内核，取消不释放其后端目标。
-        p->async_owned = false; // 局部副本与重复清理不能再关同一轮次。
+        p->async_owned = false; // 重复清理不能再关同一轮次。
     }
-    airi_fd_close_all(&p->files, false); // 回滚或已退出空表均安全，不能遗留全局引用。
-    if (p->space.root && !airi_vm_destroy(&p->space)) // 先解除并归还自有页表，不动借用的内核表。
-        airi_panic("cannot destroy inactive user tables"); // 不能归还仍被活动根引用的数据页。
-    while (p->count) // 用户代码与用户栈数据页分别归还。
-        if (!airi_memory_return_page(owned_at(p, --p->count)->physical)) // 先退到最后一个真正拥有的页。
-            airi_panic("cannot return owned user page"); // 归属错误不继续复用内存。
-    trim_records(p); // 所有数据页已归还，最后释放保存其VA/PA的记录页。
+    airi_fd_close_all(&p->files, false); // 整进程清理才关闭全部表项，exec不调用此路径清旧内存。
+    destroy_memory(&p->memory); // 只销毁用户映射和数据，不能触及本进程的执行栈。
     if (p->fpu_physical && !airi_memory_return_page(p->fpu_physical)) // CPU寄存器不保留状态页指针，切离后可归还。
-        airi_panic("cannot reclaim user FPU state"); // 不能漏掉独立于用户数据的内核页面。
+        airi_panic("cannot reclaim user FPU state"); // FPU页独立于用户页所有权。
     if (p->stack.count && !airi_memory_region_free(&p->stack)) // 调用者已经离开目标内核栈，才可销毁它。
         airi_panic("cannot reclaim user kernel stack"); // 不能在finish中提前做这一步。
-    airi_memset(p, 0, sizeof(*p)); // 不留下可重复释放的根或句柄。
+    airi_memset(p, 0, sizeof(*p)); // 不留下可重复释放的身份或其他句柄。
 }
 static void initial_frame(struct user_process *p, uint64_t entry, const char *name) { // 输入页已完整映射并清零，最后才发布首次返回现场。
     uint64_t stack_pointer = USER_STACK + 4096 - 16; // 旧受控汇编映像不读取argc，保持原布局。
@@ -335,7 +349,7 @@ static void initial_frame(struct user_process *p, uint64_t entry, const char *na
         if (bytes > 64) // 当前程序名是固定短字面量，不支持无界参数。
             airi_panic("initial program name exceeds stack budget"); // 不覆盖用户启动布局。
         uint64_t physical; // 当前根未激活，通过软件翻译找到用户栈数据页。
-        if (!airi_vm_lookup(&p->space, USER_STACK, &physical, NULL)) // 栈必须已建立。
+        if (!airi_vm_lookup(&p->memory.space, USER_STACK, &physical, NULL)) // 栈必须已建立。
             airi_panic("initial user stack mapping is missing"); // 不猜测owned数组中的位置。
         uint8_t *alias = airi_memory_direct(physical); // 通过内核HHDM填写尚未运行的用户栈。
         size_t name_offset = 4096 - bytes; // 字符串放在栈页高端。
@@ -356,29 +370,29 @@ static void initial_frame(struct user_process *p, uint64_t entry, const char *na
     p->frame->rsp = stack_pointer; // 使用刚准备的用户布局。
     p->frame->rflags = 0x202; // 用户IF开启，IOPL为零。
 }
-static bool owned_page(struct user_process *p, uint64_t address, unsigned flags) { // 一次只建立一页，失败页面仍可由统一cleanup找到。
-    if (p->count == AIRI_USER_PAGES) // 包括ELF、动态页和用户栈，不包括记录页。
+static bool owned_page(struct user_memory *memory, uint64_t address, unsigned flags) { // 一次只建立一页，失败页面仍可由统一cleanup找到。
+    if (memory->count == AIRI_USER_PAGES) // 包括ELF、动态页和用户栈，不包括记录页。
         return false; // 不越过固定记录容量。
-    unsigned chunk = p->count / PAGE_RECORDS; // 下一项应写入哪一页元数据。
-    if (!p->records[chunk]) { // 仅跨过170项边界时才增加一个记录页。
-        p->records[chunk] = airi_memory_take_page(); // 记录页与用户数据页分别拥有、分别归还。
-        if (!p->records[chunk]) // 元数据耗尽不能继续分配没有记录位置的数据页。
+    unsigned chunk = memory->count / PAGE_RECORDS; // 下一项应写入哪一页元数据。
+    if (!memory->records[chunk]) { // 仅跨过170项边界时才增加一个记录页。
+        memory->records[chunk] = airi_memory_take_page(); // 记录页与用户数据页分别拥有、分别归还。
+        if (!memory->records[chunk]) // 元数据耗尽不能继续分配没有记录位置的数据页。
             return false; // 旧有效项和旧映射完全保持。
-        airi_memset(airi_memory_direct(p->records[chunk]), 0, 4096); // 清除前一个所有者的地址记录。
+        airi_memset(airi_memory_direct(memory->records[chunk]), 0, 4096); // 清除前一个所有者的地址记录。
     }
     uint64_t physical = airi_memory_take_page(); // 取得真正归本上下文持有的物理页。
     if (!physical) { // 可能刚借出记录页，却还未增加有效数据项。
-        trim_records(p); // 收回本次没有承载活项的新记录页。
+        trim_records(memory); // 收回本次没有承载活项的新记录页。
         return false; // 调用方再回滚本批此前成功的数据页。
     }
     airi_memset(airi_memory_direct(physical), 0, 4096); // 文件尾部与BSS默认都从零开始。
-    if (!airi_vm_map(&p->space, address, physical, flags | AIRI_VM_USER)) { // 单页映射失败还没有发布到所有权数组。
+    if (!airi_vm_map(&memory->space, address, physical, flags | AIRI_VM_USER)) { // 单页映射失败还没有发布到所有权数组。
         airi_memory_return_page(physical); // 明确归还本次未接入数据页。
-        trim_records(p); // 映射失败也不能遗留空元数据页。
+        trim_records(memory); // 映射失败也不能遗留空元数据页。
         return false; // 调用者回滚此前成功的部分。
     }
-    *owned_at(p, p->count) = (struct user_page){address, physical, flags | AIRI_VM_USER}; // 保存VA/PA/权限供fork复制与精确回收。
-    ++p->count; // 记录完整后才发布有效项；指针不跨记录页释放保留。
+    *owned_at(memory, memory->count) = (struct user_page){address, physical, flags | AIRI_VM_USER}; // 保存VA/PA/权限供fork复制与精确回收。
+    ++memory->count; // 记录完整后才发布有效项；指针不跨记录页释放保留。
     return true; // 每个已登记数据页都有对应映射。
 }
 static int prepare_elf(struct user_process *p, const uint8_t *image, size_t bytes, const char *name, bool make_stack) { // 空目标只拥有新用户资源；exec不另建正在使用的内核栈。
@@ -390,7 +404,7 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
     }
     if (make_stack && !create_stack(p)) // 内核陷入栈先完成，再借高半区。
         return -12; // -ENOMEM，区域接口已回滚失败。
-    if (!create_fpu(p) || !airi_memory_user_space(&p->space)) // 浮点页与独立低半区都必须完整建立。
+    if (!create_fpu(p) || !airi_memory_user_space(&p->memory.space)) // 浮点页与独立低半区都必须完整建立。
         goto failed; // 后续失败均收回所有已持有资源。
     for (unsigned i = 0; i < view.count; ++i) { // 每段独立赋予对应权限。
         const struct airi_elf_segment *segment = &view.segments[i]; // 元数据已经过统一校验。
@@ -398,11 +412,11 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
         uint64_t first = segment->address & ~4095ull; // 覆盖段首所在页。
         uint64_t end = (segment->address + segment->memory_bytes + 4095) & ~4095ull; // 包含完整BSS跨度。
         for (uint64_t address = first; address < end; address += 4096) // 所有页面先清零再接入。
-            if (!owned_page(p, address, flags)) // 物理耗尽或映射失败都终止本次装载。
+            if (!owned_page(&p->memory, address, flags)) // 物理耗尽或映射失败都终止本次装载。
                 goto failed; // 清理根/表后再归还数据页。
         for (uint64_t done = 0; done < segment->file_bytes;) { // 只复制filesz字节，memsz剩余继续保持零。
             uint64_t physical; // lookup结果包含当前页内偏移。
-            if (!airi_vm_lookup(&p->space, segment->address + done, &physical, NULL)) // 已映射跨度必须可查询。
+            if (!airi_vm_lookup(&p->memory.space, segment->address + done, &physical, NULL)) // 已映射跨度必须可查询。
                 goto failed; // 内部装载状态不一致也不运行。
             uint64_t part = 4096 - ((segment->address + done) & 4095); // 当前页内可复制长度。
             if (part > segment->file_bytes - done) // 不从文件右端外复制字节。
@@ -412,11 +426,11 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
         }
     }
     for (unsigned i = 0; i < AIRI_USER_STACK_PAGES; ++i) // 最高页地址不变，向低地址增加十五页。
-        if (!owned_page(p, USER_STACK - i * 4096ull, AIRI_VM_WRITE)) // 栈RW/NX，最低页之下仍无映射。
+        if (!owned_page(&p->memory, USER_STACK - i * 4096ull, AIRI_VM_WRITE)) // 栈RW/NX，最低页之下仍无映射。
             goto failed; // 任意一页失败均回收整份新映像。
     if (view.tls.memory_bytes) { // 无TLS程序继续FS=0，有模板才建立独立运行副本。
         for (unsigned i = 0; i < view.tls.pages; ++i) // 当前最多两页，含TP后的16字节TCB。
-            if (!owned_page(p, USER_TLS + i * 4096ull, AIRI_VM_WRITE)) // 仍由用户页记录持有，RW/NX且fork逐页复制。
+            if (!owned_page(&p->memory, USER_TLS + i * 4096ull, AIRI_VM_WRITE)) // 仍由用户页记录持有，RW/NX且fork逐页复制。
                 goto failed; // 任何分配失败回滚整个新映像。
         uint64_t data = USER_TLS + view.tls.data_offset; // 小对齐模板可能在块首留下padding，保证负偏移相对TP正确。
         if (view.tls.file_bytes && !copy_user(p, (void *)(view.image + view.tls.offset), data, (size_t)view.tls.file_bytes, true)) // 按目标页查物理别名，初值可能跨页。
@@ -428,7 +442,7 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
         airi_log("[ELF_TLS] bytes=%llu initialized=%llu alignment=%llu pages=%u data=0x%llx tp=0x%llx", (unsigned long long)view.tls.memory_bytes, (unsigned long long)view.tls.file_bytes, (unsigned long long)view.tls.alignment, view.tls.pages, (unsigned long long)data, (unsigned long long)p->fs_base); // 模板与运行位置分别可观察。
     }
     initial_frame(p, view.entry, name); // 用户_start接收最小argc/argv协议。
-    airi_log("[ELF_LOAD] entry=0x%llx segments=%u data_pages=%u argc=1", (unsigned long long)view.entry, view.count, p->count); // 不含页表与内核栈的用户数据页数量。
+    airi_log("[ELF_LOAD] entry=0x%llx segments=%u data_pages=%u argc=1", (unsigned long long)view.entry, view.count, p->memory.count); // 不含页表与内核栈的用户数据页数量。
     return 0; // 只准备新空间，尚未切CR3或覆盖旧现场。
 failed: // 长期根仍活动，用户空间从未开始执行。
     cleanup(p); // 页表、用户数据和内核栈全部回收。
@@ -442,9 +456,9 @@ static void place_frame(struct user_process *p) { // 初始寄存器值完成后
 static bool prepare_flat(struct user_process *p, const uint8_t *image, size_t bytes) { // 保留受控指令故障回归，不作为ELF加载接口。
     if (!bytes || bytes > 4096 || !create_stack(p)) // 本节旧映像最多一页。
         return false; // 栈创建失败已回滚。
-    if (!create_fpu(p) || !airi_memory_user_space(&p->space) || !owned_page(p, USER_CODE, AIRI_VM_EXEC) || !owned_page(p, USER_STACK, AIRI_VM_WRITE)) // 分别拥有根、代码和栈。
+    if (!create_fpu(p) || !airi_memory_user_space(&p->memory.space) || !owned_page(&p->memory, USER_CODE, AIRI_VM_EXEC) || !owned_page(&p->memory, USER_STACK, AIRI_VM_WRITE)) // 分别拥有根、代码和栈。
         goto failed; // 所有权列表可清理全部已成功部分。
-    airi_memcpy(airi_memory_direct(owned_at(p, 0)->physical), image, bytes); // 映像内引用保持旧固定布局。
+    airi_memcpy(airi_memory_direct(owned_at(&p->memory, 0)->physical), image, bytes); // 映像内引用保持旧固定布局。
     initial_frame(p, USER_CODE, NULL); // 受控汇编不读取argc/argv。
     return true; // 尚未设置可运行状态。
 failed: // 目标从未被调度，当前根和栈均不属于它。
@@ -478,7 +492,7 @@ static struct airi_trap_frame *select_user(struct user_process *p) { // 只在�
     current = p; // 之后的IRQ和系统调用归属这个身份。
     p->state = USER_RUNNING; // 新用户即将获得CPU。
     airi_trap_set_stack(p->stack.virtual_address + p->stack.count * 4096ull); // 陷入时使用目标自己的内核栈。
-    if (!airi_vm_activate(&p->space)) // 所有高半区内核映射在准备时已存在。
+    if (!airi_vm_activate(&p->memory.space)) // 所有高半区内核映射在准备时已存在。
         airi_panic("cannot activate selected user root"); // 不返回到缺映射的调用链。
     return airi_user_resume(p->frame); // 用户返回地址与标志必须仍符合边界。
 }
@@ -566,13 +580,13 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
     struct user_process *child = unused(); // 未发布的新槽。
     if (!child) // 表满没有可分配身份。
         return -11; // -EAGAIN。
-    if (!create_stack(child) || !create_fpu(child) || !airi_memory_user_space(&child->space)) // 先创建独立内核栈和空低半区。
+    if (!create_stack(child) || !create_fpu(child) || !airi_memory_user_space(&child->memory.space)) // 先创建独立内核栈和空低半区。
         goto failed; // 父状态从未改变。
-    for (unsigned i = 0; i < parent->count; ++i) { // 包括用户栈和此前申请的堆页。
-        const struct user_page *page = owned_at(parent, i); // 每页原VA、权限和物理地址。
-        if (!owned_page(child, page->address, page->flags)) // 子页在相同VA，但物理所有权独立。
+    for (unsigned i = 0; i < parent->memory.count; ++i) { // 包括用户栈和此前申请的堆页。
+        const struct user_page *page = owned_at(&parent->memory, i); // 每页原VA、权限和物理地址。
+        if (!owned_page(&child->memory, page->address, page->flags)) // 子页在相同VA，但物理所有权独立。
             goto failed; // 回滚全部子资源，不改变父页面。
-        airi_memcpy(airi_memory_direct(owned_at(child, child->count - 1)->physical), airi_memory_direct(page->physical), 4096); // 复制完整页内容，父子以后写入互不影响。
+        airi_memcpy(airi_memory_direct(owned_at(&child->memory, child->memory.count - 1)->physical), airi_memory_direct(page->physical), 4096); // 复制完整页内容，父子以后写入互不影响。
     }
     child->fs_base = parent->fs_base; // fork继承同一用户VA，指向复制后的子页面，不共享物理内容。
     airi_memcpy(airi_memory_direct(child->fpu_physical), airi_memory_direct(parent->fpu_physical), AIRI_FPU_BYTES); // 父陷入时已保存，子复制真实状态而非共享状态页。
@@ -586,7 +600,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
     child->async_owned = true; // 成功后才记资源所有权。
     place_frame(child); // 只把用户返回现场放入子内核栈，不复制父的内核C调用链。
     child->state = USER_RUNNABLE; // 准备完成后才让IRQ调度器看见它。
-    airi_log("[FORK] parent=%u child=%u copied_pages=%u", parent->pid, child->pid, child->count); // 实际复制数量含用户栈与堆。
+    airi_log("[FORK] parent=%u child=%u copied_pages=%u", parent->pid, child->pid, child->memory.count); // 实际复制数量含用户栈与堆。
     return child->pid; // 父分支得到正子PID。
 failed: // 还没有向调度器发布孩子，当前仍在父根和父内核栈上。
     cleanup(child); // 删除不活动子根和其独立栈，父继续原系统调用。
@@ -629,13 +643,13 @@ static long allocate_user(size_t bytes) { // 按页提供有界用户内存，�
     if (!bytes || bytes > AIRI_USER_REQUEST_PAGES * 4096ull) // 一次最多六十四页，取整加法保持有界。
         return -22; // -EINVAL。
     unsigned count = (unsigned)((bytes + 4095) / 4096); // 请求向上取整为完整页。
-    if (count > AIRI_USER_PAGES - current->count) // 先检查整批有效项容量。
+    if (count > AIRI_USER_PAGES - current->memory.count) // 先检查整批有效项容量。
         return -12; // -ENOMEM。
     uint64_t address = USER_HEAP; // 从低端找能容纳本次整段的空洞，不依赖旧分配顺序。
     for (;;) { // 每次冲突越过至少一个已拥有页，搜索被1024项预算限制。
         bool conflict = false; // 本候选范围是否撞上现有用户数据页。
-        for (unsigned i = 0; i < current->count; ++i) { // owned可能因释放而换序，不要求按VA排序。
-            uint64_t used = owned_at(current, i)->address; // 当前页仍由此进程拥有。
+        for (unsigned i = 0; i < current->memory.count; ++i) { // owned可能因释放而换序，不要求按VA排序。
+            uint64_t used = owned_at(&current->memory, i)->address; // 当前页仍由此进程拥有。
             if (used >= address && used < address + count * 4096ull) { // 页对齐后，页起点落入候选即发生重叠。
                 address = used + 4096; // 此页之前的起点都不能容纳本次整段，跳到该页右端。
                 conflict = true; // 新候选须重新从整个owned数组检查。
@@ -647,26 +661,26 @@ static long allocate_user(size_t bytes) { // 按页提供有界用户内存，�
         if (!conflict) // 所有现有页都不与此候选相交。
             break; // 后续只为这段空洞创建映射。
     }
-    unsigned before = current->count; // 失败只回滚本次新增映射。
+    unsigned before = current->memory.count; // 失败只回滚本次新增映射。
     for (unsigned i = 0; i < count; ++i) // 页物理可以不连续，用户VA连续。
-        if (!owned_page(current, address + i * 4096ull, AIRI_VM_WRITE)) // 成功页面已在owned中登记。
+        if (!owned_page(&current->memory, address + i * 4096ull, AIRI_VM_WRITE)) // 成功页面已在owned中登记。
             goto rollback; // 游标尚未前移。
     airi_log("[USER_ALLOC] pid=%u address=0x%llx pages=%u zeroed=1", current->pid, (unsigned long long)address, count); // 只记录已完整提交的用户映射。
     return (long)address; // 用户可显式归还完整页，未归还页仍在exit统一清理。
 rollback: // 已有用户页面不受本次耗尽影响。
-    while (current->count > before) { // 只处理新增的成功项。
-        const struct user_page *page = owned_at(current, --current->count); // 先退到最后一项。
-        if (!airi_vm_unmap(&current->space, page->address) || !airi_memory_return_page(page->physical)) // 活动根必须先断映射并失效，再归还。
+    while (current->memory.count > before) { // 只处理新增的成功项。
+        const struct user_page *page = owned_at(&current->memory, --current->memory.count); // 先退到最后一项。
+        if (!airi_vm_unmap(&current->memory.space, page->address) || !airi_memory_return_page(page->physical)) // 活动根必须先断映射并失效，再归还。
             airi_panic("cannot roll back user page allocation"); // 内部所有权错误不能被吞掉。
     }
-    trim_records(current); // 本批回滚后，尾部没有活项的记录页也一起归还。
+    trim_records(&current->memory); // 本批回滚后，尾部没有活项的记录页也一起归还。
     return -12; // 不返回半段用户范围。
 }
 static unsigned owned_index(uint64_t address) { // 只在当前单线程进程的不可抢占系统调用中查询。
-    for (unsigned i = 0; i < current->count; ++i) // 有效项之外可能有旧字节，不参与查找。
-        if (owned_at(current, i)->address == address) // 精确页起点，不接受页内指针。
+    for (unsigned i = 0; i < current->memory.count; ++i) // 有效项之外可能有旧字节，不参与查找。
+        if (owned_at(&current->memory, i)->address == address) // 精确页起点，不接受页内指针。
             return i; // 下标只借给本次操作，不跨状态修改保存。
-    return current->count; // count本身是未找到哨兵，不能作为数组下标解引用。
+    return current->memory.count; // count本身是未找到哨兵，不能作为数组下标解引用。
 }
 static long release_user(uint64_t address, uint64_t bytes) { // 按页解除动态用户映射，不是C malloc对象free。
     if (!bytes || bytes > AIRI_USER_REQUEST_PAGES * 4096ull || (bytes & 4095) || (address & 4095) || address < USER_HEAP || address >= USER_HEAP_END || bytes > USER_HEAP_END - address) // 短路先限地址再做右端减法。
@@ -674,17 +688,17 @@ static long release_user(uint64_t address, uint64_t bytes) { // 按页解除动�
     unsigned count = (unsigned)(bytes / 4096); // 参数已限制为一到六十四个完整页。
     for (unsigned i = 0; i < count; ++i) { // 第一遍先验证整段，避免中途坏页留下部分解除。
         unsigned index = owned_index(address + i * 4096ull); // 当前目标VA属于动态页范围。
-        if (index == current->count || owned_at(current, index)->flags != (AIRI_VM_USER | AIRI_VM_WRITE)) // 既需真实所有权，也只接受RW/NX用户动态页。
+        if (index == current->memory.count || owned_at(&current->memory, index)->flags != (AIRI_VM_USER | AIRI_VM_WRITE)) // 既需真实所有权，也只接受RW/NX用户动态页。
             return -22; // 任何一页不存在，整段保持原样。
     }
     for (unsigned i = 0; i < count; ++i) { // 第二遍提交，当前没有其他线程改变本地址空间。
         unsigned index = owned_index(address + i * 4096ull); // 每次重新查，上一轮可能移动了owned末项。
-        struct user_page page = *owned_at(current, index); // 在压缩数组前保留当前VA与PA数值。
-        if (!airi_vm_unmap(&current->space, page.address) || !airi_memory_return_page(page.physical)) // 先断开活动根映射并invlpg，才归还物理页。
+        struct user_page page = *owned_at(&current->memory, index); // 在压缩数组前保留当前VA与PA数值。
+        if (!airi_vm_unmap(&current->memory.space, page.address) || !airi_memory_return_page(page.physical)) // 先断开活动根映射并invlpg，才归还物理页。
             airi_panic("cannot release owned dynamic user page"); // 内部不变量失败不能返回假成功。
-        *owned_at(current, index) = *owned_at(current, --current->count); // 末项可位于另一记录页，复制后才允许回收尾页。
+        *owned_at(&current->memory, index) = *owned_at(&current->memory, --current->memory.count); // 末项可位于另一记录页，复制后才允许回收尾页。
     }
-    trim_records(current); // 全段压缩结束，任何有效项都不再借用空尾页。
+    trim_records(&current->memory); // 全段压缩结束，任何有效项都不再借用空尾页。
     airi_log("[USER_RELEASE] pid=%u address=0x%llx pages=%u", current->pid, (unsigned long long)address, count); // 只记录整段真正归还后的结果。
     return 0; // 后续分配可复用空洞，新物理页按原owned_page逻辑清零。
 }
@@ -716,34 +730,39 @@ static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用�
         cleanup(&next); // next尚未拥有当前PID的owner。
         return async_error; // 原用户调用可继续处理失败。
     }
-    struct user_process old = *current; // 暂存旧用户资源，切离旧根之后归还。
-    old.async_owned = false; // reset已撤销旧轮次，cleanup旧映像不能关闭新的owner。
-    next.async_owned = true; // 同一PID的新epoch由提交后的控制块拥有。
-    unsigned old_pages = old.count; // 归还前保留实际替换规模用于记录。
-    next.pid = old.pid; // exec保持进程身份。
-    next.parent = old.parent; // 父仍等待同一个孩子。
-    next.user_ticks = old.user_ticks; // 同一身份的已运行计数不丢失。
-    next.stack = old.stack; // 明确转移正在使用的内核栈所有权，VA和物理内容都不变。
-    airi_memset(&old.stack, 0, sizeof(old.stack)); // old清理者不再拥有这组栈，不能重复释放。
-    next.frame = f; // 真实返回现场仍在同一内核栈上，不能留下指向next.initial局部对象的指针。
-    *f = next.initial; // 事务提交时才覆盖旧用户RIP/RSP和寄存器。
-    next.files = old.files; // 文件表所有权从旧映像转到新映像，偏移和普通FD继续存在。
-    airi_memset(&old.files, 0, sizeof(old.files)); // cleanup旧映像不能重复关闭已转移引用。
-    airi_fd_close_all(&next.files, true); // 只有成功提交才关闭CLOEXEC，失败exec不影响原表。
-    if (input_pid == next.pid) // 若前台进程自行exec，旧输入权限不能漏到其他映像。
+    unsigned old_pages = current->memory.count; // 清理前保留替换规模，不复制整进程控制块。
+    struct user_memory old_memory = take_memory(&current->memory); // 旧根此刻仍活动，其所有权暂由局部描述接住。
+    current->memory = take_memory(&next.memory); // 新根所有权进入原进程槽，候选来源立即为空。
+    uint64_t old_fpu = current->fpu_physical; // 旧用户CPU状态页不属于用户地址空间。
+    current->fpu_physical = next.fpu_physical; // 替换为准备好的默认x87/SSE状态。
+    next.fpu_physical = 0; // 候选从此不能再归还这页。
+    current->fs_base = next.fs_base; // 新映像的静态TLS指针，或无TLS时的0。
+    current->initial = next.initial; // 保存新入口数值，不保存指向候选栈局部对象的指针。
+    current->frame = f; // 原内核陷入栈及TSS继续属于同一执行者。
+    *f = current->initial; // 全部可失败准备完成之后才覆盖旧RIP/RSP和寄存器。
+    current->fault_error = 0; // 新映像没有旧用户故障报告。
+    current->exit_code = 0; // 运行中的新映像还没有退出结果。
+    current->wait_target = 0; // 原先完成的wait条件不能成为新映像状态。
+    current->wait_status = 0; // 撤销旧用户输出地址的数值借用。
+    current->io = IO_NONE; // exec发生在运行系统调用中，没有需要继续的旧阻塞操作。
+    current->io_fd = current->io_events = 0; // FD表原地保留，但旧等待条件清零。
+    current->io_address = current->io_bytes = current->io_deadline = 0; // 不把旧空间中的请求指针带到新映像。
+    airi_fd_close_all(&current->files, true); // 进程FD表原地保留，成功提交才关闭CLOEXEC。
+    if (input_pid == current->pid) // 若前台进程自行exec，旧输入权限不能漏到其他映像。
         input_pid = 0; // 成功提交时才撤销，失败exec仍保留旧权限。
     if (acquire_input) { // 本次新映像确实是init管理的shell。
-        airi_fd_close(&next.files, 0); // 无表项时-9可忽略；已有普通FD0也按此启动策略关闭。
-        if (!airi_fd_attach_input(&next.files)) // 新FD0必须为空且输入引用成功接入。
+        airi_fd_close(&current->files, 0); // 无表项时-9可忽略；已有普通FD0也按此启动策略关闭。
+        if (!airi_fd_attach_input(&current->files)) // 新FD0必须为空且输入引用成功接入。
             airi_panic("cannot attach supervised shell input"); // 事务提交内部不变量错误。
-        input_pid = next.pid; // 文件引用完成后才发布唯一消费身份。
+        input_pid = current->pid; // 文件引用完成后才发布唯一消费身份。
     }
-    next.state = USER_RUNNING; // 此身份继续运行，但从新_start开始。
-    *current = next; // 把新所有权发布到原进程槽，PID不变。
-    if (!airi_vm_activate(&current->space)) // 新根已借到当前内核栈及内核映射。
+    current->state = USER_RUNNING; // PID、父关系、已运行tick、内核栈和异步owner均原地保持。
+    if (!airi_vm_activate(&current->memory.space)) // 新根已借到当前内核栈及内核映射。
         airi_panic("cannot activate committed exec image"); // 硬件不变量失败不能回旧用户继续。
-    cleanup(&old); // 旧根已经不活动，旧数据可回收；当前内核栈已转移所以不释放。
-    airi_log("[EXEC_COMMIT] pid=%u program=%s old_pages=%u new_pages=%u", current->pid, name, old_pages, current->count); // 名称是内核副本，不引用刚释放用户页。
+    destroy_memory(&old_memory); // CR3已切到新根，只归还局部接住的旧用户内存。
+    if (!airi_memory_return_page(old_fpu)) // 硬件随后从新状态页恢复，不再借旧页指针。
+        airi_panic("cannot reclaim replaced user FPU state"); // 内部归还错误不能伪装成普通exec失败。
+    airi_log("[EXEC_COMMIT] pid=%u program=%s old_pages=%u new_pages=%u", current->pid, name, old_pages, current->memory.count); // 名称是内核副本，不引用刚释放用户页。
     return 0; // 调用者直接恢复新f，不把这个0写回旧用户调用。
 }
 void airi_user_enter(struct airi_trap_frame *f) { // 所有CS3来源在分派设备、timer或syscall之前共同保存。

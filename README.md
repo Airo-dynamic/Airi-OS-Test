@@ -23,7 +23,7 @@ run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、d
 
 | 分支 | 检查点 | 内容与运行条件 |
 | --- | --- | --- |
-| main | 60 个：00–10、K11–K48、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
+| main | 61 个：00–10、K11–K49、L01–L08、T01–T03 | 串口内核、必修 Linux 对照和作者工具；不包含图形课程、前端源码或图形资产 |
 | gui | 15 个：G11–G24、G26 | 从 main 的 00 根提交分叉，只增加图形自己的路径；合入任一现有 main 阶段均不覆盖主线文件 |
 
 合入源码与开始运行是两件事。图形代码可以先合入较早的 main 检查点，运行需主线到 K11；G24 的 guest 接入需 K13。G11–G23 先提供宿主观察，G26 提供完整图形检查。默认构建继续选择串口实现，不读取字体，也不链接 Cocoa。
@@ -99,3 +99,5 @@ P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)
 [K47 名义单调时钟](dev-log/core/47-monotonic-clock.md)通过受检查的clock_gettime输出PIT时间，验证真实阻塞窗口并明确10ms量化与墙钟边界。
 
 [K48 用户对象分配](dev-log/core/48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。
+
+[K49 用户内存所有权](dev-log/core/49-user-memory-owner.md)将页表与页面记录单独持有，exec只转移新旧内存，保持内核栈、FD与进程身份，切根后再回收旧页。

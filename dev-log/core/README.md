@@ -64,3 +64,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K47 名义单调时钟](47-monotonic-clock.md)通过受检查的clock_gettime输出PIT时间，验证真实阻塞窗口并明确10ms量化与墙钟边界。
 
 [K48 用户对象分配](48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。
+
+[K49 用户内存所有权](49-user-memory-owner.md)将页表与页面记录单独持有，exec只转移新旧内存，保持内核栈、FD与进程身份，切根后再回收旧页。

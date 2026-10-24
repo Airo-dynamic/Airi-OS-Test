@@ -304,6 +304,11 @@
       "id": "K48",
       "title": "K48 · 用户对象分配与页面缓存",
       "document": "dev-log/core/48-user-malloc.md"
+    },
+    {
+      "id": "K49",
+      "title": "K49 · 用户内存所有权与exec局部替换",
+      "document": "dev-log/core/49-user-memory-owner.md"
     }
   ]
 }

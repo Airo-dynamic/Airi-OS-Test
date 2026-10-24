@@ -1,0 +1,35 @@
+checkpoint: K49
+baseline: baseline.yaml
+start: K48
+current_operation: 将旧用户内存交给局部所有者，保持PID与内核栈并提交新映像，切根后只销毁旧内存
+already_explained:
+- concept: exec准备与提交
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 失败只回滚候选，成功保持PID与内核调用栈，切CR3以后才能销毁旧根和旧用户页
+- concept: 数据页、记录页与有限容量
+  at: ../../../dev-log/core/37-user-capacity.md
+  establishes: 1024数据页由七个按需记录页保存，元数据与数据分别持有和归还
+- concept: 用户与非用户CPU状态页
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-process-owner
+  establishes: FPU状态独占内核页，fork复制真实状态、exec重建默认，不能与用户数据页混为一项
+- concept: 模板页与FS基址
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: 静态TLS运行页属于用户根，FS只持有其用户VA，失败exec保留、成功exec重建
+first_use:
+- concept: 用户内存描述与执行状态分开
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-owner
+  establishes: space、records和count共同归还一份用户内存；内核陷入栈、FD、FS和FPU独立
+- concept: 页面函数只接内存所有者
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-callers
+  establishes: 成员地址借用不复制页面，fork仍逐页深复制，不把描述值复制当成共享
+- concept: C中的显式所有权转移
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-destroy
+  establishes: take先复制小描述再清来源，返回值必须接住；destroy在非活动根上按表、数据、记录页顺序归还
+- concept: 不复制整个进程的exec提交
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-exec
+  establishes: 新旧内存分别持有，FD和内核栈原地保持，新的FPU和FS单独替换，切根后回收旧内存
+not_assumed:
+- 线程、共享地址空间引用计数、进程组资源、futex或SMP同步已经实现
+limits:
+- 一进程一执行者；user_memory当前内嵌且唯一持有，转移是受控C约定而非语言所有权检查
+- 既有用户接口行为保持，本节不增加新调用或扩大页面预算
