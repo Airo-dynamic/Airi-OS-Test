@@ -1,0 +1,32 @@
+checkpoint: K40
+baseline: baseline.yaml
+start: K39
+current_operation: VirtIO块完成经q35/PIC进入IRQ43，普通服务收集used；屏蔽设备IRQ后由PIT后备继续
+already_explained:
+- concept: 设备输入、PIC向量与CPU IF
+  at: ../../../dev-log/core/18-timer.md#pit-pic-route
+  establishes: IRQ线与IDT向量分开，设备事件、控制器屏蔽和IF三者都成立才交付；IRQ需EOI
+- concept: PCI与DMA地址
+  at: ../../../dev-log/core/25-block-device.md#block-pci-and-dma
+  establishes: CF8/CFC配置选择、BAR端口和连续内核BSS的guest PA，不能由任意堆VA猜DMA地址
+- concept: begin接收与used收集
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-begin-poll
+  establishes: busy保持到poll核对id/长度/status，deadline仅建立一次，未完成不能复用静态DMA
+first_use:
+- concept: PCI Pin到板级PIRQ再到PIC
+  at: ../../../dev-log/core/40-block-interrupts.md#block-irq-route
+  establishes: 当前0:3.0 INTA经q35 PIRQ H/0x6b接IRQ11，从片输入3级联到主片IRQ2，得到向量43
+- concept: 撤销设备电平与两片EOI
+  at: ../../../dev-log/core/40-block-interrupts.md#block-irq-hint
+  establishes: 读ISR先撤销INTx，再确认PIC；通知计数不能作为完成身份，used仍决定数据可收集
+- concept: 设备IRQ的完整用户现场交接
+  at: ../../../dev-log/core/40-block-interrupts.md#block-irq-context
+  establishes: 先于CS3故障判断处理IRQ，IRQ仅提示，有异步工作时暂回普通栈pump与复制
+- concept: 屏蔽通知但保留完成的后备
+  at: ../../../dev-log/core/40-block-interrupts.md#block-irq-fallback
+  establishes: PIC屏蔽不伪造used，PIT继续唤醒；删除周期后备需要另建防丢唤醒协议
+not_assumed:
+- 通用ACPI/PCI桥路由、共享IRQ注册、IOAPIC/MSI-X、SMP或tickless已经实现
+limits:
+- 锁定QEMU q35、根槽0至24、一个legacy块设备、IRQ11；真实板不套此路由公式
+- 单队列单在途，热改配置只在普通begin/poll中停止，不做在线恢复

@@ -259,6 +259,11 @@
       "id": "K39",
       "title": "K39 · 独立服务启动与坏初始ELF恢复",
       "document": "dev-log/core/39-service-boot.md"
+    },
+    {
+      "id": "K40",
+      "title": "K40 · q35设备中断、used完成与屏蔽后备",
+      "document": "dev-log/core/40-block-interrupts.md"
     }
   ]
 }

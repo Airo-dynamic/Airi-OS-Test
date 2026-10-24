@@ -21,4 +21,4 @@
 
 [验证记录](verification.md)记录作者实际结果，[系统实践地图](system-practice.md)把每项机制接回BOSS、Taishan与旧网络库的问题。
 
-P7 已亲手实现的新增路径：[K34](../dev-log/core/34-orphan-reaper.md)孤儿托管、[K35](../dev-log/core/35-user-page-release.md)整页归还与空洞复用、[K36](../dev-log/core/36-init-supervisor.md)常驻用户init、单一UART消费身份与阻塞重启、[K37](../dev-log/core/37-user-capacity.md)按需页记录、大映像与跨页用户栈，以及[K38](../dev-log/core/38-kernel-heap-growth.md)堆扩展和缓存/活对象核对、[K39](../dev-log/core/39-service-boot.md)初始化与诊断分离、自动init与坏初始映像恢复。真实板、网络、线程与C++ runtime仍按[部署路线](deployment-roadmap.md)继续，已提供解释不代表读者已掌握。
+P7 已亲手实现的新增路径：[K34](../dev-log/core/34-orphan-reaper.md)孤儿托管、[K35](../dev-log/core/35-user-page-release.md)整页归还与空洞复用、[K36](../dev-log/core/36-init-supervisor.md)常驻用户init、单一UART消费身份与阻塞重启、[K37](../dev-log/core/37-user-capacity.md)按需页记录、大映像与跨页用户栈，以及[K38](../dev-log/core/38-kernel-heap-growth.md)堆扩展和缓存/活对象核对、[K39](../dev-log/core/39-service-boot.md)初始化与诊断分离、自动init与坏初始映像恢复、[K40](../dev-log/core/40-block-interrupts.md)PCI/PIC设备提示与普通used收集。真实板、网络、线程与C++ runtime仍按[部署路线](deployment-roadmap.md)继续，已提供解释不代表读者已掌握。

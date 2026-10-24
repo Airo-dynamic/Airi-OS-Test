@@ -1,3 +1,4 @@
+#include <airi/irq.h> // q35路由、PIC屏蔽和确认由平台层提供。
 #include <airi/block.h> // 上层按扇区请求，不知道PCI和环结构。
 #include <airi/kernel.h> // 串口记录与内核不变量停止。
 #include <airi/timer.h> // 超时依据真实PIT tick。
@@ -16,6 +17,9 @@ static struct descriptor *descriptors; // 发布后直到完成不可改链。
 static uint64_t request_physical, capacity; // 设备使用guest物理地址，不理解内核高VA。
 static uint32_t active_type; // 当前在途操作只属于成功begin的调用者。
 static uint64_t request_deadline; // 截止跨begin/poll调用保存，不能每次poll重置。
+static volatile uint64_t interrupt_count; // 只有真实IRQ处理增加；不作为完成身份或完成条数。
+static volatile bool config_changed; // IRQ仅记录配置变化，普通上下文再停止不支持的动态变更。
+static bool irq_routed; // 成功配置后才能开放或屏蔽该固定设备输入。
 static bool readonly, can_flush, ready, busy; // 固定队列状态，失败后禁止再次覆盖DMA。
 static uint32_t pci_read(unsigned slot, unsigned function, unsigned offset) { // 仅固定bus0上的q35设备。
     airi_out32(0xcf8, 0x80000000u | slot << 11 | function << 8 | (offset & 0xfcu)); // 选择PCI配置地址。
@@ -29,6 +33,8 @@ static uint64_t physical(const AiriBootInfo *info, const void *pointer, size_t b
 }
 static int stop(int error) { // 超时和坏完成后先撤销设备运行资格。
     airi_out8(io + 18, 0); // reset设备；固定DMA区仍永久保留，不因reset结果复用。
+    if (irq_routed) // 固定平台此IRQ只交本驱动管理，隔离后也停止交付。
+        airi_irq_mask(AIRI_PCI_IRQ, true); // 静态DMA仍保持，不能因屏蔽IRQ就归还。
     ready = false; // 后续请求返回EIO，避免晚到DMA打到新请求。
     busy = false; // 不再让上层等待旧状态，但不重建队列。
     airi_log("[BLOCK_STOP] error=%d reset_status=%u dma=quarantined", error, (unsigned)airi_in8(io + 18)); // 是否已确认reset作为真实记录。
@@ -49,7 +55,7 @@ int airi_block_init(const AiriBootInfo *info) { // 仅启动时调用，不支�
         return -95; // 本节不实现现代PCI capability transport。
     io = (uint16_t)(bar & ~3u); // 低位是类型，不属于端口地址。
     uint32_t command = pci_read(found_slot, found_function, 4); // PCI命令需要启用I/O与总线主控DMA。
-    airi_out32(0xcfc, (command & 0xffffu) | 5u); // 地址仍指向command，状态高16位写0以免误清W1C位。
+    airi_out16(0xcfc, (uint16_t)((command & 0xffffu & ~(1u << 10)) | 5u)); // 只写命令低16位，启I/O/DMA并清INTx Disable，不触碰W1C状态。
     airi_out8(io + 18, 0); // 先reset，再发布本次驱动状态。
     if (airi_in8(io + 18)) // 不确认停止就不能重用静态队列。
         return -5; // -EIO。
@@ -71,7 +77,7 @@ int airi_block_init(const AiriBootInfo *info) { // 仅启动时调用，不支�
     available = (volatile uint16_t *)(queue + 16u * queue_size); // flags、idx、ring依次为16位字段。
     used = (volatile uint16_t *)(queue + used_offset); // used部分另起4096边界。
     used_ring = (volatile struct used_element *)(queue + used_offset + 4); // flags和idx之后是元素数组。
-    available[0] = 1; // NO_INTERRUPT：首版由驱动轮询完成，不启设备IRQ。
+    available[0] = 0; // 不抑制used通知；中断只是提示，完成仍消费used环。
     uint64_t queue_physical = physical(info, queue, sizeof(queue)); // 设备需要连续guest PA。
     request_physical = physical(info, &request, sizeof(request)); // 请求对象也是静态内核物理存储。
     if (queue_physical & 4095 || queue_physical >> 44) // PFN寄存器32位、页对齐。
@@ -92,10 +98,38 @@ int airi_block_init(const AiriBootInfo *info) { // 仅启动时调用，不支�
         return stop(-5); // 停止设备且不重用静态DMA。
     if (capacity < 16) // 实验留足独立扇区，拒绝过小盘。
         return stop(-22); // 不在空设备上减1。
+    uint32_t interrupt = pci_read(found_slot, found_function, 0x3c); // Interrupt Pin在第二字节，低字节Line仅作软件记录。
+    unsigned pin = (interrupt >> 8) & 0xffu; // PCI INTA-D编码为1至4，不是PIC输入编号。
+    airi_out8(0xcfc, AIRI_PCI_IRQ); // 当前选择仍指向此设备0x3c，只记录固定分配的IRQ11。
+    if (!airi_irq_route_pci(found_slot, pin)) // q35 PIRQ、ELCR与芯片身份必须明确支持。
+        return stop(-95); // 不默默假定固件已把INTx接到正确PIC输入。
+    irq_routed = true; // 从此stop可关闭该输入，但不复用DMA。
+    interrupt_count = 0; // 计数只用于观察实际IRQ，不给请求分配身份。
+    config_changed = false; // 首次容量已由前面的稳定读取确定。
+    (void)airi_in8(io + 19); // 清初始化前残留状态，设备尚未接收本驱动请求。
     airi_out8(io + 18, 7); // legacy不使用现代FEATURES_OK，ACK|DRIVER|DRIVER_OK。
     ready = true; // 队列和配置完整后才接收请求。
+#ifdef AIRI_TEST_BLOCK_IRQ_MASKED // 实际used环继续工作，只屏蔽PIC交付。
+    airi_irq_mask(AIRI_PCI_IRQ, true); // 让后备PIT路径收集完成，计数应保持零。
+#else // 普通与服务目标均开放真实设备IRQ。
+    airi_irq_mask(AIRI_PCI_IRQ, false); // 同时开放从PIC和主片级联。
+#endif // 不改变设备返回值与DMA生命周期。
+    airi_log("[BLOCK_IRQ_READY] irq=%u vector=%u transport=legacy-intx", AIRI_PCI_IRQ, 32u + AIRI_PCI_IRQ); // 路由确认后才报告可交付。
     airi_log("[BLOCK_READY] pci=0:%u.%u io=0x%x queue=%u sectors=%llu readonly=%u flush=%u", found_slot, found_function, io, queue_size, (unsigned long long)capacity, readonly, can_flush); // 数据来自真实设备配置。
     return 0; // 上层不接触端口或描述符。
+}
+bool airi_block_interrupt(void) { // IRQ上下文只读ISR、记录提示；不复制数据、不分配、不打印。
+    if (!io || !irq_routed) // 未配置设备时不能随意读未知端口。
+        return false; // 调用者仍确认PIC，当前平台不提供通用共享IRQ分派。
+    uint8_t status = airi_in8(io + 19); // 读取使设备撤销INTx电平，随后才能给PIC EOI。
+    if (status & 1u) // 队列提示可能合并多个完成，也可能迟于普通poll。
+        ++interrupt_count; // 不把中断次数当作请求编号。
+    if (status & 2u) // 当前不支持热改容量或配置，留给普通上下文处理。
+        config_changed = true; // 不在IRQ里reset、日志或改变DMA所有权。
+    return (status & 3u) != 0; // 只有本设备声明来源时才请求用户服务交接。
+}
+uint64_t airi_block_interrupts(void) { // x86-64单核对齐64位读取，实际计数不含PIT。
+    return interrupt_count; // 观察接口不暴露队列对象。
 }
 bool airi_block_readonly(void) { // 单设备配置启动后保持稳定。
     return readonly; // 不泄露驱动内部队列指针。
@@ -108,6 +142,8 @@ int airi_block_begin(unsigned type, uint64_t sector, const void *write_data) { /
         return -22; // -EINVAL。
     if (!ready) // 之前超时或未初始化。
         return -5; // -EIO，不覆盖可能仍被设备使用的旧DMA。
+    if (config_changed) // 不支持在线容量变更，停止比沿用旧容量更明确。
+        return stop(-95); // 普通上下文隔离，静态DMA保持。
     if (busy) // 不支持重入和多个调用者覆盖同一静态请求。
         return -16; // -EBUSY。
     if (type != 4 && sector >= capacity) // 在设备读取任何描述符前拒绝越界扇区。
@@ -146,6 +182,11 @@ int airi_block_poll(void *buffer) { // 只检查一次，不hlt，不要求用�
     if (!busy) // 没有本驱动接收的请求可收集。
         return -22; // -EINVAL，不能读上次残留status当新完成。
     uint64_t flags = airi_irq_save(); // 完成收集和busy撤销作为同一次内核操作。
+    if (config_changed) { // ISR只登记，当前普通上下文才撤销设备资格。
+        int result = stop(-95); // 不把容量变化后的不确定请求当普通成功。
+        airi_irq_restore(flags); // 保持调用者原IF。
+        return result; // 固定设备本轮没有热改操作，失败策略保留明确。
+    }
     if (used[1] == used_index) { // 设备尚未发布新完成。
         int result = airi_timer_ticks() >= request_deadline ? stop(-110) : 1; // 真超时才reset并隔离，1明确仍在途。
         airi_irq_restore(flags); // 无完成也不改变原IF。
@@ -169,7 +210,9 @@ int airi_block_poll(void *buffer) { // 只检查一次，不hlt，不要求用�
     int result = request.status == 0 ? 0 : request.status == 2 ? -95 : -5; // 设备IOERR与UNSUPP都明确交回。
     if (!result && type == 0 && buffer) // 只有成功读才能把设备数据交给上层。
         airi_memcpy(buffer, request.data, 512); // 复制结束后设备DMA缓冲才可供下次覆盖。
-    (void)airi_in8(io + 19); // 清可能遗留的legacy ISR状态，完成仍以used环判断。
+#ifdef AIRI_TEST_BLOCK_IRQ_MASKED // 没有IRQ处理者时由后备收集清除设备来源。
+    (void)airi_in8(io + 19); // 只清通知；used.idx与状态已独立核对。
+#endif // 正常模式只在IRQ读取ISR，不让poll抢先吃掉通知。
     busy = false; // 已确认完成，可以重用同一静态请求。
     airi_irq_restore(flags); // 系统调用进入时IF0，普通内核演示进入时IF1。
     return result; // 收集完成后才能重用静态DMA，0不是应用事务持久化。
@@ -179,7 +222,7 @@ static int perform(unsigned type, uint64_t sector, void *buffer) { // 原同步�
     int result = airi_block_begin(type, sector, buffer); // busy或参数错误不会偷取别人的完成。
     if (!result) // 只有本次提交成功才可以收集。
         while ((result = airi_block_poll(buffer)) == 1) // 1是驱动待完成状态，不是成功字节数。
-            __asm__ volatile("sti; hlt; cli" ::: "memory"); // 用PIT唤醒后重查，截止由首次begin固定。
+            __asm__ volatile("sti; hlt; cli" ::: "memory"); // 设备IRQ或PIT都可唤醒；截止仍由首次begin固定。
     airi_irq_restore(flags); // 系统调用IF0与普通内核IF1都按原样恢复。
     return result; // 0或负错误，旧read/write/flush契约不变。
 }
@@ -204,6 +247,18 @@ void airi_block_demo(void) { // 独立实验盘，不接宿主真实磁盘。
 #endif // 正常路径还需验证真正读写。
     if (error) // 初始读取必须完成。
         airi_panic("cannot read block demo sector"); // 不用未初始化before覆盖磁盘。
+#ifdef AIRI_TEST_BLOCK_IRQ_MASKED // 第一条真实读已完成，PIC未交付任何设备中断。
+    if (airi_block_interrupts()) // 不能用实际收到IRQ的配置冒充屏蔽后备路径。
+        airi_panic("masked block IRQ unexpectedly delivered"); // 明确拒绝错误测试环境。
+    airi_log("[BLOCK_IRQ_FALLBACK_OK] interrupts=0 used=collected timer=active"); // 数据来自真实used环，未伪造完成。
+#else // 给已完成请求的延迟通知一个有界交付窗口。
+    uint64_t irq_deadline = airi_timer_ticks() + 20; // 最多等二十个实际PIT tick，不关闭唯一超时时钟。
+    while (!airi_block_interrupts() && airi_timer_ticks() < irq_deadline) // 完成通知可迟于首个poll，仍须实际进入IRQ43。
+        __asm__ volatile("sti; hlt" ::: "memory"); // 等设备或PIT事件，不在用户地址上复制。
+    if (!airi_block_interrupts()) // used可用也不能冒充IRQ已经接通。
+        airi_panic("PCI block IRQ did not reach its vector"); // 原始计数只由IRQ处理者增加。
+    airi_log("[BLOCK_IRQ_OK] vector=43 interrupts=%llu used=collected", (unsigned long long)airi_block_interrupts()); // 完成身份仍由前面的used检查保证。
+#endif // 后续重叠请求、只读和真实写回归保持。
     if (airi_block_begin(0, sector, NULL) || !airi_block_pending() || airi_block_begin(0, sector, NULL) != -16) // 接收后即使设备已快完成，也不可覆盖未收集请求。
         airi_panic("nonblocking block submission ownership failed"); // 不把第二次提交覆盖旧DMA。
     int polled; // 首次poll可能已完成，不能伪造必须观测到pending。

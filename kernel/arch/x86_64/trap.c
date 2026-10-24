@@ -1,3 +1,5 @@
+#include <airi/irq.h> // 设备来源先撤销，再确认PIC级联。
+#include <airi/block.h> // 当前固定设备IRQ只做通知，不在中断里收集DMA。
 #include <airi/user.h> // 用户陷入可选择另一条完整返回现场。
 #include <airi/timer.h> // 唯一开放的设备IRQ交给架构时钟驱动。
 #include <airi/trap.h> // 异常现场的 C 布局。
@@ -24,6 +26,7 @@ static struct task_state tss; // TSS 也必须在 ltr 后持续存在。
 static uint8_t double_fault_stack[16384] __attribute__((aligned(16))); // 原栈损坏时 DF 换这块栈。
 extern const uintptr_t airi_trap_entries[32]; // 汇编产生的异常入口地址表。
 extern void airi_trap_128(void), airi_trap_129(void); // 系统调用与内核启动用户上下文的门。
+extern void airi_trap_43(void); // 当前q35设备IRQ11的独立向量入口。
 extern void airi_trap_32(void); // IRQ0也复用完整通用寄存器保存入口。
 extern void airi_trap_255(void); // 未启用的向量转到统一停止路径。
 extern void airi_tables_load(const void *, const void *); // 汇编依次加载 GDT/TSS/IDT。
@@ -49,6 +52,8 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
         uintptr_t address = i < 32 ? airi_trap_entries[i] : (uintptr_t)airi_trap_255; // 未使用向量也有明确停止入口。
         if (i == 32) // 唯一开放的设备向量有自己的编号，不能冒充未知255。
             address = (uintptr_t)airi_trap_32; // 指向TRAP32生成的入口。
+        if (i == 32u + AIRI_PCI_IRQ) // 唯一登记的PCI设备有自己的43号现场。
+            address = (uintptr_t)airi_trap_43; // 与TRAP宏压入的编号一致。
         if (i == 128 || i == 129) // 两个软件中断各有固定身份。
             address = i == 128 ? (uintptr_t)airi_trap_128 : (uintptr_t)airi_trap_129; // 不能让它们落入未知向量255。
         idt[i] = (struct idt_gate){(uint16_t)address, 8, i == 8 ? 1 : 0, i == 128 ? 0xee : 0x8e, (uint16_t)(address >> 16), (uint32_t)(address >> 32), 0}; // int80门DPL3，其余DPL0；仅DF使用IST1。
@@ -59,6 +64,11 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     airi_log("[TRAP_READY] vectors=32 cs=8 double_fault_ist=1 interrupts=off"); // 该标记只表示异常设施，不宣称调度或 IRQ 完成。
 }
 struct airi_trap_frame *airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
+    if (f->vector == 32u + AIRI_PCI_IRQ) { // 必须先于通用CS3故障判断，设备IRQ不能杀死用户进程。
+        bool notified = airi_block_interrupt(); // 读取设备ISR使INTx先撤销，仅保存提示。
+        airi_irq_end(AIRI_PCI_IRQ); // 再按从PIC到主PIC确认，避免电平来源持续触发。
+        return notified && (f->cs & 3) == 3 ? airi_user_device_irq(f) : f; // 内核不抢占；用户可在完整现场交普通服务栈。
+    }
     if (f->vector == 128 || f->vector == 129 || ((f->cs & 3) == 3 && f->vector != 32)) // 用户系统调用和用户故障由用户上下文所有者处理。
         return airi_user_trap(f); // 返回哪条完整现场由明确边界决定。
     if (f->vector == 32) { // PIC重映射后的时钟，不能作为CPU故障停止。

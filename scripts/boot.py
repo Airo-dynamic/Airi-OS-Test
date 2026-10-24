@@ -95,6 +95,8 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         block_marker = '[BLOCK_TIMEOUT_OK]' if case == 'block-timeout' else '[BLOCK_READONLY_OK]' if case == 'block-readonly' else '[BLOCK_DEMO_OK]' # 不同设备条件分别核对真实结果。
                         assert '[BLOCK_READY]' in text and block_marker in text # 完成、拒绝或超时必须符合本配置。
                         if case != 'block-timeout': # 隔离盘不再允许新提交。
+                            irq_marker = '[BLOCK_IRQ_FALLBACK_OK]' if case=='block-irq-masked' else '[BLOCK_IRQ_OK]' # 后备与真实IRQ两条路径分别验收。
+                            assert '[BLOCK_IRQ_READY]' in text and irq_marker in text # 接线、独立向量与used收集均须成立。
                             assert '[BLOCK_NONBLOCK_OK]' in text # begin接受、重叠拒绝和poll收集已运行。
                         journal_marker = '[JOURNAL_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[JOURNAL_DEMO_OK]' # 没有可写设备时不冒充日志完成。
                         assert journal_marker in text # 正常配置必须真实恢复并替换坏尾。

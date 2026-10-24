@@ -28,3 +28,7 @@ CPU 特权、寄存器与页表参考 [Intel SDM](https://www.intel.com/content/
 界面使用 IBM Plex Sans，代码和终端使用 IBM Plex Mono。来源为 Google Fonts 固定提交 `2eb0b48d5f760f62e286216f0859a8c540dbc1bd`，逐文件 URL 与 SHA-256 在 `frontend/assets/fonts.lock.json`；`config/deps.lock.json` 同时锁定生成图集。
 
 字体采用 SIL Open Font License 1.1，原始字体及 `sans-OFL.txt` / `mono-OFL.txt` 一并保留在 `frontend/assets/`。生成的 A8 字形仍受字体许可约束，不能把原始项目 MIT 许可当成字体许可。来源：[IBM Plex](https://github.com/IBM/plex)、[Google Fonts 固定版本](https://github.com/google/fonts/tree/2eb0b48d5f760f62e286216f0859a8c540dbc1bd/ofl)。图集生成使用 Pillow 12.3.0，常规构建只使用已生成图集，不要求安装 Pillow。
+
+## K40的q35接线参考
+
+固定QEMU v11.1.2的普通根槽PIRQ映射与寄存器事实参考[ICH9 LPC模型](https://github.com/qemu/qemu/blob/v11.1.2/hw/isa/lpc_ich9.c)及[芯片声明](https://github.com/qemu/qemu/blob/v11.1.2/include/hw/southbridge/ich9.h)。前者文件保留MIT许可说明；本项目自行编写小范围路由、PIC操作和IRQ分派，没有导入QEMU设备模型作为内核实现或新增运行依赖。真实主板不能套用该模型公式。

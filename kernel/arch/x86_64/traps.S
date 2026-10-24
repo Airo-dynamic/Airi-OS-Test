@@ -60,6 +60,7 @@ TRAP 29, 1 /* VMM 通信异常。 */
 TRAP 30, 1 /* 安全异常。 */
 TRAP 31 /* 保留向量。 */
 TRAP 32 /* 主PIC IRQ0对应的时钟入口，无硬件错误码。 */
+TRAP 43 /* 从PIC IRQ11，当前固定PCI块设备INTx。 */
 TRAP 128 /* DPL3的AiriOS系统调用门。 */
 TRAP 129 /* DPL0启动/返回用户执行的内核门。 */
 TRAP 255 /* 未使用的 IDT 项统一停止；可屏蔽中断仍关闭。 */

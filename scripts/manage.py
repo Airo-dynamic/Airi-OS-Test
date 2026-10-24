@@ -11,7 +11,7 @@ from shell_test import check_shell # 真正用户shell与端到端存储演示�
 from storage_test import check_storage_restart # 跨启动恢复与真实QMP节流下的CQ等待。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
+PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing','block-irq-masked')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
 SERVICE_PROFILES=('service','service-no-framebuffer','service-init-failure') # 三种UART常驻/恢复配置，不混入旧阶段完成标记检查。
 def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
     subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。

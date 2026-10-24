@@ -654,6 +654,15 @@ struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // 所有�
     f->rflags |= 0x202; // 保留必需bit1并保持用户IF。
     return f; // 返回选中进程的完整现场。
 }
+struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *f) { // 本函数只在真实设备IRQ打断ring3后调用。
+    if (!session_active || !current || current->state != USER_RUNNING) // 用户返回必须有明确现场所有者。
+        airi_panic("device IRQ without a running user"); // 不把未知栈交给启动继续点。
+    if (!airi_async_work()) // 同步启动请求或已收集的旧通知无需切用户身份。
+        return airi_user_resume(f); // 用户返回策略仍统一核对。
+    current->frame = f; // 保存完整GPR与用户RIP/RSP，稍后从同一指令继续。
+    current->state = USER_RUNNABLE; // 不丢掉被设备提示打断的计算用户运行资格。
+    return pause_for_service(false); // 切到长期普通栈后才pump、复制用户输出和唤醒等待者。
+}
 struct airi_trap_frame *airi_user_timer(struct airi_trap_frame *f) { // IRQ路径不分配、不回收、不打印，只有状态与根选择。
     if (!session_active || !current || current->state != USER_RUNNING) // CS3的IRQ必须有明确用户所有者。
         airi_panic("user IRQ without a running process"); // 不把未知内核栈交给调度器。

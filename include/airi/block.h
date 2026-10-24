@@ -2,6 +2,8 @@
 #define AIRI_BLOCK_H // 包含保护。
 #include <airi/boot.h> // 当前启动提供内核连续物理映像位置。
 int airi_block_init(const AiriBootInfo *info); // 固定单队列，失败返回负错误。
+bool airi_block_interrupt(void); // IRQ只读清ISR并记录提示，不收集DMA结果。
+uint64_t airi_block_interrupts(void); // 实际设备IRQ计数，不等于完成条数。
 bool airi_block_readonly(void); // 给调用者明确只读事实，不能靠写失败猜测。
 uint64_t airi_block_sectors(void); // 以512字节扇区计，不等同设备逻辑块大小配置。
 int airi_block_read(uint64_t sector, void *buffer); // 一次精确一个512字节扇区，0成功。
