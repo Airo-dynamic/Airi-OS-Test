@@ -229,7 +229,29 @@
   "not_verified": [
     "Real board or physically absent VGA; no-framebuffer filters the boot response on fixed QEMU hardware",
     "General live-init process-tree crash recovery; launch still waits living descendants",
-    "Linux L01-L08 and native network/tunnel remain later work",
-    "GUI fresh regression pending isolated main+gui combination"
-  ]
+    "Linux L01-L08 and native network/tunnel remain later work"
+  ],
+  "gui": {
+    "directory": "/tmp/airios-k39-gui-20261024",
+    "main_files_identical": 131,
+    "merge": "local main K39 plus unchanged gui branch, source repo branches not modified",
+    "graphics_test_exit": 0,
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_combinations": 58,
+    "guest_day_night_visually_checked": true,
+    "screenshots": [
+      "artifacts/k39/gui-day.png",
+      "artifacts/k39/gui-night.png"
+    ]
+  },
+  "local_release": {
+    "commit": "1fc1695",
+    "tag": "k39-service-boot",
+    "snapshots": 51,
+    "snapshots_exit": 0,
+    "clean_export": "/private/tmp/airios-k39-release-20261024",
+    "export_exit": 0,
+    "pushed": false
+  }
 }

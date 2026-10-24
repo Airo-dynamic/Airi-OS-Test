@@ -6,7 +6,7 @@
 
 完整test通过八组主机检查、原九种诊断启动、三条输入、用户容量/孤儿/shell、normal十二代init、三种服务配置及三次存储会话。service与service-no-framebuffer各自从复位自动进入PID1的init，并各完成十二代shell；驱动未发送run init。新实验盘启动前后内容摘要相同。service-init-failure拒绝截断ELF为−8，恢复monitor后echo、mem与真实hello运行通过。service加graphics在字体检查之前以预期状态2拒绝。
 
-51个检查点、131份实现重建及475个源码块旁注检查通过。教程另导出到新目录，125份源码哈希一致，只借固定第三方缓存后独立构建service并实际完成十二代监督。此处尚未验收真实无屏硬件、通用init崩溃管理或长时间部署；Linux状态不变。图形组合回归随后单独记录。[K39记录](../.codex/teaching/validation/K39.json)。
+51个检查点、131份实现重建及475个源码块旁注检查通过。教程另导出到新目录，125份源码哈希一致，只借固定第三方缓存后独立构建service并实际完成十二代监督。此处尚未验收真实无屏硬件、通用init崩溃管理或长时间部署；Linux状态不变。在临时克隆合入原gui后，131份主线文件与K39全部相同；图形test通过九种启动、三条输入与三次存储会话，ui-test通过84张快照和58项颜色组合，并实际查看guest Day/Night画面。[K39记录](../.codex/teaching/validation/K39.json)。
 
 ## K38：内核堆扩展与缓存核对（2026-10-24）
 
