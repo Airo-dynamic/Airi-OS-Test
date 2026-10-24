@@ -212,5 +212,18 @@
     "4MiB per process; 8 processes; one thread; eager copy fork",
     "16KiB kernel stack, fixed 64KiB ELF user stack, no automatic growth",
     "64KiB kernel object heap unchanged; no malloc/TLS/C++ runtime"
-  ]
+  ],
+  "local_release": {
+    "checkpoint_commit": "6b030ca",
+    "tag": "k37-user-capacity",
+    "clean_export": "/private/tmp/airios-k37-release-20261024",
+    "export_exit": 0,
+    "snapshots_exit": 0,
+    "snapshots": 49,
+    "logs": [
+      "artifacts/k37/export.log",
+      "artifacts/k37/snapshots.log"
+    ],
+    "pushed": false
+  }
 }
