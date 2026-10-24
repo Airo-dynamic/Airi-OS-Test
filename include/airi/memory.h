@@ -7,6 +7,7 @@ struct airi_memory_stats { // 消费者只得到数值，不持有分配器内�
     size_t heap_bytes, heap_free, heap_used; // 已映射backing、空闲payload与活对象payload分别统计。
 };
 void airi_memory_init(const AiriBootInfo *info); // 顺序初始化页池、页表和可扩展内核堆。
+void airi_memory_demo(void); // 初始化之后才执行页面、权限与堆教学观察，服务启动可跳过。
 void airi_memory_snapshot(struct airi_memory_stats *stats); // 同步复制当前数值到调用者对象。
 static inline bool airi_memory_same_usage(const struct airi_memory_stats *before, const struct airi_memory_stats *after) { // 每个包含者使用这段小函数，无独立链接符号。
     uint64_t old_available = before->pages_free + before->heap_bytes / 4096; // 堆的缓存数据页从页池转出，但没有外部借用。

@@ -169,5 +169,14 @@
     "No fresh GUI run in K38; interfaces remain source compatible, no frontend changed",
     "Linux L01-L08 still SSH255 from K37, no new attempt in K38",
     "Real board and native network/tunnel remain later phases"
-  ]
+  ],
+  "local_release": {
+    "commit": "5669e22",
+    "tag": "k38-kernel-heap-growth",
+    "snapshots": 50,
+    "export": "/private/tmp/airios-k38-release-20261024",
+    "snapshots_exit": 0,
+    "export_exit": 0,
+    "pushed": false
+  }
 }

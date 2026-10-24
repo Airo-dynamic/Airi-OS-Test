@@ -254,6 +254,11 @@
       "id": "K38",
       "title": "K38 · 内核堆按批扩展与缓存资源核对",
       "document": "dev-log/core/38-kernel-heap-growth.md"
+    },
+    {
+      "id": "K39",
+      "title": "K39 · 独立服务启动与坏初始ELF恢复",
+      "document": "dev-log/core/39-service-boot.md"
     }
   ]
 }

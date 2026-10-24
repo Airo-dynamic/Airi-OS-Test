@@ -37,10 +37,17 @@ ifneq ($(filter desktop-%,$(PROFILE)),)
 CPPFLAGS += -DAIRI_GRAPHICAL_CONSOLE -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
 endif # 结束当前可选图形分支。
 # Make条件只在no-framebuffer配置加入下方测试宏。
-ifeq ($(CASE),no-framebuffer)
+ifneq ($(filter no-framebuffer service-no-framebuffer,$(CASE)),)
 # +=追加预处理选项，让启动适配模拟缺少图形响应。
 CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
 endif # 结束 no-framebuffer 的编译条件
+# 服务目标只改变启动策略，与旧九种诊断目标使用独立产物目录。
+ifneq ($(filter service service-no-framebuffer service-init-failure,$(CASE)),)
+CPPFLAGS += -DAIRI_BOOT_SERVICE # 初始化完成后直接进入用户init，不运行教学演示。
+endif # 普通配置继续原诊断路径。
+ifeq ($(CASE),service-init-failure)
+CPPFLAGS += -DAIRI_TEST_INIT_FAILURE # 只在此故障镜像把初始程序换成截断ELF。
+endif # 不修改正常init或用户资源接口。
 # 缺内存响应配置采用独立构建目录和下面宏。
 ifeq ($(CASE),missing-memory)
 # 模拟必需内存地图缺失，内核应打印具体PANIC。

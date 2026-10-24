@@ -12,6 +12,7 @@ from storage_test import check_storage_restart # 跨启动恢复与真实QMP节�
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
 PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
+SERVICE_PROFILES=('service','service-no-framebuffer','service-init-failure') # 三种UART常驻/恢复配置，不混入旧阶段完成标记检查。
 def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
     subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
 def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。
@@ -73,11 +74,13 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
     parser.add_argument('action',choices=['doctor','build','run','test','debug','kernel-debug','linux-lab','clean','ui-preview','ui-test','docs-check','snapshots'])  # 位置参数限定动作集合，拼错动作不能落到默认运行QEMU。
     parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
     parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
-    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
+    parser.add_argument('--profile',choices=PROFILES+SERVICE_PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
     parser.add_argument('--phase',choices=('p1','p2','p3','p4','p5-threads','p5-epoll','p5-uring','p6'),default='p1') # Linux阶段显式选择，默认保持P1。
     parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
     parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
     args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
+    if args.graphics and args.profile in SERVICE_PROFILES: # 常驻用户输入目前只接UART，不能进入不可见图形等待。
+        parser.error('service profiles use UART; omit --graphics') # 在读取字体或前端以前给出实际修复方式。
     if args.action=='snapshots':  # 只有导出动作需要读取Git教学提交链。
         from snapshots import generate  # 局部导入后续提供的快照模块。
         generate()  # 核对固定main提交链和旧目录保护后导出阶段源码。
@@ -131,6 +134,12 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         if not args.graphics: # 当前用户shell只独占串口，图形终端尚无用户TTY接入。
             check_shell() # 同一核心构建实际执行用户解析、fork/exec/wait和慢设备I/O。
             check_init() # 同一监督者重启十二代shell，不结束会话清空资源。
+            services=[] # 服务配置的可用条件不同于旧诊断READY，分别记录。
+            for profile in SERVICE_PROFILES: # 两种正常无屏路径与一个失败恢复路径。
+                build(profile) # 独立构建目录，不能借用normal已运行演示的状态。
+                inspect_elf(profile) # 每个服务内核仍必须为无宿主依赖的静态ELF。
+                services.append(check_init(profile)) # UART实际观察自动启动、重启或恢复。
+            (ROOT/'artifacts/service-tests.json').write_text(json.dumps(services,indent=2)+'\n') # 只保存本轮实际结果。
         check_storage_restart('desktop-normal' if args.graphics else 'normal') # 正式日志双启动恢复，另以第三个guest验证慢设备CQ等待。
     else:  # 普通build/run/debug共用指定配置构建路径。
         build(args.profile)  # build/run/debug先构建调用者选择的配置。

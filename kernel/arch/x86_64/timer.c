@@ -48,7 +48,7 @@ void airi_timer_interrupt(void) { // IDT32中断门进入时CPU已经清IF。
     out8(0x20, 0x20); // 向主PIC发送EOI，允许后续IRQ0继续到达。
 }
 void airi_timer_demo(void) { // 此时只演示中断唤醒，不存在任务调度。
-    airi_timer_init(); // 开启固定平台的周期时钟。
+    // 调用者已开启固定平台时钟；此函数不重新配置PIC或清零ticks。
     uint64_t start = airi_timer_ticks(); // 记录当前基准，不假定初始化后尚未经过第一个tick。
     while (airi_timer_ticks() - start < 5) // 至少处理五个真实IRQ，而不是忙等某个常数。
         __asm__ volatile("hlt" ::: "memory"); // IF为一，下一次IRQ唤醒后从这里继续。

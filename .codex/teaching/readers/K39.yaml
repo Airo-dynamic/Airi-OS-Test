@@ -1,0 +1,35 @@
+checkpoint: K39
+baseline: baseline.yaml
+start: K38
+current_operation: 从复位只初始化真实资源，直接启动用户init并监督UART shell；坏初始ELF回恢复监控台
+already_explained:
+- concept: 常驻监督与前台UART资格
+  at: ../../../dev-log/core/36-init-supervisor.md#init-roles
+  establishes: init不读UART，直接sh孩子取得输入，logout唤醒同一监督者并阻塞退避后重启
+- concept: 有界堆的初始化与缓存
+  at: ../../../dev-log/core/38-kernel-heap-growth.md#heap-grow-mapping
+  establishes: 最小64KiB映射后才接入块链，按请求增长；大对象演示会将缓存推到1MiB上限
+- concept: 完整会话资源核对
+  at: ../../../dev-log/core/38-kernel-heap-growth.md#heap-grow-callers
+  establishes: launch失败和收尾保持净页面与活对象，FD单独核对
+first_use:
+- concept: 初始化与诊断观察分离
+  at: ../../../dev-log/core/39-service-boot.md#service-init-boundary
+  establishes: 内存init只建页池/根/最小堆，demo在初始化后消费；时钟不再由demo配置
+- concept: 无演示前置的用户启动
+  at: ../../../dev-log/core/39-service-boot.md#service-user-start
+  establishes: 文件资源先初始化，boot仍走同一ELF/launch路径，初始PID1来自此前无用户身份消耗
+- concept: 启动资源就绪与服务可用
+  at: ../../../dev-log/core/39-service-boot.md#service-main-flow
+  establishes: 资源标记只说明内核准备，实际用户prompt和命令才证明服务；初始映像失败回可操作monitor
+- concept: 独立服务构建与故障配置
+  at: ../../../dev-log/core/39-service-boot.md#service-profile
+  establishes: 三种profile单独编译，不改变BootInfo或用户ABI，CLI在读取前端前拒绝service加graphics
+- concept: 自动启动的真实UART观察
+  at: ../../../dev-log/core/39-service-boot.md#service-observer
+  establishes: 不发送run init，两种服务各十二代shell；摘要核对新测试盘内容不变，坏ELF后echo/mem/hello完整运行
+not_assumed:
+- 完整init进程树崩溃管理、信号、watchdog、服务配置、真实板或用户TTY已经实现
+limits:
+- 固定编译配置与UART；无图形测试是适配层缺描述，QEMU仍保留VGA硬件
+- init已运行后若退出且有活后代，launch仍按现有会话规则等待它们结束

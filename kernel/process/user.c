@@ -990,8 +990,20 @@ static void run_one(const uint8_t *image, size_t bytes, const char *name, int ex
     if (require_scheduler) // 实际多用户会话单独报告行为证据。
         airi_log("[PROCESS_DEMO_OK] fork=copy exec=transaction wait=blocked timer_switches=%u wait_blocks=%u reclaimed=1", result.switches, result.blocks); // 计数来自真实IRQ与状态转换。
 }
+void airi_user_init(void) { // 启动只调用一次；不依赖先运行任何用户演示。
+    airi_files_init(); // 为普通用户与init同样建立只读seed和空RAM目录。
+    airi_log("[USER_RESOURCES_READY] slots=%u elf=static", PROCESS_COUNT); // 仅声明资源可用，不宣称已经运行服务。
+}
+int airi_user_boot(const char *name) { // 输入来自内核固定启动策略，不接受外部未验证指针。
+    const struct executable *image = find_program(name); // 与命令入口使用同一真实映像目录。
+    if (!image) // 不存在程序时尚未改变任何进程资源。
+        return -2; // -ENOENT，交给启动恢复策略。
+    struct user_result result; // 持续会话停止后才取得根退出状态。
+    int error = launch(image->start, (size_t)((uintptr_t)image->end - (uintptr_t)image->start), name, true, &result); // 准备失败与正常返回均由launch核对回收。
+    return error ? error : result.code; // 初始化失败或用户退出都不能被当作仍在服务。
+}
 void airi_user_demo(void) { // 串口主线的真实用户边界与多进程回归。
-    airi_files_init(); // 用户会话开始前创建只读seed与空RAM目录，仅启动一次。
+    // 用户资源已由airi_user_init建立，演示不重置正式初始化状态。
     run_one(airi_user_probe_start, (size_t)((uintptr_t)airi_user_probe_end - (uintptr_t)airi_user_probe_start), NULL, 0, false, true, false); // 原有非法指针与用户IRQ验证。
     run_one(airi_user_bad_start, (size_t)((uintptr_t)airi_user_bad_end - (uintptr_t)airi_user_bad_start), NULL, -141, false, false, false); // 用户cli只杀当前身份。
     run_one(airi_user_load_bad_start, (size_t)((uintptr_t)airi_user_load_bad_end - (uintptr_t)airi_user_load_bad_start), NULL, -142, false, false, false); // USER保护PF。

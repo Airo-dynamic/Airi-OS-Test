@@ -5,6 +5,7 @@
 #include <airi/pages.h> // 物理页分配与启动信息。
 #include <airi/kernel.h> // 日志和具体失败出口。
 static struct airi_page_pool pages; // 页池元数据放在内核 BSS，不能自己被分配。
+static void heap_demo(void); // 教学观察不属于设备或资源初始化。
 static void heap_init(void); // 自有页表建立后才映射堆backing。
 static void virtual_memory_init(const AiriBootInfo *info); // 页池就绪后才建立并激活页表。
 void airi_memory_init(const AiriBootInfo *info) { // 在异常设施安装后调用，仍使用加载器页表。
@@ -12,12 +13,16 @@ void airi_memory_init(const AiriBootInfo *info) { // 在异常设施安装后调
         airi_panic("physical page pool has no usable pages"); // 停止，而不是假装分配成功。
     airi_log("[PAGES_READY] page_bytes=4096 capacity_bytes=%llu managed=%u free=%u", // 明确固定上限和实际管理数量。
              (unsigned long long)AIRI_PHYSICAL_LIMIT, pages.total, pages.free); // 内存地图中的非 usable 页面不在统计中。
+    virtual_memory_init(info); // 只建立并激活长期页表，不触发权限故障。
+    heap_init(); // 初始映射64KiB，服务启动不先运行容量演示。
+}
+static void physical_memory_demo(void) { // 页池已经初始化，临时借出和归还只用于诊断配置。
     uint32_t before = pages.free; // 保存演示前空闲数量，最后必须恢复。
     uint64_t first = airi_page_alloc(&pages); // 取得第一个物理页，0 是失败。
     uint64_t second = airi_page_alloc(&pages); // 第二个页面必须独立借出。
     if (!first || !second || first == second) // 耗尽和重复借出都不允许继续写入。
         airi_panic("physical page allocation failed"); // 停止潜在的内存破坏。
-    volatile uint64_t *mapped = (volatile uint64_t *)(uintptr_t)(info->direct_map_offset + first); // HHDM 将物理页转换为当前可访问的虚拟别名。
+    volatile uint64_t *mapped = airi_memory_direct(first); // HHDM 将物理页转换为当前可访问的虚拟别名。
     *mapped = 0x4149524950414745ull; // 真正写入刚借出的 RAM，volatile 保留设备级观察所需的访问。
     if (*mapped != 0x4149524950414745ull || pages.free != before - 2) // 验证内容和所有权统计是同一次分配结果。
         airi_panic("physical page write/accounting failed"); // 不能只凭非零地址宣称可用。
@@ -28,8 +33,6 @@ void airi_memory_init(const AiriBootInfo *info) { // 在异常设施安装后调
         airi_panic("physical page reuse/accounting failed"); // 任何泄漏都阻止后续阶段。
     airi_log("[PAGES_DEMO_OK] first=0x%llx second=0x%llx reused=0x%llx free=%u", // 日志给出本轮真实分配地址。
              (unsigned long long)first, (unsigned long long)second, (unsigned long long)again, pages.free); // 记录数值，不在归还后解引用旧指针。
-    virtual_memory_init(info); // 页表页也从同一所有权池取得。
-    heap_init(); // 小对象分配不能反过来成为页表构建的前置。
 }
 
 static struct airi_address_space kernel_space; // 当前内核持有根页，所有映射在切换后持续存在。
@@ -85,11 +88,13 @@ static void virtual_memory_init(const AiriBootInfo *info) { // 借用加载器�
         airi_panic("x86 paging requires four levels, NX and no PCID"); // 不在未支持的启动配置上假装成功。
     airi_log("[VM_READY] cr3=0x%llx levels=4 page_bytes=4096 wp=1 nx=1 free=%u", // 只有真正切根后才输出。
              (unsigned long long)kernel_space.root, pages.free); // 页表持有的页面计入已借出数量。
+}
+static void virtual_memory_demo(void) { // 安装长期根以后才执行可恢复的只读/NX/未映射故障。
     uint32_t before = pages.free; // 演示只临时创建一个独立分支，最后应全部回收。
     uint64_t data = airi_page_alloc(&pages); // 调用者拥有这个数据页，页表不会替它归还。
     if (!data) // 演示也必须处理耗尽。
         airi_panic("cannot allocate paging demonstration page"); // 不写失败哨兵。
-    uint64_t *alias = (uint64_t *)(uintptr_t)(info->direct_map_offset + data); // 新根已保留全部受管理 RAM 的 HHDM。
+    uint64_t *alias = airi_memory_direct(data); // 新根已保留全部受管理 RAM 的 HHDM。
     *alias = 0xc3; // 第一字节是 ret，若 NX 缺失，调用也能返回并被演示检查拒绝。
     if (!airi_vm_map(&kernel_space, AIRI_VM_DEMO_ADDRESS, data, 0)) // 建立 supervisor 只读、不可执行的别名。
         airi_panic("cannot map paging demonstration page"); // 失败不能访问目标 VA。
@@ -134,6 +139,9 @@ static bool heap_grow(void) { // 单核不可抢占普通上下文调用，IRQ�
 static void heap_init(void) { // 所需页与页表都由当前内核拥有。
     if (!heap_grow()) // 第一批也遵守映射成功后才接入的顺序。
         airi_panic("cannot initialize kernel heap"); // 启动必须有最小对象容量。
+    airi_log("[HEAP_READY] bytes=%zu limit=1048576 chunks=%u", heap.bytes, heap_chunks); // 初始化只报告已经持有的最小容量。
+}
+static void heap_demo(void) { // 小对象、扩展与耗尽留在诊断入口，服务启动不执行。
     size_t before = airi_heap_free_bytes(&heap); // 结束后对象级空闲应恢复。
     uint8_t *a = airi_kmalloc(80); // 第一个对象拥有独立payload。
     uint8_t *b = airi_kmalloc(128); // 中间对象用于演示相邻归还合并。
@@ -170,6 +178,11 @@ static void heap_init(void) { // 所需页与页表都由当前内核拥有。
         airi_panic("kernel heap cache accounting failed"); // 页或对象泄漏仍需报告。
     airi_log("[HEAP_CAPACITY_OK] initial=65536 bytes=%zu live=%zu chunks=%u preserved=1 limit=null", grown.heap_bytes, grown.heap_used, heap_chunks); // 真实映射、写入、耗尽和归还完成。
 
+}
+void airi_memory_demo(void) { // 从完整初始化状态执行三类观察，不能代替初始化。
+    physical_memory_demo(); // 临时页面的内容和归还。
+    virtual_memory_demo(); // 真实硬件权限故障与精确恢复。
+    heap_demo(); // 对象分割/合并及1MiB容量边界。
 }
 void *airi_kmalloc(size_t bytes) { // 内核小对象入口，不引入宿主libc。
     if (!heap.first || !bytes || bytes > HEAP_MAX_CHUNKS * HEAP_STEP_PAGES * 4096u - 32) // 未初始化、空请求或绝不可能容纳的对象不触发增长。

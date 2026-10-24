@@ -39,3 +39,5 @@ P1–P6 的旧检查点保留。升级从 K34 追加，自己的 day2 目录仍�
 2026-10-23 已按用户授权创建专用 `airios-lab-20261023` Tunnel，凭据仅保存在本机私有目录；未创建 DNS 路由；官方 cloudflared 2026.7.3 使用内置 404 服务做短时 HTTP/2 对照，6.67 秒内观察到 Registered tunnel connection 后已终止。该结果确认本机网络与测试资源可完成官方注册，宿主 C++ 原型与 AiriOS 原生客户端仍未验证。真实板与主板型号也未接入。内核、Linux 实验与宿主协议开发继续按各自依赖推进。
 
 Cloudflare 创建流程依据[官方本地管理文档](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)，本轮[参考客户端记录](../.codex/teaching/validation/cloudflare-reference-20261023.json)只作为后续自研实现的对照，不计为自研隧道功能。
+
+P7当前停点已到K39：K34–K36提供持续回收与用户监督，K37扩大用户容量，K38增加有界内核堆，K39提供独立service启动与坏初始ELF恢复。设备中断仍在后续，尚未开始真实板部署或长时间稳定性验收。
