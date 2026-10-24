@@ -1,3 +1,4 @@
+#include <airi/fpu.h> // 每进程拥有一份非用户映射的浮点/SSE状态。
 #include <airi/async.h> // 进程轮次与固定缓冲资源的生命周期。
 #include <airi/arch.h> // CPU空闲与用户调度门留在架构适配。
 #include <airi/storage.h> // 用户存储请求经过有界副本进入日志服务。
@@ -24,6 +25,7 @@ struct user_process { // 所有权和调度状态由内核持有，用户只能�
     bool async_owned; // 本控制块是否持有当前PID的异步owner，局部旧exec副本必须清除此所有权。
     struct airi_fd_table files; // exec转移表项，fork增加同一打开对象的引用。
     struct airi_address_space space; // 根和低半区表自有，高半区借用。
+    uint64_t fpu_physical; // 独立状态页不塞进exec局部控制块，也不算用户数据页。
     struct airi_kernel_region stack; // 不能在仍使用它的C调用中释放。
     uint64_t records[RECORD_CHUNKS]; // 元数据页的物理地址；各页经HHDM访问，不映射给用户。
     unsigned count, pid, parent, user_ticks; // 资源数量、身份、父PID和本进程实际IRQ数。
@@ -54,6 +56,8 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_simd_elf_start[], airi_simd_elf_end[]; // 浮点、抢占和继承探针。
+extern const uint8_t airi_simd_reset_elf_start[], airi_simd_reset_elf_end[]; // exec新状态观察。
 extern const uint8_t airi_init_elf_start[], airi_init_elf_end[]; // 用户态常驻监督程序。
 extern const uint8_t airi_capacity_elf_start[], airi_capacity_elf_end[]; // 大BSS、深用户栈与跨记录页的fork/exec。
 extern const uint8_t airi_memory_elf_start[], airi_memory_elf_end[]; // 用户页面归还与空洞复用工作负载。
@@ -71,6 +75,8 @@ struct executable { const char *name; const uint8_t *start, *end; }; // 初始�
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
     {"init", airi_init_elf_start, airi_init_elf_end}, // 管理前台shell的常驻用户进程。
+    {"simd", airi_simd_elf_start, airi_simd_elf_end}, // 真实SSE/x87隔离与fork/exec。
+    {"simd-reset", airi_simd_reset_elf_start, airi_simd_reset_elf_end}, // 新ELF入口的默认状态。
     {"capacity", airi_capacity_elf_start, airi_capacity_elf_end}, // 预算耗尽后回收并继续运行。
     {"memory", airi_memory_elf_start, airi_memory_elf_end}, // 同一地址空间内释放与重新申请。
     {"orphans", airi_orphans_elf_start, airi_orphans_elf_end}, // 不结束根会话也能回收退出的孤儿。
@@ -117,6 +123,15 @@ static void trim_records(struct user_process *p) { // count已缩小，释放不
             airi_panic("cannot reclaim user page records"); // 归属错误不能静默复用页面。
         p->records[i] = 0; // 归还后立即撤掉唯一所有权记录。
     }
+}
+static bool create_fpu(struct user_process *p) { // 构造器只给空控制块建立独立页所有权。
+    p->fpu_physical = airi_memory_take_page(); // 一页足够容纳对齐512字节状态，与用户记录页分别归还。
+    if (!p->fpu_physical) // 没有内存就不准备可运行身份。
+        return false; // cleanup可回收此前的栈等资源。
+    void *state = airi_memory_direct(p->fpu_physical); // 内核HHDM别名，不给用户USER映射。
+    airi_memset(state, 0, 4096); // 剩余页字节也不带旧内容。
+    airi_fpu_new(state); // 只复制已验证模板，不改变当前用户硬件状态。
+    return true; // 页句柄此后由进程清理者持有。
 }
 static bool user_access(const struct user_process *p, uint64_t address, size_t bytes, bool write) { // 检查完整用户范围，不直接解引用它。
     if (address >= AIRI_USER_LIMIT || bytes > AIRI_USER_LIMIT - address) // 排除内核地址与右端溢出。
@@ -238,6 +253,8 @@ static void cleanup(struct user_process *p) { // 目标根必须不活动，而�
         if (!airi_memory_return_page(owned_at(p, --p->count)->physical)) // 先退到最后一个真正拥有的页。
             airi_panic("cannot return owned user page"); // 归属错误不继续复用内存。
     trim_records(p); // 所有数据页已归还，最后释放保存其VA/PA的记录页。
+    if (p->fpu_physical && !airi_memory_return_page(p->fpu_physical)) // CPU寄存器不保留状态页指针，切离后可归还。
+        airi_panic("cannot reclaim user FPU state"); // 不能漏掉独立于用户数据的内核页面。
     if (p->stack.count && !airi_memory_region_free(&p->stack)) // 调用者已经离开目标内核栈，才可销毁它。
         airi_panic("cannot reclaim user kernel stack"); // 不能在finish中提前做这一步。
     airi_memset(p, 0, sizeof(*p)); // 不留下可重复释放的根或句柄。
@@ -304,7 +321,7 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
     }
     if (make_stack && !create_stack(p)) // 内核陷入栈先完成，再借高半区。
         return -12; // -ENOMEM，区域接口已回滚失败。
-    if (!airi_memory_user_space(&p->space)) // 创建独立低半区。
+    if (!create_fpu(p) || !airi_memory_user_space(&p->space)) // 浮点页与独立低半区都必须完整建立。
         goto failed; // 后续失败均收回所有已持有资源。
     for (unsigned i = 0; i < view.count; ++i) { // 每段独立赋予对应权限。
         const struct airi_elf_segment *segment = &view.segments[i]; // 元数据已经过统一校验。
@@ -343,7 +360,7 @@ static void place_frame(struct user_process *p) { // 初始寄存器值完成后
 static bool prepare_flat(struct user_process *p, const uint8_t *image, size_t bytes) { // 保留受控指令故障回归，不作为ELF加载接口。
     if (!bytes || bytes > 4096 || !create_stack(p)) // 本节旧映像最多一页。
         return false; // 栈创建失败已回滚。
-    if (!airi_memory_user_space(&p->space) || !owned_page(p, USER_CODE, AIRI_VM_EXEC) || !owned_page(p, USER_STACK, AIRI_VM_WRITE)) // 分别拥有根、代码和栈。
+    if (!create_fpu(p) || !airi_memory_user_space(&p->space) || !owned_page(p, USER_CODE, AIRI_VM_EXEC) || !owned_page(p, USER_STACK, AIRI_VM_WRITE)) // 分别拥有根、代码和栈。
         goto failed; // 所有权列表可清理全部已成功部分。
     airi_memcpy(airi_memory_direct(owned_at(p, 0)->physical), image, bytes); // 映像内引用保持旧固定布局。
     initial_frame(p, USER_CODE, NULL); // 受控汇编不读取argc/argv。
@@ -467,7 +484,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
     struct user_process *child = unused(); // 未发布的新槽。
     if (!child) // 表满没有可分配身份。
         return -11; // -EAGAIN。
-    if (!create_stack(child) || !airi_memory_user_space(&child->space)) // 先创建独立内核栈和空低半区。
+    if (!create_stack(child) || !create_fpu(child) || !airi_memory_user_space(&child->space)) // 先创建独立内核栈和空低半区。
         goto failed; // 父状态从未改变。
     for (unsigned i = 0; i < parent->count; ++i) { // 包括用户栈和此前申请的堆页。
         const struct user_page *page = owned_at(parent, i); // 每页原VA、权限和物理地址。
@@ -475,6 +492,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
             goto failed; // 回滚全部子资源，不改变父页面。
         airi_memcpy(airi_memory_direct(owned_at(child, child->count - 1)->physical), airi_memory_direct(page->physical), 4096); // 复制完整页内容，父子以后写入互不影响。
     }
+    airi_memcpy(airi_memory_direct(child->fpu_physical), airi_memory_direct(parent->fpu_physical), AIRI_FPU_BYTES); // 父陷入时已保存，子复制真实状态而非共享状态页。
     airi_fd_clone(&child->files, &parent->files); // 页复制全部成功后再取得FD引用，失败cleanup仍能撤销。
     child->initial = *parent_frame; // 用户RIP/RSP和寄存器从同一次fork返回点继续。
     child->initial.rax = 0; // 子分支看到fork返回0。
@@ -652,11 +670,13 @@ struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // 所有�
     }
     f->rflags &= ~((3ull << 12) | (1ull << 14) | (1ull << 17)); // 清IOPL、NT和VM。
     f->rflags |= 0x202; // 保留必需bit1并保持用户IF。
+    airi_fpu_restore(airi_memory_direct(current->fpu_physical)); // 当前身份已确定，恢复后内核和公共汇编不再使用浮点/XMM。
     return f; // 返回选中进程的完整现场。
 }
 struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *f) { // 本函数只在真实设备IRQ打断ring3后调用。
     if (!session_active || !current || current->state != USER_RUNNING) // 用户返回必须有明确现场所有者。
         airi_panic("device IRQ without a running user"); // 不把未知栈交给启动继续点。
+    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // IRQ可打断活XMM/x87值，先保存再决定是否交普通服务。
     if (!airi_async_work()) // 同步启动请求或已收集的旧通知无需切用户身份。
         return airi_user_resume(f); // 用户返回策略仍统一核对。
     current->frame = f; // 保存完整GPR与用户RIP/RSP，稍后从同一指令继续。
@@ -666,6 +686,7 @@ struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *f) { // 本
 struct airi_trap_frame *airi_user_timer(struct airi_trap_frame *f) { // IRQ路径不分配、不回收、不打印，只有状态与根选择。
     if (!session_active || !current || current->state != USER_RUNNING) // CS3的IRQ必须有明确用户所有者。
         airi_panic("user IRQ without a running process"); // 不把未知内核栈交给调度器。
+    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // 每个用户时钟入口先保存额外CPU状态，不能只保存GPR。
     current->frame = f; // 保存真正被打断的位置，不只保存C ABI寄存器。
     ++current->user_ticks; // 实际CPU用户时间片事件数。
     if (current->user_ticks % 2 == 0) // 每两个实际IRQ尝试一次round-robin。
@@ -681,6 +702,7 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     }
     if (!session_active || !current || current->state != USER_RUNNING || (f->cs & 3) != 3) // 内核错误不能伪装为用户故障。
         airi_panic("user trap without a running process"); // 维持故障边界。
+    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // syscall、fork、exec与用户故障都从本次真实硬件状态承接。
     collect_pending(); // 现在确实在另一条内核栈上，回收已经离开的孩子。
     current->frame = f; // 系统调用与故障都以当前实际现场为继续点。
     if (f->vector != 128) { // 用户CPU故障只结束拥有者。

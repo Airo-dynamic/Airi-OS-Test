@@ -85,3 +85,13 @@ airi_init_elf_end: /* 文件右端。 */
 airi_capacity_elf_start: /* ELF文件首。 */
 .incbin AIRI_CAPACITY_ELF /* 当前配置刚链接完成的独立用户程序。 */
 airi_capacity_elf_end: /* 文件半开右端。 */
+
+.section .rodata /* 浮点工作负载仍经过同一个静态ELF装载器。 */
+.global airi_simd_elf_start, airi_simd_elf_end /* 主程序输入边界。 */
+airi_simd_elf_start: /* 文件首。 */
+.incbin AIRI_SIMD_ELF /* 当前配置带真实SSE/x87指令的ELF。 */
+airi_simd_elf_end: /* 文件右端。 */
+.global airi_simd_reset_elf_start, airi_simd_reset_elf_end /* exec新入口观察映像。 */
+airi_simd_reset_elf_start: /* 文件首。 */
+.incbin AIRI_SIMD_RESET_ELF /* 当前配置的状态快照程序。 */
+airi_simd_reset_elf_end: /* 半开右端。 */

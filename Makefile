@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/arch/x86_64/irq.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/arch/x86_64/fpu.c kernel/arch/x86_64/irq.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -25,7 +25,7 @@ endif # 结束当前可选图形分支。
 # 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
 CASE := $(patsubst desktop-%,%,$(PROFILE))
 # patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o $(OUT)/kernel/arch/x86_64/switch.o $(OUT)/labs/airios/probe.o $(OUT)/labs/airios/images.o
+OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/fpu_seed.o $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o $(OUT)/kernel/arch/x86_64/switch.o $(OUT)/labs/airios/probe.o $(OUT)/labs/airios/images.o
 # 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
           -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
@@ -87,13 +87,13 @@ all: image
 # 只构建独立内核ELF，不制作启动镜像。
 kernel: $(OUT)/airios.elf
 # 模式规则将相同相对路径的C源文件编成当前配置对象；%匹配路径主体。
-$(OUT)/%.o: %.c
+$(OUT)/%.o: %.c Makefile
 # @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
 	@mkdir -p $(dir $@)
 # $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 # 同一对象布局下编译带预处理的汇编入口。
-$(OUT)/%.o: %.S
+$(OUT)/%.o: %.S Makefile
 # @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
 	@mkdir -p $(dir $@)
 # $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
@@ -196,23 +196,23 @@ lab-boot-info:
 	./build/labs/boot-info
 
 # 用户C使用自己的低地址模型、入口和库；绝不沿用内核高地址链接脚本。
-USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -mcmodel=small -Iinclude
+USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -msse2 -mno-avx -MMD -MP -mcmodel=small -Iinclude
 # 每个配置拥有独立用户对象，避免跨配置复用旧二进制。
 USER_OBJECTS := $(OUT)/user/start.o $(OUT)/user/hello.o $(OUT)/user/bytes.o $(OUT)/user/syscall.o
 # 入口汇编与内核汇编分别形成对象，符号_start不在同一个链接目标中冲突。
-$(OUT)/user/start.o: labs/airios/start.S
+$(OUT)/user/start.o: labs/airios/start.S Makefile
 # 先建立独立用户产物目录。
 	@mkdir -p $(dir $@)
 # 当前交叉编译器不链接宿主运行时。
 	$(CC) $(USER_FLAGS) -c $< -o $@
 # 用户C程序只读取自有用户库声明。
-$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 先建立输出目录。
 	@mkdir -p $(dir $@)
 # 编译为用户模型对象。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # 用户库的字节实现与系统调用实现共用这一规则。
-$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 输出目录与当前配置绑定。
 	@mkdir -p $(dir $@)
 # 所有用户库均使用同样的freestanding约束。
@@ -222,7 +222,7 @@ $(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
 # 用户只链接自己的_start、main和libc子集，无宿主依赖。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
 # 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf $(OUT)/user/async.elf
+$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf $(OUT)/user/async.elf Makefile
 # 建立包装对象目录。
 	@mkdir -p $(dir $@)
 # 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
@@ -231,7 +231,7 @@ $(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/u
 # 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
 USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
 # 普通用户C工作负载仍使用相同低地址编译约束。
-$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 创建当前配置目录。
 	@mkdir -p $(dir $@)
 # 只读取用户库头，不引入内核实现。
@@ -242,7 +242,7 @@ $(OUT)/user/processes.elf: $(USER_COMMON) $(OUT)/user/processes.o labs/airios/pr
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/processes.o -o $@
 
 # exec目标独立编译，保持同一用户ABI与链接布局。
-$(OUT)/user/worker.o: labs/airios/worker.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/worker.o: labs/airios/worker.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 建立当前配置输出目录。
 	@mkdir -p $(dir $@)
 # 普通用户C仅链接自己的运行库。
@@ -253,7 +253,7 @@ $(OUT)/user/worker.elf: $(USER_COMMON) $(OUT)/user/worker.o labs/airios/program.
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/worker.o -o $@
 
 # 文件演示有独立用户main，复用自有入口与库。
-$(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 按配置建立目录。
 	@mkdir -p $(dir $@)
 # 同样禁止宿主库和浮点寄存器。
@@ -264,7 +264,7 @@ $(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/files.o -o $@
 
 # 存储工作负载有独立用户main，普通启动不自动追加正式记录。
-$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 建立配置专属目录。
 	@mkdir -p $(dir $@)
 # 保持相同用户整数编译约束。
@@ -275,7 +275,7 @@ $(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/progra
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/storage.o -o $@
 
 # 非阻塞管道有独立用户main，保持前面程序各自可运行。
-$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 当前配置目录单独建立。
 	@mkdir -p $(dir $@)
 # 不链接内核头或宿主运行时。
@@ -286,7 +286,7 @@ $(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/pipes.o -o $@
 
 # 阻塞和就绪等待工作负载独立于非阻塞管道程序。
-$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 仍按配置隔离用户对象。
 	@mkdir -p $(dir $@)
 # 只使用自有用户库与整数寄存器。
@@ -297,7 +297,7 @@ $(OUT)/user/waits.elf: $(USER_COMMON) $(OUT)/user/waits.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/waits.o -o $@
 
 # 异步用户程序与重置别名共用独立main和低地址入口。
-$(OUT)/user/async.o: labs/airios/async.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/async.o: labs/airios/async.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 当前配置的对象目录。
 	@mkdir -p $(dir $@)
 # USER_FLAGS含公开ABI头，不能依赖内核内部结构。
@@ -308,7 +308,7 @@ $(OUT)/user/async.elf: $(USER_COMMON) $(OUT)/user/async.o labs/airios/program.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/async.o -o $@
 
 # shell与贯通演示是独立的低地址用户ELF，不链接彼此main。
-$(OUT)/user/%.o: labs/airios/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h
+$(OUT)/user/%.o: labs/airios/%.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 与既有libc模式规则路径不同，Make按存在的源选择。
 	@mkdir -p $(dir $@)
 # 复用整数用户ABI，不借宿主运行时。
@@ -361,3 +361,31 @@ $(OUT)/user/capacity.elf: $(USER_COMMON) $(OUT)/user/capacity.o labs/airios/prog
 $(OUT)/labs/airios/images.o: $(OUT)/user/capacity.elf
 # 原始ELF路径只由此对象的预处理变量消费。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CAPACITY_ELF='"$(OUT)/user/capacity.elf"'
+
+# 用户SSE/x87观察由独立汇编保持活寄存器，不能用普通函数调用假定XMM保留。
+$(OUT)/user/simd-probe.o: labs/airios/simd-probe.S Makefile
+# 这个对象只进入用户ELF，与内核状态清理汇编分开。
+	@mkdir -p $(dir $@)
+# USER_FLAGS开放SSE2但不开放未保存的AVX。
+	$(CC) $(USER_FLAGS) -c $< -o $@
+# simd的main有真实double表达式；另链接寄存器观察汇编。
+$(OUT)/user/simd.elf: $(USER_COMMON) $(OUT)/user/simd.o $(OUT)/user/simd-probe.o labs/airios/program.ld
+# 静态链接仍只有一份main，不借宿主浮点运行库。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/simd.o $(OUT)/user/simd-probe.o -o $@
+# reset探针在任何编译器SSE指令之前快照入口状态，因此此main保持general-only。
+$(OUT)/user/simd-reset.o: labs/airios/simd-reset.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
+# 与普通用户源使用同一配置目录。
+	@mkdir -p $(dir $@)
+# 后面的general-only只限制此观察C文件，内嵌FXSAVE64仍明确执行。
+	$(CC) $(USER_FLAGS) -mgeneral-regs-only -Ilabs/airios/include -c $< -o $@
+# 新ELF用于观察exec重新建立默认CPU状态。
+$(OUT)/user/simd-reset.elf: $(USER_COMMON) $(OUT)/user/simd-reset.o labs/airios/program.ld
+# 用户入口尚不触碰XMM，main第一件事保存真实状态。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/simd-reset.o -o $@
+# 包装只等待本配置两份真实用户程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/simd.elf $(OUT)/user/simd-reset.elf
+# 文件名以C字符串宏交给预处理汇编。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_SIMD_ELF='"$(OUT)/user/simd.elf"' -DAIRI_SIMD_RESET_ELF='"$(OUT)/user/simd-reset.elf"'
+
+# 用户C与汇编也生成传递头文件依赖，Makefile变化会重编各对象，避免保留旧SSE编译策略。
+-include $(wildcard $(OUT)/user/*.d)

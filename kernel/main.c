@@ -1,3 +1,4 @@
+#include <airi/fpu.h> // 用户浮点状态在首次用户程序以前建立。
 #include <airi/async.h> // 有界SQ/CQ先在真实设备演示，再接用户。
 #include <airi/storage.h> // 正式日志区跨进程和QEMU重启保留。
 #include <airi/journal.h> // 追加记录恢复演示独立于RAM文件。
@@ -26,6 +27,8 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     if (error)  // 有具体原因则不能继续读取未经验证的数据。
         airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
     airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
+    if (!airi_fpu_init()) // 诊断和常驻启动都必须拥有完整用户CPU状态。
+        airi_panic("CPU requires FXSR, SSE and SSE2 user state support"); // 不把不支持目标带入用户ELF。
     airi_log("[BOOT_MODE] name=%s", diagnostics ? "diagnostic" : "service"); // 当前镜像的启动策略明确可见。
     if (diagnostics) // 服务启动只安装异常入口，不主动触发错误。
         airi_trap_demo(); // 诊断配置验证两种异常栈形状。

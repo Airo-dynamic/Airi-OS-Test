@@ -264,6 +264,11 @@
       "id": "K40",
       "title": "K40 · q35设备中断、used完成与屏蔽后备",
       "document": "dev-log/core/40-block-interrupts.md"
+    },
+    {
+      "id": "K41",
+      "title": "K41 · 每进程浮点/SSE状态与fork、exec隔离",
+      "document": "dev-log/core/41-user-fpu-state.md"
     }
   ]
 }

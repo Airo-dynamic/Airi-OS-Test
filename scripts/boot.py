@@ -114,6 +114,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         assert '[FILES_USER_OK]' in text and '[FD_EXEC_OK]' in text # RAM文件和成功exec继承均完成。
                         assert '[PROCESS_FORK_WAIT_OK]' in text and '[PROCESS_DEMO_OK]' in text # 复制、真实阻塞、timer换身份和回收都须完成。
                         assert '[ELF_LOAD]' in text and '[ELF_USER_OK]' in text # 独立ELF段、BSS与用户libc必须真正运行。
+                        assert '[CPU_STATE_READY] x87=1 sse2=1 fxsave_bytes=512 avx=off kernel=general-only' in text # 用户SSE编译前必须真正准备CPU保存边界。
                         assert '[USER_DEMO_OK]' in text # 用户输出、指针拒绝和用户故障后内核必须继续。
                         assert '[HEAP_CAPACITY_OK] initial=65536 bytes=1048576 live=0 chunks=16 preserved=1 limit=null' in text # 新映射、活对象保持、上限和缓存归属均实际演示。
                         assert '[TASK_DEMO_OK]' in text # 两个独立栈必须交错并全部回收。

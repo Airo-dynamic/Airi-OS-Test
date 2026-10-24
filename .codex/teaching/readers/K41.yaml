@@ -1,0 +1,38 @@
+checkpoint: K41
+baseline: baseline.yaml
+start: K40
+current_operation: 两个用户跨PIT保持活x87/XMM与控制环境，fork继承、失败exec保留、成功exec重建，错误保存只终止自己
+already_explained:
+- concept: 完整通用现场与用户返回
+  at: ../../../dev-log/core/20-user-boundary.md#safe-user-return
+  establishes: 公共陷入保存GPR，返回检查RIP/RSP/段与标志；该版本尚未保存浮点
+- concept: 用户时间片与真实身份切换
+  at: ../../../dev-log/core/22-processes.md#timer-process-switch
+  establishes: current、TSS、CR3和frame一同选择，IRQ仅抢占CS3，内核C不可重入
+- concept: 小控制块与额外物理页所有权
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-records
+  establishes: 元数据不塞大数组到exec局部对象，HHDM访问不意味着用户可以写
+- concept: 设备IRQ也可能离开用户
+  at: ../../../dev-log/core/40-block-interrupts.md#block-irq-context
+  establishes: 设备提示可暂回普通服务栈，必须保留实际用户现场
+first_use:
+- concept: x87、XMM与MXCSR的状态布局
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-state-shape
+  establishes: 普通double也使用SSE2，数据与控制均需隔离，512字节映像要求16字节对齐
+- concept: CPU能力、允许位与合法模板
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-enable-template
+  establishes: CPUID确认FXSR/SSE2，CR0/CR4只改必要位，清真实数据后以FXSAVE形成模板，不开启AVX
+- concept: 独立状态页的进程生命周期
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-process-owner
+  establishes: 用户陷入先存、返回恢复，fork复制、exec事务换新、失败保留、退出归还
+- concept: 函数调用约定与系统调度的区别
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-probe-abi
+  establishes: XMM数据caller-saved，控制字callee-saved；汇编先验证再回C并恢复调用者环境
+- concept: 改编译策略时使旧对象失效
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-build
+  establishes: Makefile作为对象前置保持源为首项，用户.d记录传递头依赖；用户SSE2与内核general-only分别生效
+not_assumed:
+- AVX/XSAVE、线程、TLS、浮点信号恢复、多核或内核浮点已经完成
+limits:
+- 单核固定qemu64，单进程一份512字节状态；每次用户陷入保存，非lazy上下文策略
+- MXCSR保留位故障在本轮TCG未按预期发生；对齐GP是实际验证路径
