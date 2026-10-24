@@ -207,5 +207,11 @@
     "Linux prior actual SSH255 remains unverified",
     "No GUI presentation change or new GUI run; K49 visual combination retained",
     "Real board/native network/tunnel not present"
-  ]
+  ],
+  "release": {
+    "snapshots_exit": 0,
+    "snapshots": 63,
+    "export_exit": 0,
+    "path": "/private/tmp/airios-k51-release-20261024"
+  }
 }

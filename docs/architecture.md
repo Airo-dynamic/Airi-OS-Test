@@ -55,7 +55,7 @@ gui 只增加自己的显示适配、frontend、图形观察程序、资产和�
 
 ## 课程、分支与导出
 
-main 基础18节点之后已追加K14–K51、L02–L08，当前63节点。00–02 保持实现字节及学习连续性，03–10 继续启动和输入，K11–K13 完成串口日常入口，L01 是必修 Linux 对照。作者工具 T01–T03 沿 main 继续，不要求图形课程完成。
+main 基础18节点之后已追加K14–K52、L02–L08，当前64节点。00–02 保持实现字节及学习连续性，03–10 继续启动和输入，K11–K13 完成串口日常入口，L01 是必修 Linux 对照。作者工具 T01–T03 沿 main 继续，不要求图形课程完成。
 
 gui 从 main 的 00 根提交分叉，以 15 个节点 G11–G24、G26 只增加图形自己的路径，可无冲突合入任一现有 main 阶段。分支起点决定哪些路径可以独立维护，课程的 requires 则说明重建和运行需要哪些知识与实现；图形的 K11/K13 运行前置不改变分支起点。
 
@@ -134,3 +134,5 @@ K49将页表根、记录页和数量收进96字节user_memory，页管理辅助�
 K50将FS/FPU、内核陷入栈、frame/initial、时钟/故障与等待条件收进424字节user_execution，user_process保留进程资源并暂内嵌一个执行者，整体800字节。create_stack显式接执行者和合法槽号，create_fpu/place_frame只接执行者；destroy_execution必须在其他栈上调用。调度和陷入ABI保持，尚未提供共享线程。
 
 K51修正TLS关联校验：初值filesz必须完整对应某个LOAD文件范围，零尾部memsz不要求被普通LOAD memsz包住；模板起点仍锚定合法段，纯零模板可在段右端。运行副本页预算与清零保持，ctls-tail实际TLS4/273、普通LOAD4/5，分别读写互不覆盖。
+
+K52保留八进程组，增加全局八worker，调度遍历十六execution。current指所属进程，running指实际执行者；process唯一拥有共享内存/FD/异步owner，execution独立持有FS、FPU、内核栈与等待。创建继承父FPU环境并从ELF重新建立TLS；主执行者负责创建/join，工作return保留结果，原始exit或用户故障结束整组。join后安全归还内核栈/FPU，用户栈/TLS最多144页缓存至进程exec/exit。并发期间拒绝fork/exec/waitpid/release，等待中的FD拒绝close；无pthread/detach/cancel、主执行者独立退出或线程安全malloc。目录实测255字节，仍用256容量。

@@ -30,3 +30,5 @@ AiriOS会从较小的有界队列实现同一段生命周期：谁持有请求�
 ## 已发布入口
 
 [L04存储](../dev-log/linux/04-storage.md)对应向量I/O、直接I/O和同步替换，[L05线程](../dev-log/linux/05-threads.md)对应队列谓词与futex，[L06就绪](../dev-log/linux/06-epoll.md)对应Reactor背压，[L07完成](../dev-log/linux/07-uring.md)对应批量读取的身份和缓冲寿命。[K33](../dev-log/core/33-shell-pipeline.md)把用户分配、FD、等待与设备完成串起来，[L08](../dev-log/linux/08-comparison.md)在同一TCP负载中区分等待位置，不提供未经实测的性能优劣结论。
+
+K52将线程池所需的共享执行落到自有内核：工作者共享FD表和进程注册buffer，栈/TLS/CPU状态独立；主执行者创建和join，进程退出收拢整个组。回看BOSS时可先区分进程资源与每条执行链，再继续L05的条件谓词与futex。当前用户malloc仍单线程，实际请求对象不能无保护地由多个工作者同时分配；下一步建立内核比较入睡和用户互斥，不以yield循环替代最终线程库。

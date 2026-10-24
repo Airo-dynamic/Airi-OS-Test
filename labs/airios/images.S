@@ -147,6 +147,12 @@ airi_malloc_elf_start: /* 用户页与对象借用的真实观察程序。 */
 .incbin AIRI_MALLOC_ELF /* 由本配置静态链接，不借宿主malloc。 */
 airi_malloc_elf_end: /* 输入范围的排他右端。 */
 
+.balign 8 /* 共享线程观察仍作为独立用户ELF装载。 */
+.global airi_threads_elf_start, airi_threads_elf_end /* 目录只保存这份只读映像范围。 */
+airi_threads_elf_start: /* 自有运行库含C11 TLS和共享执行桥接器。 */
+.incbin AIRI_THREADS_ELF /* 当前配置真正交叉链接的文件。 */
+airi_threads_elf_end: /* 完整输入文件的排他右端。 */
+
 .balign 8 /* TLS零尾部观察仍经真实静态ELF装载。 */
 .global airi_ctls_tail_elf_start, airi_ctls_tail_elf_end /* 输入范围供真实初始程序目录使用。 */
 airi_ctls_tail_elf_start: /* 普通BSS小于tbss的最小程序。 */

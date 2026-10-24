@@ -319,6 +319,11 @@
       "id": "K51",
       "title": "K51 · TLS初值与零尾部分别校验",
       "document": "dev-log/core/51-tls-zero-tail.md"
+    },
+    {
+      "id": "K52",
+      "title": "K52 · 同进程共享执行者与阻塞join",
+      "document": "dev-log/core/52-shared-executions.md"
     }
   ]
 }

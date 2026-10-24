@@ -474,6 +474,27 @@ $(OUT)/labs/airios/images.o: $(OUT)/user/malloc-probe.elf
 # 本配置产物路径仅作为.incbin输入。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MALLOC_ELF='"$(OUT)/user/malloc-probe.elf"'
 
+# 共享执行库显式链接，不让早期原始程序自动依赖线程入口。
+$(OUT)/user/threads-lib.o: labs/airios/libc/threads.c Makefile
+# 单独命名，与观察程序threads-probe.o分别保存。
+	@mkdir -p $(dir $@)
+# 使用当前用户C目标和自动头依赖。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 用户桥接器的call遵循普通C ABI，工作返回再进入自有内核调用。
+$(OUT)/user/thread-entry.o: labs/airios/thread-entry.S Makefile
+# 它不属于内核架构入口对象。
+	@mkdir -p $(dir $@)
+# 用户汇编与C使用同一无红区、SSE2目标配置。
+	$(CC) $(USER_FLAGS) -c $< -o $@
+# 观察程序选择errno/TLS和共享执行库，不调用宿主pthread。
+$(OUT)/user/threads.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/threads-probe.o labs/airios/program.ld
+# 一份静态用户ELF，全部自有运行符号在链接时解析。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录只包本配置真正链接的共享执行程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/threads.elf
+# 路径宏供只读incbin消费。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_THREADS_ELF='"$(OUT)/user/threads.elf"'
+
 # 单独观察TLS零尾部与较小普通BSS，不需要先实现多个执行者。
 $(OUT)/user/ctls-tail.elf: $(USER_COMMON) $(OUT)/user/ctls-tail.o labs/airios/program.ld
 # 文件初值来自tdata，tbss运行空间不由普通LOAD长度替代。

@@ -1,0 +1,48 @@
+checkpoint: K52
+baseline: baseline.yaml
+start: K51
+current_operation: 主执行者创建同进程工作者，共享文件和buffer，跨PIT保持独立TLS/CPU状态，join后复用并观察进程级退出故障
+already_explained:
+- concept: 用户内存唯一所有者
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-owner
+  establishes: memory共同持有页表和数据，FD/异步owner与执行栈分别归属
+- concept: CPU继续点与等待属于执行链
+  at: ../../../dev-log/core/50-user-execution.md#execution-dispatch
+  establishes: 激活进程内存并选择执行栈/frame，FS/FPU保存恢复必须匹配执行者
+- concept: 独立静态TLS运行块
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: 初值从ELF复制、零尾部清零，FS指向运行副本及TCB
+- concept: TLS零尾部与普通LOAD
+  at: ../../../dev-log/core/51-tls-zero-tail.md#tls-tail-validation
+  establishes: 初值完整对应LOAD，零尾部另建运行空间，当前线程ELF65字节不被普通LOAD56字节拒绝
+first_use:
+- concept: 一个进程与多条执行链
+  at: ../../../dev-log/core/52-shared-executions.md#thread-resource-owner
+  establishes: process唯一拥有共享页/FD/owner，主/工作execution分别有TID和CPU状态，return与进程exit不同
+- concept: current与running分开
+  at: ../../../dev-log/core/52-shared-executions.md#thread-scheduler
+  establishes: 资源从current取得，现场和等待从running取得；十六调度槽不以单调TID索引
+- concept: 共享映射中的私有栈和TLS缓存
+  at: ../../../dev-log/core/52-shared-executions.md#thread-create-pages
+  establishes: 每槽独立用户/内核栈和TLS，创建失败只回滚新增页，join保留用户缓存而新建TLS对象，FPU页复制创建者环境
+- concept: 用户函数桥接与间接call
+  at: ../../../dev-log/core/52-shared-executions.md#thread-user-bridge
+  establishes: 初始RSP16对齐，函数地址先保存在RAX，参数进RDI，call压返回地址后满足C ABI，40提交完整long结果
+- concept: 结果等待与安全栈回收
+  at: ../../../dev-log/core/52-shared-executions.md#thread-join-lifetime
+  establishes: 查状态和登记连贯，ZOMBIE结果交出一次后REAP_PENDING，在其他栈上归还内核资源
+- concept: 有界并发资源策略
+  at: ../../../dev-log/core/52-shared-executions.md#thread-boundaries
+  establishes: 未收拢工作者期间拒绝映像/页解除，阻塞FD拒绝close，异步buffer按共享PID授权，malloc仍单线程
+- concept: C11发布与普通共享数据
+  at: ../../../dev-log/core/52-shared-executions.md#thread-user-publication
+  establishes: 同一原子gate的release/acquire观察发布后再读普通输入，volatile不提供同步，lock-free值2不表示两字节宽
+- concept: 浮点环境继承和普通调用保持
+  at: ../../../dev-log/core/52-shared-executions.md#thread-private-cpu
+  establishes: 继承父修改的MXCSR/x87控制，再各自修改跨抢占，所有工作返回恢复入场环境，父自己的值保持
+not_assumed:
+- pthread、工作者管理树、主线程独立退出、detach/cancel、TLS析构、SMP或线程安全malloc已经实现
+- 注册buffer共享意味着多消费者SQ/CQ压力已验证
+limits:
+- 全系统八个额外执行者；主执行者负责创建/join，普通进程exit或任一用户CPU故障结束所属进程组
+- 用户栈/TLS缓存至exec/exit，最多144页；内核栈/FPU在join后安全栈上回收；当前close忙策略不等同Linux在途引用
