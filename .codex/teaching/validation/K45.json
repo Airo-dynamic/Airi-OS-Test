@@ -218,7 +218,24 @@
   "not_verified": [
     "Blocking readv/writev, shared threads, asynchronous arbitrary iovecs, zero-copy and full POSIX",
     "No new persistence or physical failure guarantee",
-    "Real board, Linux labs and native network/tunnel",
-    "New GUI combination pending"
-  ]
+    "Real board, Linux labs and native network/tunnel"
+  ],
+  "gui": {
+    "path": "/tmp/airios-k39-gui-20261024",
+    "main_source_files": 156,
+    "main_source_equal": true,
+    "test_exit": 0,
+    "scope": "10 diagnostic profiles, 3 inputs, 3 storage sessions",
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_checks": 58,
+    "guest_day_night_viewed": true,
+    "artifacts": "artifacts/k45"
+  },
+  "release": {
+    "source": "clean temporary clone at0e99f9f",
+    "snapshots": 57,
+    "export": "/private/tmp/airios-k45-release-20261024",
+    "exit": 0
+  }
 }
