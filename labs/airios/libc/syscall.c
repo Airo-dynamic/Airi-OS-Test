@@ -118,3 +118,10 @@ long airi_release(void *address, size_t bytes) { // 调用后用户不能继续�
 long airi_sleep(unsigned ticks) { // 当前只有单调PIT计数，等待期间不消耗用户执行时间。
     return call3(32, ticks, 0, 0); // 0成功或负错误，截止由内核保存。
 }
+
+long airi_fs_set(uintptr_t base) { // 用户代码只提交数值，内核先排除高半区与非规范值。
+    return call3(33, base, 0, 0); // 0成功，-22失败且保持原基址；不设置POSIX errno。
+}
+long airi_fs_base(void) { // 通过受检查入口观察本次陷入时真实硬件状态。
+    return call3(34, 0, 0, 0); // 当前只支持低半区，可用非负long表示。
+}

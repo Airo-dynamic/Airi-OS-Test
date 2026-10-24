@@ -1,3 +1,4 @@
+#include <airi/tls.h> // 每次真实用户陷入取回FS，内核处理期间清零。
 #include <airi/fpu.h> // 每进程拥有一份非用户映射的浮点/SSE状态。
 #include <airi/async.h> // 进程轮次与固定缓冲资源的生命周期。
 #include <airi/arch.h> // CPU空闲与用户调度门留在架构适配。
@@ -25,6 +26,7 @@ struct user_process { // 所有权和调度状态由内核持有，用户只能�
     bool async_owned; // 本控制块是否持有当前PID的异步owner，局部旧exec副本必须清除此所有权。
     struct airi_fd_table files; // exec转移表项，fork增加同一打开对象的引用。
     struct airi_address_space space; // 根和低半区表自有，高半区借用。
+    uint64_t fs_base; // 用户FS基址只保存数值，映射由原用户页所有权管理。
     uint64_t fpu_physical; // 独立状态页不塞进exec局部控制块，也不算用户数据页。
     struct airi_kernel_region stack; // 不能在仍使用它的C调用中释放。
     uint64_t records[RECORD_CHUNKS]; // 元数据页的物理地址；各页经HHDM访问，不映射给用户。
@@ -56,6 +58,8 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_tls_elf_start[], airi_tls_elf_end[]; // FS本地数据与切换探针。
+extern const uint8_t airi_tls_reset_elf_start[], airi_tls_reset_elf_end[]; // 成功exec清基址观察。
 extern const uint8_t airi_simd_elf_start[], airi_simd_elf_end[]; // 浮点、抢占和继承探针。
 extern const uint8_t airi_simd_reset_elf_start[], airi_simd_reset_elf_end[]; // exec新状态观察。
 extern const uint8_t airi_init_elf_start[], airi_init_elf_end[]; // 用户态常驻监督程序。
@@ -75,6 +79,8 @@ struct executable { const char *name; const uint8_t *start, *end; }; // 初始�
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
     {"init", airi_init_elf_start, airi_init_elf_end}, // 管理前台shell的常驻用户进程。
+    {"tls", airi_tls_elf_start, airi_tls_elf_end}, // 每个用户身份独立FS基址。
+    {"tls-reset", airi_tls_reset_elf_start, airi_tls_reset_elf_end}, // 新ELF不沿用旧FS。
     {"simd", airi_simd_elf_start, airi_simd_elf_end}, // 真实SSE/x87隔离与fork/exec。
     {"simd-reset", airi_simd_reset_elf_start, airi_simd_reset_elf_end}, // 新ELF入口的默认状态。
     {"capacity", airi_capacity_elf_start, airi_capacity_elf_end}, // 预算耗尽后回收并继续运行。
@@ -492,6 +498,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
             goto failed; // 回滚全部子资源，不改变父页面。
         airi_memcpy(airi_memory_direct(owned_at(child, child->count - 1)->physical), airi_memory_direct(page->physical), 4096); // 复制完整页内容，父子以后写入互不影响。
     }
+    child->fs_base = parent->fs_base; // fork继承同一用户VA，指向复制后的子页面，不共享物理内容。
     airi_memcpy(airi_memory_direct(child->fpu_physical), airi_memory_direct(parent->fpu_physical), AIRI_FPU_BYTES); // 父陷入时已保存，子复制真实状态而非共享状态页。
     airi_fd_clone(&child->files, &parent->files); // 页复制全部成功后再取得FD引用，失败cleanup仍能撤销。
     child->initial = *parent_frame; // 用户RIP/RSP和寄存器从同一次fork返回点继续。
@@ -663,6 +670,12 @@ static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用�
     airi_log("[EXEC_COMMIT] pid=%u program=%s old_pages=%u new_pages=%u", current->pid, name, old_pages, current->count); // 名称是内核副本，不引用刚释放用户页。
     return 0; // 调用者直接恢复新f，不把这个0写回旧用户调用。
 }
+void airi_user_enter(struct airi_trap_frame *f) { // 所有CS3来源在分派设备、timer或syscall之前共同保存。
+    if (!session_active || !current || current->state != USER_RUNNING || (f->cs & 3) != 3) // 当前实际栈必须有运行所有者。
+        airi_panic("CPU state without a running user"); // 内核int129不经过这个入口。
+    current->fs_base = airi_tls_take(); // 先取真实用户基址，再把硬件FS清零供内核处理。
+    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // x87/XMM也在此唯一入口保存，不能因设备没有新ISR而跳过。
+}
 struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // 所有用户iretq路径使用同一规范地址和标志策略。
     if (f->cs != 27 || f->ss != 35 || f->rip >= AIRI_USER_LIMIT || f->rsp >= AIRI_USER_LIMIT) { // 坏返回不能变成内核GP。
         airi_log("[USER_RETURN_REJECTED] pid=%u rip=0x%llx rsp=0x%llx", current->pid, (unsigned long long)f->rip, (unsigned long long)f->rsp); // 不解引用错误地址。
@@ -670,13 +683,13 @@ struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // 所有�
     }
     f->rflags &= ~((3ull << 12) | (1ull << 14) | (1ull << 17)); // 清IOPL、NT和VM。
     f->rflags |= 0x202; // 保留必需bit1并保持用户IF。
+    airi_tls_restore(current->fs_base); // 与所选用户身份一起恢复，随后内核C不会通过FS访问数据。
     airi_fpu_restore(airi_memory_direct(current->fpu_physical)); // 当前身份已确定，恢复后内核和公共汇编不再使用浮点/XMM。
     return f; // 返回选中进程的完整现场。
 }
 struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *f) { // 本函数只在真实设备IRQ打断ring3后调用。
     if (!session_active || !current || current->state != USER_RUNNING) // 用户返回必须有明确现场所有者。
         airi_panic("device IRQ without a running user"); // 不把未知栈交给启动继续点。
-    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // IRQ可打断活XMM/x87值，先保存再决定是否交普通服务。
     if (!airi_async_work()) // 同步启动请求或已收集的旧通知无需切用户身份。
         return airi_user_resume(f); // 用户返回策略仍统一核对。
     current->frame = f; // 保存完整GPR与用户RIP/RSP，稍后从同一指令继续。
@@ -686,7 +699,6 @@ struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *f) { // 本
 struct airi_trap_frame *airi_user_timer(struct airi_trap_frame *f) { // IRQ路径不分配、不回收、不打印，只有状态与根选择。
     if (!session_active || !current || current->state != USER_RUNNING) // CS3的IRQ必须有明确用户所有者。
         airi_panic("user IRQ without a running process"); // 不把未知内核栈交给调度器。
-    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // 每个用户时钟入口先保存额外CPU状态，不能只保存GPR。
     current->frame = f; // 保存真正被打断的位置，不只保存C ABI寄存器。
     ++current->user_ticks; // 实际CPU用户时间片事件数。
     if (current->user_ticks % 2 == 0) // 每两个实际IRQ尝试一次round-robin。
@@ -702,7 +714,6 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     }
     if (!session_active || !current || current->state != USER_RUNNING || (f->cs & 3) != 3) // 内核错误不能伪装为用户故障。
         airi_panic("user trap without a running process"); // 维持故障边界。
-    airi_fpu_save(airi_memory_direct(current->fpu_physical)); // syscall、fork、exec与用户故障都从本次真实硬件状态承接。
     collect_pending(); // 现在确实在另一条内核栈上，回收已经离开的孩子。
     current->frame = f; // 系统调用与故障都以当前实际现场为继续点。
     if (f->vector != 128) { // 用户CPU故障只结束拥有者。
@@ -925,6 +936,16 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
             return schedule(REASON_IO); // 其他用户继续；全阻塞时启动栈hlt等PIT。
         }
     }
+    else if (f->rax == 33) { // 自有FS基址设置，只验证数值，不固定或分配其目标页。
+        if (f->rdi >= AIRI_USER_LIMIT) // 非规范中间地址与所有内核高半区都在特权WRMSR之前拒绝。
+            f->rax = (uint64_t)-22ll; // -EINVAL，旧保存值不变。
+        else { // 0表示停用，其余低半区值即使尚未映射也可登记。
+            current->fs_base = f->rdi; // 当前硬件仍为内核0，统一返回入口才写用户值。
+            f->rax = 0; // 不解引用、不读取该用户地址。
+        }
+    }
+    else if (f->rax == 34) // 查询的是陷入时从硬件读取的真实当前值。
+        f->rax = current->fs_base; // 低半区基址可由long无歧义表示，不返回内核地址。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。

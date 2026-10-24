@@ -1,3 +1,4 @@
+#include <airi/tls.h> // FS基址准备与用户CPU状态分开，服务启动也需要。
 #include <airi/fpu.h> // 用户浮点状态在首次用户程序以前建立。
 #include <airi/async.h> // 有界SQ/CQ先在真实设备演示，再接用户。
 #include <airi/storage.h> // 正式日志区跨进程和QEMU重启保留。
@@ -29,6 +30,8 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
     airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
     if (!airi_fpu_init()) // 诊断和常驻启动都必须拥有完整用户CPU状态。
         airi_panic("CPU requires FXSR, SSE and SSE2 user state support"); // 不把不支持目标带入用户ELF。
+    if (!airi_tls_init()) // 用户FS设置只能由已初始化的架构接口完成。
+        airi_panic("CPU lacks user FS base support"); // 不进入无法隔离本地状态的用户程序。
     airi_log("[BOOT_MODE] name=%s", diagnostics ? "diagnostic" : "service"); // 当前镜像的启动策略明确可见。
     if (diagnostics) // 服务启动只安装异常入口，不主动触发错误。
         airi_trap_demo(); // 诊断配置验证两种异常栈形状。

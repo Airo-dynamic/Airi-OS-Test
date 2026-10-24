@@ -95,3 +95,14 @@ airi_simd_elf_end: /* 文件右端。 */
 airi_simd_reset_elf_start: /* 文件首。 */
 .incbin AIRI_SIMD_RESET_ELF /* 当前配置的状态快照程序。 */
 airi_simd_reset_elf_end: /* 半开右端。 */
+
+.balign 8 /* 两份FS观察程序仍是独立ELF字节，不是内核函数。 */
+.global airi_tls_elf_start, airi_tls_elf_end /* 注册目录使用真实起止范围。 */
+airi_tls_elf_start: /* 本配置的用户程序。 */
+.incbin AIRI_TLS_ELF /* 路径由Makefile传入，不借宿主ABI。 */
+airi_tls_elf_end: /* 当前ELF结束位置。 */
+.balign 8 /* reset映像单独对齐。 */
+.global airi_tls_reset_elf_start, airi_tls_reset_elf_end /* 成功exec的新目标。 */
+airi_tls_reset_elf_start: /* 新映像独立入口。 */
+.incbin AIRI_TLS_RESET_ELF /* main只查询新基址并输出。 */
+airi_tls_reset_elf_end: /* 新ELF的右端。 */

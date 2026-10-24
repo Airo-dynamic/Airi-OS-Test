@@ -50,3 +50,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 接着完成必修的 [Linux 入口对照](../linux/01-entry.md)，把普通函数调用、Linux 系统调用与内核设备访问放到各自的执行环境里。后续阶段继续以串口与 Linux 实验作为必需反馈，图形接入作为可选消费者。
 
 [K41 浮点与向量状态](41-user-fpu-state.md)给每个用户独立CPU状态页，沿抢占、fork、exec与退出保持所有权。
+
+[K42 用户FS基址](42-user-fs-base.md)将实际FS寻址接入统一用户保存与恢复，验证不同基址的抢占、fork/exec及释放后缺页。

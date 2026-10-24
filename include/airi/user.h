@@ -5,6 +5,7 @@
 void airi_user_init(void); // 初始化用户文件资源，教学演示与服务启动共用。
 int airi_user_boot(const char *name); // 内核启动固定目录中的根用户，返回仅表示该持续会话已经停止。
 void airi_user_demo(void); // 运行受控隔离演示与独立C用户ELF，结束后回收。
+void airi_user_enter(struct airi_trap_frame *frame); // 所有CS3陷入先保存额外CPU状态并清内核FS。
 struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *frame); // 允许返回另一条完整中断调用链。
 struct airi_trap_frame *airi_user_device_irq(struct airi_trap_frame *frame); // 真实设备提示可把用户现场交给普通服务栈，不在IRQ复制结果。
 struct airi_trap_frame *airi_user_timer(struct airi_trap_frame *frame); // 用户时间片在完整现场边界轮转，内核仍不可抢占。

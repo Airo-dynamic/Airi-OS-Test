@@ -269,6 +269,11 @@
       "id": "K41",
       "title": "K41 · 每进程浮点/SSE状态与fork、exec隔离",
       "document": "dev-log/core/41-user-fpu-state.md"
+    },
+    {
+      "id": "K42",
+      "title": "K42 · 用户FS基址、硬件寻址与生命周期",
+      "document": "dev-log/core/42-user-fs-base.md"
     }
   ]
 }

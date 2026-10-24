@@ -40,4 +40,4 @@ P1–P6 的旧检查点保留。升级从 K34 追加，自己的 day2 目录仍�
 
 Cloudflare 创建流程依据[官方本地管理文档](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)，本轮[参考客户端记录](../.codex/teaching/validation/cloudflare-reference-20261023.json)只作为后续自研实现的对照，不计为自研隧道功能。
 
-P7当前停点已到K40：K34–K36提供持续回收与用户监督，K37扩大用户容量，K38增加有界内核堆，K39提供独立service启动与坏初始ELF恢复，K40接通当前q35块设备IRQ及PIT后备。P8已追加K41用户x87/SSE2状态，下一步是TLS、线程和运行库；尚未开始真实板部署或长时间稳定性验收。
+P7当前停点已到K40：K34–K36提供持续回收与用户监督，K37扩大用户容量，K38增加有界内核堆，K39提供独立service启动与坏初始ELF恢复，K40接通当前q35块设备IRQ及PIT后备。P8已追加K41用户x87/SSE2状态，K42追加用户FS基址与隔离，下一步接ELF TLS、线程和运行库；尚未开始真实板部署或长时间稳定性验收。

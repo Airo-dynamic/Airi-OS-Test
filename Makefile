@@ -12,7 +12,7 @@ OUT := build/$(PROFILE)
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
-    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/arch/x86_64/fpu.c kernel/arch/x86_64/irq.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/arch/x86_64/fpu.c kernel/arch/x86_64/tls.c kernel/arch/x86_64/irq.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
 include frontend/sources.mk # 本分支取得图形自己的源码清单。
@@ -389,3 +389,16 @@ $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_SIMD_ELF='"$(OUT)/user/simd.elf"
 
 # 用户C与汇编也生成传递头文件依赖，Makefile变化会重编各对象，避免保留旧SSE编译策略。
 -include $(wildcard $(OUT)/user/*.d)
+
+# 两份FS观察用户程序分别保留自己的main，仍共用静态用户运行入口。
+$(OUT)/user/tls.elf: $(USER_COMMON) $(OUT)/user/tls.o labs/airios/program.ld
+# 普通用户C已允许SSE2，本探针的FS访问由明确内嵌汇编执行。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/tls.o -o $@
+# reset只观察exec后FS默认值，不借用旧本地块。
+$(OUT)/user/tls-reset.elf: $(USER_COMMON) $(OUT)/user/tls-reset.o labs/airios/program.ld
+# 新ELF不与tls的main同时链接。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/tls-reset.o -o $@
+# 包装只等待本配置的两份用户ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/tls.elf $(OUT)/user/tls-reset.elf
+# 文件路径通过预处理宏进入.incbin。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_TLS_ELF='"$(OUT)/user/tls.elf"' -DAIRI_TLS_RESET_ELF='"$(OUT)/user/tls-reset.elf"'

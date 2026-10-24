@@ -1,0 +1,32 @@
+checkpoint: K42
+baseline: baseline.yaml
+start: K41
+current_operation: 用户FS寻址跨不同基址的父子抢占保持，exec清零，目标页解除后产生用户PF
+already_explained:
+- concept: 选择子、GDT与用户数据权限
+  at: ../../../dev-log/core/20-user-boundary.md#ring3-gates
+  establishes: 用户数据描述符偏移32加RPL3得到35，选择子是表索引及权限而非内存地址
+- concept: exec事务边界
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: next从独立资源准备，失败回滚且旧现场保持，成功才换根清旧
+- concept: CPU状态与普通调用约定
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-process-owner
+  establishes: 所有用户陷入保存额外状态，选定身份返回前恢复；内核C不用用户寄存器数据
+first_use:
+- concept: FS基址加偏移后仍经过页表
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-address
+  establishes: FS:8得到当前基址加8的用户线性地址，设置值不映射或固定其目标页面
+- concept: 特权MSR与段选择子的不同作用
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-msr
+  establishes: ECX选MSR、EDX:EAX组成64位值；用户设置前拒绝非规范/高半区，先装空选择子再写完整基址
+- concept: 真实硬件值共同入口与恢复
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-entry
+  establishes: 用户能装合法选择子，因此每次CS3入口先取实际FS再清零；无新ISR的返回也要恢复
+- concept: 基址与页面所有权分别管理
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-owner
+  establishes: fork复制数值与页，exec新状态零、失败旧值保留，release不自动清指向该页的基址
+not_assumed:
+- 编译器_Thread_local、ELF TLS模板、libc TCB ABI、errno、线程、GS/SWAPGS或完整Linux段选择子ABI
+limits:
+- 固定单核x86-64，FSGSBASE直写关闭，内核C没有FS访问；加入内核TLS时需调整汇编边界
+- 每进程仍单线程，本节使用手工两字段块，非完整线程运行库

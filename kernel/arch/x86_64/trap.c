@@ -64,10 +64,14 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     airi_log("[TRAP_READY] vectors=32 cs=8 double_fault_ist=1 interrupts=off"); // 该标记只表示异常设施，不宣称调度或 IRQ 完成。
 }
 struct airi_trap_frame *airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
+    if ((f->cs & 3) == 3) // 只有真正打断用户才取回该身份的额外CPU状态。
+        airi_user_enter(f); // 清FS后再进入设备、时钟、系统调用或故障的普通处理。
     if (f->vector == 32u + AIRI_PCI_IRQ) { // 必须先于通用CS3故障判断，设备IRQ不能杀死用户进程。
         bool notified = airi_block_interrupt(); // 读取设备ISR使INTx先撤销，仅保存提示。
         airi_irq_end(AIRI_PCI_IRQ); // 再按从PIC到主PIC确认，避免电平来源持续触发。
-        return notified && (f->cs & 3) == 3 ? airi_user_device_irq(f) : f; // 内核不抢占；用户可在完整现场交普通服务栈。
+        if ((f->cs & 3) == 3) // 即使ISR已无新来源，也必须恢复入口保存并清掉的用户状态。
+            return notified ? airi_user_device_irq(f) : airi_user_resume(f); // 设备提示与完整恢复是两个独立条件。
+        return f; // CS0继续原内核现场，不切用户身份。
     }
     if (f->vector == 128 || f->vector == 129 || ((f->cs & 3) == 3 && f->vector != 32)) // 用户系统调用和用户故障由用户上下文所有者处理。
         return airi_user_trap(f); // 返回哪条完整现场由明确边界决定。
