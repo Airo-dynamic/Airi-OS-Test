@@ -62,3 +62,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K46 有符号定位](46-signed-seek.md)在共享打开对象中一次完成SET/CUR/END，验证负差值、极值失败保持和写入后的零洞。
 
 [K47 名义单调时钟](47-monotonic-clock.md)通过受检查的clock_gettime输出PIT时间，验证真实阻塞窗口并明确10ms量化与墙钟边界。
+
+[K48 用户对象分配](48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。

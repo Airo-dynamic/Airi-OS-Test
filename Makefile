@@ -452,3 +452,24 @@ $(OUT)/user/vector-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/vec
 $(OUT)/labs/airios/images.o: $(OUT)/user/vector-probe.elf
 # 文件路径以C字符串宏交给预处理汇编。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_VECTOR_ELF='"$(OUT)/user/vector-probe.elf"'
+
+# 纯块链算法再次以用户选项编译，内核heap.o不进入用户ELF。
+$(OUT)/user/heap-algorithm.o: kernel/mm/heap.c Makefile
+# 独立输出路径隔离两种编译策略。
+	@mkdir -p $(dir $@)
+# 算法只需要目标类型，隐式字节复制由用户bytes.o提供。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 对象包装单独选择errno与原始页来源，不改变早期无TLS程序。
+$(OUT)/user/malloc.o: labs/airios/libc/malloc.c Makefile
+# 与其他用户对象使用同一输出目录和传递头依赖。
+	@mkdir -p $(dir $@)
+# 所有状态位于当前用户ELF的BSS，编译器不访问内核memory.c。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 分配器观察是独立main，不把标准malloc塞进USER_COMMON。
+$(OUT)/user/malloc-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/malloc-probe.o labs/airios/program.ld
+# 原始库、POSIX错误槽、纯算法与用户对象包装都在这个静态ELF内。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 包装等待真实用户分配程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/malloc-probe.elf
+# 本配置产物路径仅作为.incbin输入。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MALLOC_ELF='"$(OUT)/user/malloc-probe.elf"'

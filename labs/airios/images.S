@@ -140,3 +140,9 @@ airi_posix_elf_end: /* 完整用户文件边界。 */
 airi_vector_elf_start: /* 含POSIX包装的观察程序。 */
 .incbin AIRI_VECTOR_ELF /* 本配置交叉链接产物。 */
 airi_vector_elf_end: /* 只读输入的右端。 */
+
+.balign 8 /* 对象分配器只进入选择它的用户ELF。 */
+.global airi_malloc_elf_start, airi_malloc_elf_end /* 两个目录名共用这一完整映像。 */
+airi_malloc_elf_start: /* 用户页与对象借用的真实观察程序。 */
+.incbin AIRI_MALLOC_ELF /* 由本配置静态链接，不借宿主malloc。 */
+airi_malloc_elf_end: /* 输入范围的排他右端。 */

@@ -35,7 +35,7 @@
 
 ## 组合可选图形停点
 
-main 的基础18节点之后已追加 K14–K47 和 L02–L08，共59节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
+main 的基础18节点之后已追加 K14–K48 和 L02–L08，共60节点。gui 从共同的 00 根提交分叉，有 G11–G24、G26 共 15 个节点，并只增加自己的文件。因此 gui 可以无冲突合入任一现有 main 阶段，既不替换主线入口和 Makefile，也不修改文本模型。
 
 图形的运行前置另行声明：运行需主线到 K11，G24 的 guest 接入需 K13。合并 gui 后出现独立的 graphics.json，learn 才增加图形节点；未合并时，主线列表、导出和快照只处理 main。
 
@@ -80,3 +80,5 @@ P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路
 [K46 有符号定位](core/46-signed-seek.md)在共享打开对象中一次完成SET/CUR/END，验证负差值、极值失败保持和写入后的零洞。
 
 [K47 名义单调时钟](core/47-monotonic-clock.md)通过受检查的clock_gettime输出PIT时间，验证真实阻塞窗口并明确10ms量化与墙钟边界。
+
+[K48 用户对象分配](core/48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。

@@ -299,6 +299,11 @@
       "id": "K47",
       "title": "K47 · 受检查的名义单调时钟",
       "document": "dev-log/core/47-monotonic-clock.md"
+    },
+    {
+      "id": "K48",
+      "title": "K48 · 用户对象分配与页面缓存",
+      "document": "dev-log/core/48-user-malloc.md"
     }
   ]
 }

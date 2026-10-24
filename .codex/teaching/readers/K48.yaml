@@ -1,0 +1,41 @@
+checkpoint: K48
+baseline: baseline.yaml
+start: K47
+current_operation: 用户对象分配在原始页不足后恢复，复用清零，扩容失败保留，fork复制和exec重建堆状态
+already_explained:
+- concept: 页面与块对象分别所有
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-backing
+  establishes: 32字节块头和16字节payload对齐，free归还对象不归还backing页
+- concept: 分裂与相邻合并
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-split
+  establishes: 块链完整接回后继，free合并相邻空块且恢复原块头容量
+- concept: 映射解除前验证整段
+  at: ../../../dev-log/core/35-user-page-release.md#release-order
+  establishes: 原始release消费页对齐范围，先核对整段再断映射和归还物理页
+- concept: 请求失败与TLS错误槽
+  at: ../../../dev-log/core/44-posix-errno.md#errno-result
+  establishes: errno只在本次失败时解释，当前库成功保留旧值
+first_use:
+- concept: 同一算法在用户目标中的独立实例
+  at: ../../../dev-log/core/48-user-malloc.md#user-arena
+  establishes: 纯heap.c以用户参数另编译，用户BSS和arena不引用内核堆；请求头保持基本类型对齐
+- concept: 懒申请与对象/缓存统计
+  at: ../../../dev-log/core/48-user-malloc.md#malloc-request
+  establishes: 查询和零请求不申请页，arena失败保持空描述可重试，活请求长度与页面缓存分别记录
+- concept: calloc乘法与复用清零
+  at: ../../../dev-log/core/48-user-malloc.md#malloc-release
+  establishes: 先除后比排除乘法溢出，每次成功calloc清完整请求；非法free仍为未定义行为
+- concept: realloc生命周期和瞬时容量
+  at: ../../../dev-log/core/48-user-malloc.md#malloc-reallocate
+  establishes: 增长先申请再复制最后free，失败保持旧对象；缩小只收请求范围，C11零长度策略明确限定
+- concept: 用户分配状态跨进程复制与替换
+  at: ../../../dev-log/core/48-user-malloc.md#malloc-fork-exec
+  establishes: fork复制BSS、块头和页面，同VA不同物理副本；成功exec重建零BSS和TLS
+- concept: Make自动变量过滤对象
+  at: ../../../dev-log/core/48-user-malloc.md#malloc-build
+  establishes: filter从当前完整前置列表中过滤.o，排除链接脚本，USER_COMMON仍不含errno和对象库
+not_assumed:
+- 完整stdlib、C23或全部POSIX语义、并发分配器、扩展对齐、自动增长收缩、pthread和C++ runtime
+limits:
+- 每进程单线程，单个按需256KiB arena，最大请求262096字节，增长可能因同时持有新旧块失败
+- free保留arena直到进程退出或exec；无任意指针安全释放和越界保护承诺
