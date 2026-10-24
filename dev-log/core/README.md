@@ -40,6 +40,7 @@ K11 把文本会话与显示实现分开，默认构建只链接串口实现。K
 - [K35 · 用户页归还与空洞复用](35-user-page-release.md)
 - [K36 · 常驻用户init与UART服务重启](36-init-supervisor.md)
 - [K37 · 用户内存扩容与大映像替换](37-user-capacity.md)
+- [K38 · 内核堆按批扩展与缓存核对](38-kernel-heap-growth.md)
 - [后续部署升级](next.md)
 
 K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接到当前终端，按 Ctrl-A 后按 X 退出；后者使用独立 QEMU 进程、日志和截止时间，检查启动与输入。默认构建只需主线源码、工具和引导材料。

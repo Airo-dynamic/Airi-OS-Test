@@ -15,6 +15,33 @@ bool airi_heap_init(struct airi_heap *heap, void *base, size_t bytes) { // 调�
     *heap->first = (struct airi_heap_block){bytes - sizeof(*heap->first), NULL, true}; // 初始只有一个完整空闲块。
     return true; // 仍未向任何对象借出空间。
 }
+bool airi_heap_extend(struct airi_heap *heap, void *tail, size_t bytes) { // 只接入已经拥有且连续的新backing，不执行映射。
+    if (!heap || !heap->first || !tail || bytes < sizeof(struct airi_heap_block) + 16 || bytes % 16 || heap->bytes > UINTPTR_MAX - (uintptr_t)heap->base) // 先核对对象与旧右端，再读取块链。
+        return false; // 失败不修改已存在的对象或块头。
+    uintptr_t end = (uintptr_t)heap->base + heap->bytes; // 上面的减法检查保证旧右端不回绕。
+    if ((uintptr_t)tail != end || bytes > UINTPTR_MAX - end) // 新范围必须精确紧邻，不能有洞、覆盖旧对象或右端溢出。
+        return false; // 此时尚未触碰调用者的新范围。
+    struct airi_heap_block *last = heap->first; // 找到唯一一个没有后继的块。
+    while (last->next) // 只沿已有受管理块，不读取新页面上的旧字节。
+        last = last->next; // 链按地址连续排列，末块到达旧右端。
+    if (last->free) // 空末块可直接延长，避免再付一个块头。
+        last->bytes += bytes; // 原payload地址与所有活对象位置均不改变。
+    else { // 旧末块仍被对象借用，不能把新增容量偷偷并入该对象。
+        struct airi_heap_block *added = tail; // 新块头恰在旧backing右端。
+        *added = (struct airi_heap_block){bytes - sizeof(*added), NULL, true}; // 完整初始化后才接入旧链。
+        last->next = added; // 发布新的空闲末块，旧对象容量保持。
+    }
+    heap->bytes += bytes; // 块链准备好以后才发布完整backing容量。
+    return true; // 新范围此后归堆管理，调用者不能单独解除映射。
+}
+size_t airi_heap_used_bytes(const struct airi_heap *heap) { // 资源核对只观察活payload，不把空闲缓存算成对象泄漏。
+    size_t bytes = 0; // 空堆与无活对象都为零。
+    if (heap) // 尚未初始化的查询同样安全。
+        for (const struct airi_heap_block *block = heap->first; block; block = block->next) // 不改变块状态。
+            if (!block->free) // 已归还的payload不再有借用者。
+                bytes += block->bytes; // 包含对象实际取得的对齐容量，不是原请求长度。
+    return bytes; // 元数据块头与物理backing另有所有者。
+}
 void *airi_heap_alloc(struct airi_heap *heap, size_t bytes) { // 首次适配按地址顺序寻找能放下对象的空闲块。
     if (!heap || !heap->first || !bytes || bytes > SIZE_MAX - 15) // 拒绝零长度和对齐加法溢出。
         return NULL; // 失败不改变块链。

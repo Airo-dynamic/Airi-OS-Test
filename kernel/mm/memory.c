@@ -1,5 +1,5 @@
 #include <airi/memory.h> // 内存服务对消费者只交出快照和对象。
-#include <airi/heap.h> // 固定backing上的字节分配器。
+#include <airi/heap.h> // 页面映射与对象块链分别维护，扩展后保留活对象。
 #include <airi/vm.h> // 使用自有四级页表建立内核映射。
 #include <airi/trap.h> // 真实页权限故障由异常入口报告。
 #include <airi/pages.h> // 物理页分配与启动信息。
@@ -108,33 +108,32 @@ static void virtual_memory_init(const AiriBootInfo *info) { // 借用加载器�
 }
 
 #define HEAP_ADDRESS 0xffffd00000000000ull // 固定堆虚拟范围不与内核、HHDM或演示页重叠。
-#define HEAP_PAGES 16u // 首版堆固定 64 KiB，不自动扩容。
+#define HEAP_STEP_PAGES 16u // 初始与每次扩展都为64KiB。
+#define HEAP_MAX_CHUNKS 16u // 总backing最多1MiB，仍位于同一2MiB叶子表覆盖内。
 static struct airi_heap heap; // backing持有者和对象块链在整个内核期存在。
+static struct airi_kernel_region heap_regions[HEAP_MAX_CHUNKS]; // 静态句柄记录每批物理页，不向尚未建立的堆递归申请元数据。
+static unsigned heap_chunks; // 只有完整映射并接入块链的批次才计入。
+static bool heap_grow(void) { // 单核不可抢占普通上下文调用，IRQ不进入分配器。
+    if (heap_chunks == HEAP_MAX_CHUNKS) // 明确容量上限，不能越界写句柄或扩展到别的页表。
+        return false; // 当前活对象与空闲块完全保持。
+    struct airi_kernel_region *region = &heap_regions[heap_chunks]; // 未发布槽必须仍是空句柄。
+    uint64_t address = HEAP_ADDRESS + heap_chunks * HEAP_STEP_PAGES * 4096ull; // 精确紧邻旧backing右端。
+    if (!airi_memory_region_create(region, address, HEAP_STEP_PAGES)) // 整批映射失败由区域接口回滚，不提供半个新范围。
+        return false; // heap的块链与字节容量还没有改变。
+    void *tail = (void *)(uintptr_t)address; // 完整RW/NX映射已建立并清零，才能构造块头。
+    bool accepted = heap_chunks ? airi_heap_extend(&heap, tail, HEAP_STEP_PAGES * 4096u) : airi_heap_init(&heap, tail, HEAP_STEP_PAGES * 4096u); // 第一批初始化，其余批只接在尾部。
+    if (!accepted) { // 对象分配器拒绝接入时，它保证旧链未修改。
+        if (!airi_memory_region_free(region)) // 新批还没交给任何对象，可完整解除和归还。
+            airi_panic("cannot roll back kernel heap extension"); // 内部所有权错误不能吞掉。
+        return false; // 原堆仍可继续分配和归还。
+    }
+    ++heap_chunks; // 从这里起句柄与块链共同拥有此批，直到内核生命周期结束。
+    airi_log("[HEAP_GROW] mapped_pages=%u bytes=%zu", heap_chunks * HEAP_STEP_PAGES, heap.bytes); // 只有完整提交才报告容量。
+    return true; // backing缓存不会随单个对象free自动缩小。
+}
 static void heap_init(void) { // 所需页与页表都由当前内核拥有。
-    uint64_t backing[HEAP_PAGES]; // 保存每个已借出数据页，失败时精确回滚。
-    unsigned count = 0; // 只统计已经成功映射的backing页。
-    for (; count < HEAP_PAGES; ++count) { // 虚拟连续不要求物理连续。
-        uint64_t physical = airi_page_alloc(&pages); // 每页独立取得所有权。
-        if (!physical) // 页池耗尽时还没有本次页面可归还。
-            break; // 转到统一回滚路径。
-        if (!airi_vm_map(&kernel_space, HEAP_ADDRESS + count * AIRI_PAGE_SIZE, physical, AIRI_VM_WRITE)) { // 只开放supervisor读写，不执行。
-            airi_page_free(&pages, physical); // 未接入的本次数据页立即归还。
-            break; // 之前成功映射的页面稍后拆除。
-        }
-        backing[count] = physical; // 在映射成功后登记当前拥有的数据页。
-    }
-    if (count != HEAP_PAGES) { // 不允许半个堆被提供给调用者。
-        while (count) { // 逆序拆除已成功映射的所有backing。
-            --count; // 退到最后一个真实映射。
-            airi_vm_unmap(&kernel_space, HEAP_ADDRESS + count * AIRI_PAGE_SIZE); // 先断开映射并使TLB失效。
-            airi_page_free(&pages, backing[count]); // 然后才能归还数据页。
-        }
-        airi_panic("cannot map fixed kernel heap"); // 失败保持明确，不回退到未拥有的地址。
-    }
-    void *base = (void *)(uintptr_t)HEAP_ADDRESS; // 完整映射之后才形成可供堆访问的指针。
-    airi_memset(base, 0, HEAP_PAGES * AIRI_PAGE_SIZE); // 清除页面旧内容，块链不会泄漏旧所有者数据。
-    if (!airi_heap_init(&heap, base, HEAP_PAGES * AIRI_PAGE_SIZE)) // 把已持有范围交给小对象分配器。
-        airi_panic("cannot initialize kernel heap"); // 参数不符合对齐或容量约定就停止。
+    if (!heap_grow()) // 第一批也遵守映射成功后才接入的顺序。
+        airi_panic("cannot initialize kernel heap"); // 启动必须有最小对象容量。
     size_t before = airi_heap_free_bytes(&heap); // 结束后对象级空闲应恢复。
     uint8_t *a = airi_kmalloc(80); // 第一个对象拥有独立payload。
     uint8_t *b = airi_kmalloc(128); // 中间对象用于演示相邻归还合并。
@@ -146,14 +145,42 @@ static void heap_init(void) { // 所需页与页表都由当前内核拥有。
     if (airi_kfree(b + 1) || !airi_kfree(b) || !airi_kfree(a) || airi_kfree(a)) // 内部指针和重复释放必须被拒绝。
         airi_panic("kernel heap release validation failed"); // 不允许错误释放破坏空闲块。
     uint8_t *joined = airi_kmalloc(208); // 原80和128两块合并后才能在a的位置容纳208字节。
-    if (joined != a || c[31] != 0x5a || airi_kmalloc(SIZE_MAX) || airi_kmalloc(0) || airi_kmalloc(HEAP_PAGES * AIRI_PAGE_SIZE)) // 检查合并、不覆盖活对象、溢出、零长度和耗尽。
+    if (joined != a || c[31] != 0x5a || airi_kmalloc(SIZE_MAX) || airi_kmalloc(0) || airi_heap_alloc(&heap, HEAP_STEP_PAGES * AIRI_PAGE_SIZE)) // 检查合并、不覆盖活对象、溢出、零长度和耗尽。
         airi_panic("kernel heap split/coalesce failed"); // 不把分配失败伪装成有效指针。
     if (!airi_kfree(joined) || !airi_kfree(c) || airi_heap_free_bytes(&heap) != before) // 所有对象归还后应恢复单个空闲块容量。
         airi_panic("kernel heap accounting did not recover"); // backing仍持有，只有对象借用结束。
     airi_log("[HEAP_DEMO_OK] mapped_pages=16 bytes=%zu free_payload=%zu aligned=16 coalesced=1", heap.bytes, before); // 实际分配、归还和失败演示结束。
+    struct airi_memory_stats baseline, grown; // 允许缓存增长，但结束时活payload与堆外页面必须恢复。
+    airi_memory_snapshot(&baseline); // 初始堆仅64KiB且所有演示对象已归还。
+    uint8_t *guard = airi_kmalloc(32); // 跨扩展保留一个活对象，不能移动或覆盖。
+    if (!guard) // 尚未取得活对象时不能写入。
+        airi_panic("cannot allocate heap growth guard"); // 普通耗尽保持明确。
+    airi_memset(guard, 0x5a, 32); // 扩展前留下旧对象内容，随后仍须保持。
+    uint8_t *large = airi_kmalloc(1024u * 1024 - 256); // 迫使按批扩展直到1MiB，而非返回首批外的无映射指针。
+    if (!guard || !large) // 已有页资源不足就明确停止演示。
+        airi_panic("cannot grow bounded kernel heap"); // 不访问失败指针。
+    airi_memset(large, 0xa6, 1024u * 1024 - 256); // 实际写遍新映射，证明它们可访问。
+    void *last = airi_kmalloc(128); // 吃掉最后空闲payload，堆达到明确边界。
+    if (!last || airi_kmalloc(16) || airi_kmalloc(SIZE_MAX) || guard[31] != 0x5a || large[1024u * 1024 - 257] != 0xa6) // 超限不扩展到相邻未拥有范围，活内容保持。
+        airi_panic("kernel heap growth limit or live data failed"); // 不把NULL以外的越界结果当成功。
+    if (!airi_kfree(last) || !airi_kfree(large) || !airi_kfree(guard) || airi_heap_used_bytes(&heap)) // 所有临时对象归还，backing仍缓存1MiB。
+        airi_panic("kernel heap growth leaked live payload"); // 不把持有页面与活对象混算。
+    airi_memory_snapshot(&grown); // 新堆空闲payload比原来大，但外部借用没有增加。
+    if (!airi_memory_same_usage(&baseline, &grown) || grown.heap_bytes != 1024u * 1024 || grown.heap_free != grown.heap_bytes - 32) // 缓存增长精确对应新增数据页，尾块完全合并。
+        airi_panic("kernel heap cache accounting failed"); // 页或对象泄漏仍需报告。
+    airi_log("[HEAP_CAPACITY_OK] initial=65536 bytes=%zu live=%zu chunks=%u preserved=1 limit=null", grown.heap_bytes, grown.heap_used, heap_chunks); // 真实映射、写入、耗尽和归还完成。
+
 }
 void *airi_kmalloc(size_t bytes) { // 内核小对象入口，不引入宿主libc。
-    return airi_heap_alloc(&heap, bytes); // 保留有界堆的NULL失败语义。
+    if (!heap.first || !bytes || bytes > HEAP_MAX_CHUNKS * HEAP_STEP_PAGES * 4096u - 32) // 未初始化、空请求或绝不可能容纳的对象不触发增长。
+        return NULL; // 也在向上对齐前排除SIZE_MAX等溢出输入。
+    for (;;) { // 每次失败最多增加一个64KiB批次，总共只有十六批。
+        void *object = airi_heap_alloc(&heap, bytes); // 先利用已有空闲块，不为可重用空间增加页面。
+        if (object) // 成功返回的对象可能来自旧空洞或新尾部。
+            return object; // 已有对象从未移动。
+        if (!heap_grow()) // 上限或物理/映射失败都只影响本次新请求。
+            return NULL; // 调用者保留所有旧借用及其内容。
+    }
 }
 bool airi_kfree(void *pointer) { // 对象所有者结束最后一个借用后调用。
     return airi_heap_free(&heap, pointer); // 对象空间回堆，物理页不因此归还。
@@ -162,6 +189,7 @@ void airi_memory_snapshot(struct airi_memory_stats *stats) { // 目前单核不�
     stats->pages_total = pages.total; // 固定受管理物理页容量。
     stats->pages_free = pages.free; // 减去页表和堆backing等当前所有者。
     stats->heap_bytes = heap.bytes; // 已映射的总backing字节。
+    stats->heap_used = airi_heap_used_bytes(&heap); // 真实活payload与缓存页面分别报告。
     stats->heap_free = airi_heap_free_bytes(&heap); // 空闲对象payload，不包含块头。
 }
 

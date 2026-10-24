@@ -106,7 +106,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                 offset=len(output()) # 内存查询使用本次命令之后的新记录。
                 wire.sendall(b'mem\n') # 同一串口主线查询真实页池与堆。
                 tail=wait(update(0,4),offset) # 等第四次提交的完整状态。
-                assert 'page pool: total=' in tail and 'kernel heap: bytes=65536' in tail # 不能只返回启动地图。
+                assert 'page pool: total=' in tail and 'kernel heap: bytes=1048576' in tail # 不能只返回启动地图。
                 for number, text, expected in [(5, 'programs', 'programs: registered ELF images'), (6, 'run hello', 'program hello exited 0'), (7, 'run broken', 'cannot load broken: error=-8'), (8, 'run worker', 'program worker exited 23'), (9, 'run processes', 'program processes exited 0'), (10, 'run missing', 'program not found: missing'), (11, 'echo after-programs', 'after-programs')]: # 正常、坏ELF、非零退出和未知名称都不破坏后续会话。
                     offset=len(output()) # 当前命令只消费新日志。
                     wire.sendall((text + '\n').encode()) # 发送真正UART输入，而不是直接调用内核函数。

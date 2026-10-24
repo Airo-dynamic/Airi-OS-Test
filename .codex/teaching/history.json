@@ -249,6 +249,11 @@
       "id": "K37",
       "title": "K37 · 用户内存扩容、分页元数据与大映像替换",
       "document": "dev-log/core/37-user-capacity.md"
+    },
+    {
+      "id": "K38",
+      "title": "K38 · 内核堆按批扩展与缓存资源核对",
+      "document": "dev-log/core/38-kernel-heap-growth.md"
     }
   ]
 }

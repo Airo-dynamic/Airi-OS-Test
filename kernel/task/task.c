@@ -90,7 +90,7 @@ void airi_task_demo(void) { // 启动任务收拢运行和回收，后续仍回�
         if (!airi_memory_region_free(&tasks[id].stack)) // 先解除映射和空页表，再归还数据页。
             airi_panic("cannot reclaim completed task stack"); // 不保留隐藏泄漏。
     airi_memory_snapshot(&after); // 回收后的当前实际统计。
-    if (after.pages_free != before.pages_free || after.heap_free != before.heap_free) // 任务栈和临时页表必须全部恢复。
+    if (!airi_memory_same_usage(&before, &after)) // 任务栈和临时页表必须全部恢复。
         airi_panic("completed kernel tasks leaked memory"); // 内核演示不应吃掉后续主线的容量。
     airi_log("[TASK_DEMO_OK] order=121212 separate_stacks=2 reclaimed=1"); // 只有切换、局部值、顺序与回收全部成立才输出。
 }

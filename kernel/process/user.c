@@ -913,7 +913,7 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     int error = elf ? prepare_elf(root, image, bytes, name, true) : (prepare_flat(root, image, bytes) ? 0 : -12); // ELF保留格式与资源错误之别。
     if (error) { // 失败构造也必须完整恢复资源。
         airi_memory_snapshot(&after); // 不能只看错误码忽略泄漏。
-        if (before.pages_free != after.pages_free || before.heap_free != after.heap_free || airi_files_open_count()) // 半份新映像不应改变空闲数量。
+        if (!airi_memory_same_usage(&before, &after) || airi_files_open_count()) // 半份新映像不应改变空闲数量。
             airi_panic("failed user launch leaked resources"); // 内部错误与普通坏文件分开。
         return error; // 调用者可以继续命令，不停机。
     }
@@ -926,7 +926,7 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     if (async_error) { // 未向用户发布，此时根与栈不活动。
         cleanup(root); // 回滚页面、FD与内核栈，尚未拥有异步owner。
         airi_memory_snapshot(&after); // 失败不能留下普通内存泄漏。
-        if (before.pages_free != after.pages_free || before.heap_free != after.heap_free) // 静态池外的资源同样核对。
+        if (!airi_memory_same_usage(&before, &after)) // 静态池外的资源同样核对。
             airi_panic("failed async owner launch leaked memory"); // 内部不变量明确停止。
         return async_error; // 应用可见普通资源失败。
     }
@@ -979,7 +979,7 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     kernel_return = NULL; // 下次会话重新登记。
     airi_async_drain(); // 所有owner已关闭，内核仍须结束无主ACTIVE并核对静态池完全回收。
     airi_memory_snapshot(&after); // 全部页和栈回收后验证。
-    if (before.pages_free != after.pages_free || before.heap_free != after.heap_free || airi_files_open_count()) // 用户程序退出码可以任意，但内核资源必须恢复。
+    if (!airi_memory_same_usage(&before, &after) || airi_files_open_count()) // 用户程序退出码可以任意，但内核资源必须恢复。
         airi_panic("user process session leaked memory"); // 不把泄漏当成应用错误跳过。
     return 0; // 表示已完整启动与收拢，程序结果另在result.code。
 }

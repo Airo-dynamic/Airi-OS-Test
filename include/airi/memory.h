@@ -4,11 +4,16 @@
 #include <stddef.h> // 小对象请求按字节计数。
 struct airi_memory_stats { // 消费者只得到数值，不持有分配器内部块指针。
     uint32_t pages_total, pages_free; // 实际受管理物理页与当前未借出页数。
-    size_t heap_bytes, heap_free; // 固定堆 backing 字节与空闲 payload 字节。
+    size_t heap_bytes, heap_free, heap_used; // 已映射backing、空闲payload与活对象payload分别统计。
 };
-void airi_memory_init(const AiriBootInfo *info); // 顺序初始化页池、页表和固定内核堆。
+void airi_memory_init(const AiriBootInfo *info); // 顺序初始化页池、页表和可扩展内核堆。
 void airi_memory_snapshot(struct airi_memory_stats *stats); // 同步复制当前数值到调用者对象。
-void *airi_kmalloc(size_t bytes); // 小对象来自已映射内核堆，不承诺完整 libc malloc ABI。
+static inline bool airi_memory_same_usage(const struct airi_memory_stats *before, const struct airi_memory_stats *after) { // 每个包含者使用这段小函数，无独立链接符号。
+    uint64_t old_available = before->pages_free + before->heap_bytes / 4096; // 堆的缓存数据页从页池转出，但没有外部借用。
+    uint64_t new_available = after->pages_free + after->heap_bytes / 4096; // 当前1MiB堆始终使用初始已建的同一张叶子表。
+    return old_available == new_available && before->heap_used == after->heap_used; // 新增活对象或堆以外的页泄漏都不能被缓存抵消。
+}
+void *airi_kmalloc(size_t bytes); // 对象空间不足时按64KiB批次扩展，最大1MiB，不承诺完整libc malloc ABI。
 bool airi_kfree(void *pointer); // 结束对象借用，backing 页仍由内核堆持有。
 #define AIRI_REGION_PAGES 16u // 当前有界内核区域最多持有十六个数据页。
 struct airi_kernel_region { // 所有权句柄必须在使用前清零，不能按值复制后重复释放。
