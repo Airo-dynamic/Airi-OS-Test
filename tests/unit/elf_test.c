@@ -54,6 +54,54 @@ static void corrupt(unsigned offset, uint64_t value, unsigned bytes) { // 每种
     put(offset, value, bytes); // 只修改这一种字段事实。
     rejected(sizeof(image)); // 要求拒绝并保持旧view不变。
 }
+static void tls_fixture(void) { // 在原两段合法映像上加入独立PT_TLS，不把它当第三个LOAD。
+    fixture(); // LOAD布局与初值都来自原有受控输入。
+    put(56, 3, 2); // 程序头新增第三项。
+    put(176, 7, 4); put(180, 4, 4); // PT_TLS只读模板描述。
+    put(184, 0x2000, 8); put(192, 0x401000, 8); // 文件和VA与数据LOAD对应同一字节。
+    put(208, 4, 8); put(216, 73, 8); put(224, 16, 8); // 四字节初值、73字节总长与16字节对齐。
+}
+static void tls_corrupt(unsigned offset, uint64_t value, unsigned bytes) { // 每种TLS错误独立观察，避免被旧错误遮蔽。
+    tls_fixture(); put(offset, value, bytes); // 从完整合法模板只改变一个字段。
+    rejected(sizeof(image)); // 必须明确拒绝并保留调用者旧输出的全部字节。
+}
+static void tls_cases(void) { // 主机只核对元数据与布局，真实FS访问另在guest执行。
+    struct airi_elf_view view; // 接收通过后的明确事实。
+    tls_fixture(); // 普通带初值和零尾部模板。
+    assert(!airi_elf_inspect(image, sizeof(image), &view)); // 合法TLS不能继续沿旧策略拒绝。
+    assert(view.pages == 3 && view.tls.file_bytes == 4 && view.tls.memory_bytes == 73); // LOAD预算和运行副本长度分别记录。
+    assert(view.tls.pointer_offset == 80 && view.tls.data_offset == 0 && view.tls.pages == 1); // 73按16向上舍入为80，TCB仍在同页。
+    put(208, 1, 8); put(216, 1, 8); put(224, 1, 8); // 只有一字节且只要求1字节对齐。
+    assert(!airi_elf_inspect(image, sizeof(image), &view)); // 小于TCB对齐的模板仍合法。
+    assert(view.tls.pointer_offset == 16 && view.tls.data_offset == 15 && view.tls.pages == 1); // 变量位于TP-1，不能从块首错误初始化。
+    put(224, 0, 8); // ELF的零对齐规范化为1，不参与除零。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && view.tls.alignment == 1); // 同一布局无需额外限制。
+    tls_fixture(); put(208, 0, 8); put(216, 4096, 8); put(224, 4096, 8); // 全零模板达到本轮最大长度，TCB另占下一页。
+    assert(!airi_elf_inspect(image, sizeof(image), &view)); // 文件里不需要放4096个零字节。
+    assert(view.tls.pointer_offset == 4096 && view.tls.pages == 2 && !view.tls.data_offset); // 第二页必须计入用户预算。
+    tls_fixture(); put(184, 0, 8); put(192, 0, 8); put(208, 0, 8); put(216, 0, 8); put(224, 0, 8); // LLD无TLS程序产生空描述。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && !view.tls.memory_bytes && !view.tls.pages); // 不改变旧无TLS程序入口。
+    tls_corrupt(208, 74, 8); // 初值超过总长度或LOAD文件字节，拒绝。
+    tls_corrupt(184, UINT64_MAX - 1, 8); // 输入文件范围不能回绕。
+    tls_corrupt(216, 4097, 8); // 比明确模板上限多一个字节。
+    tls_corrupt(216, UINT64_MAX, 8); // 极大memsz在布局加法前拒绝。
+    tls_corrupt(224, 3, 8); // 非2幂对齐。
+    tls_corrupt(224, 8192, 8); // 超出本轮单页对齐能力。
+    tls_corrupt(192, 0x401001, 8); // 模板起点不符合声明的零偏移对齐。
+    tls_corrupt(180, 6, 4); // PT_TLS模板头必须只读，不直接采用其W权限。
+    tls_corrupt(192, 0x500000, 8); // 地址合法但不属于任何LOAD，不能接受孤立模板。
+    tls_fixture(); put(224, 1, 8); put(184, 0x2001, 8); put(208, 1, 8); // 文件范围可读但与模板VA不是同一LOAD字节。
+    rejected(sizeof(image)); // 不把任意文件偏移当可执行映像的TLS初值。
+    tls_fixture(); put(56, 4, 2); put(232, 7, 4); put(236, 4, 4); // 再加一份空TLS头也不能绕过唯一性。
+    rejected(sizeof(image)); // 不静默选最后一个模板。
+    tls_fixture(); put(160, (AIRI_ELF_PAGES - 1ull) * 4096, 8); // LOAD本身刚好占满栈以外的预算。
+    rejected(sizeof(image)); // TLS副本还有一页，不能因模板属于LOAD就漏算。
+    tls_fixture(); uint8_t head[56]; // 测试TLS出现在其覆盖LOAD之前的合法输入。
+    airi_memcpy(head, image + 176, 56); // 先保存TLS头，不丢失原内容。
+    airi_memmove(image + 120, image + 64, 112); // 两份LOAD整体后移一项，确实使用重叠移动。
+    airi_memcpy(image + 64, head, 56); // TLS成为第一个程序头。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && view.count == 2 && view.tls.memory_bytes == 73); // 容纳检查在所有LOAD完成后执行。
+}
 int main(void) { // 本程序只验证解析器，不替代guest的BSS和权限运行。
     fixture(); // 两段、三数据页、有效入口。
     struct airi_elf_view view; // 接收完整已验证事实。
@@ -73,12 +121,13 @@ int main(void) { // 本程序只验证解析器，不替代guest的BSS和权限�
     corrupt(136, 0x400000, 8); // 两段共享同一页必须拒绝。
     corrupt(24, 0x401000, 8); // 入口落入可写NX数据段。
     corrupt(64, 3, 4); // PT_INTERP不能被静默忽略。
-    corrupt(64, 7, 4); // 未实现TLS也不能当普通静态程序。
+    corrupt(64, 7, 4); // 原RX代码头不能直接改名TLS绕过模板权限与入口规则。
     fixture(); // 大BSS只有memsz增长，文件本身不需要装下零填充字节。
     put(160, (AIRI_ELF_PAGES - 1ull) * 4096, 8); // 一代码页加其余数据页，刚好达到ELF预算。
     assert(!airi_elf_inspect(image, sizeof(image), &view) && view.pages == AIRI_ELF_PAGES); // 栈预留之后的精确上界仍可接受。
     put(160, AIRI_ELF_PAGES * 4096ull, 8); // 总段页数比预算多一页。
     rejected(sizeof(image)); // 失败保持上一份输出，不开始物理分配。
-    puts("PASS elf: target, bounds, overflow, permissions, overlap, entry, budget, unchanged output"); // 所有失败与正常路径均成立。
+    tls_cases(); // 静态TLS正常、小对齐、边界、恶意元数据与输出原子性。
+    puts("PASS elf: target, bounds, overflow, permissions, overlap, entry, budget, static TLS layout/bounds/ownership, unchanged output"); // 所有失败与正常路径均成立。
     return 0; // 正常退出宿主观察。
 }

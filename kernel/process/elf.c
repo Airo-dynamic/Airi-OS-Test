@@ -28,12 +28,33 @@ const char *airi_elf_inspect(const void *image, size_t bytes, struct airi_elf_vi
     if (!h.phnum || h.phnum > 16 || !fits(h.phoff, (uint64_t)h.phnum * h.phentsize, bytes)) // 程序头表也必须完整落在映像内。
         return "ELF program table is invalid"; // 有界数量保证后续乘法不溢出。
     struct airi_elf_view result = {.image=image, .bytes=bytes, .entry=h.entry}; // 所有结果先放局部，失败不破坏调用者旧状态。
+    bool tls_seen = false; // 一个静态ELF最多一份TLS模板，空头也不能重复。
     bool entry_found = false; // 最后要求入口确实落在文件提供的可执行内容。
     for (unsigned i = 0; i < h.phnum; ++i) { // 逐项读取已验证范围内的程序头。
         struct program_header p; // 文件可能未按宿主结构对齐，仍采用字节复制。
         airi_memcpy(&p, result.image + h.phoff + i * h.phentsize, sizeof(p)); // 单项来自固定程序表。
-        if (p.type == 2 || p.type == 3 || p.type == 7) // PT_DYNAMIC、PT_INTERP和PT_TLS需要尚未实现的运行时。
-            return "ELF requires a dynamic loader or TLS"; // 不忽略不可满足的装载要求。
+        if (p.type == 2 || p.type == 3) // PT_DYNAMIC与PT_INTERP仍需要尚未实现的动态运行时。
+            return "ELF requires a dynamic loader"; // 不忽略不可满足的装载要求。
+        if (p.type == 7) { // PT_TLS是初值模板，不在其p_vaddr原处当作当前线程变量使用。
+            if (tls_seen || p.flags != 4 || p.file_bytes > p.memory_bytes || !fits(p.offset, p.file_bytes, bytes)) // 只接受一个可读模板且初值完整。
+                return "ELF TLS file range or permissions are invalid"; // 不发布半份结果。
+            tls_seen = true; // 后续遇到另一空/非空TLS都拒绝。
+            if (!p.memory_bytes) { // LLD为无TLS程序保留一份全零空头，不需要运行块。
+                if (p.file_bytes || p.address || p.offset || p.align > 1) // 仅接受本链接脚本明确产生的空描述。
+                    return "ELF empty TLS template is invalid"; // 不靠空长度隐藏非法地址或对齐。
+                continue; // 该程序仍以FS=0进入，不影响K42手工本地块。
+            }
+            uint64_t alignment = p.align ? p.align : 1; // ELF中0/1都表示没有额外对齐要求。
+            if (p.memory_bytes > AIRI_ELF_TLS_LIMIT || alignment > 4096 || (alignment & (alignment - 1)) || (p.address % alignment) || (p.offset % alignment)) // 当前固定零偏移布局，对齐必须为有限2的幂。
+                return "ELF TLS size or alignment is unsupported"; // 不接受需要超出当前块布局的偏斜模板。
+            if (p.address < 0x10000 || p.address >= 0x10000000 || p.memory_bytes > 0x10000000 - p.address) // 模板仍只能属于受控用户映像范围。
+                return "ELF TLS virtual range is invalid"; // 不从内核或堆区构造模板。
+            unsigned block_align = alignment < 16 ? 16 : (unsigned)alignment; // TCB指针至少16字节对齐。
+            unsigned pointer = ((unsigned)p.memory_bytes + block_align - 1) & ~(block_align - 1); // 运行块起点到TP的跨度。
+            unsigned span = ((unsigned)p.memory_bytes + (unsigned)alignment - 1) & ~((unsigned)alignment - 1); // 链接器local-exec所用的TLS静态跨度。
+            result.tls = (struct airi_elf_tls){p.address, p.offset, p.file_bytes, p.memory_bytes, alignment, pointer, pointer - span, (pointer + 16 + 4095) / 4096}; // TLS在TP前，TCB的首字指向TP自身。
+            continue; // 不将同一模板再次作为一个独立LOAD段登记。
+        }
         if (p.type == 0x6474e551 && (p.flags & 1)) // GNU_STACK请求可执行栈不在当前策略中。
             return "ELF executable stack is unsupported"; // 用户栈始终NX。
         if (p.type != 1) // 其他不参与装载的辅助头不被当作LOAD访问。
@@ -65,6 +86,22 @@ const char *airi_elf_inspect(const void *image, size_t bytes, struct airi_elf_vi
     }
     if (!result.count || !entry_found) // 没有LOAD或没有有效入口就不能启动。
         return "ELF entry is outside executable file contents"; // 不靠CPU故障验证基本文件格式。
+    if (result.tls.memory_bytes) { // 所有LOAD都已读完，TLS头可以出现在它们之前。
+        bool contained = false; // 模板必须由一个普通可读LOAD完整提供，而非任意文件字节。
+        for (unsigned i = 0; i < result.count; ++i) { // 最多八项，逐个核对对应关系。
+            const struct airi_elf_segment *segment = &result.segments[i]; // 已验证用户范围与文件边界。
+            if (result.tls.address < segment->address) // 用减法前先确认有非负偏移。
+                continue; // 不能将负值回绕成小范围。
+            uint64_t delta = result.tls.address - segment->address; // TLS模板在该段中的相对位置。
+            if (delta > segment->memory_bytes || result.tls.memory_bytes > segment->memory_bytes - delta) // 总模板含零填充必须在段内。
+                continue; // 不接受孤立或越界TLS描述。
+            if (result.tls.file_bytes && (delta > segment->file_bytes || result.tls.file_bytes > segment->file_bytes - delta || result.tls.offset != segment->offset + delta)) // 有初值时VA和文件位置必须对应同一LOAD字节。
+                continue; // 零初值只需要内存范围，不读取文件偏移处内容。
+            contained = true; // 由一个完整合法段覆盖。
+        }
+        if (!contained || result.tls.pages > AIRI_ELF_PAGES - result.pages) // 运行副本也占用户预算，不能因模板已计页就漏算复制页。
+            return "ELF TLS is outside LOAD or exceeds the user page budget"; // 真正分配前拒绝，旧view不变。
+    }
     *view = result; // 唯一一次修改输出，旧结果在任何失败路径都保持不变。
     return NULL; // 后续装载者可以按已验证范围分配、复制并清BSS。
 }

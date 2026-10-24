@@ -106,3 +106,25 @@ airi_tls_elf_end: /* 当前ELF结束位置。 */
 airi_tls_reset_elf_start: /* 新映像独立入口。 */
 .incbin AIRI_TLS_RESET_ELF /* main只查询新基址并输出。 */
 airi_tls_reset_elf_end: /* 新ELF的右端。 */
+
+.balign 8 /* C本地变量探针的真实静态ELF。 */
+.global airi_ctls_elf_start, airi_ctls_elf_end /* 一个映像供普通与reset两个目录名。 */
+airi_ctls_elf_start: /* 完整程序头含PT_TLS。 */
+.incbin AIRI_CTLS_ELF /* 来自本配置交叉链接产物。 */
+airi_ctls_elf_end: /* 用户文件右端。 */
+.balign 8 /* 单字节TLS布局单独编译。 */
+.global airi_ctls_char_elf_start, airi_ctls_char_elf_end /* 不混入普通探针的64字节对齐要求。 */
+airi_ctls_char_elf_start: /* 唯一TLS符号的ELF。 */
+.incbin AIRI_CTLS_CHAR_ELF /* 文件大小与PT_TLS长度并不相等。 */
+airi_ctls_char_elf_end: /* 映像范围结束。 */
+.balign 8 /* 错误ELF仍作为只读字节输入校验器。 */
+.global airi_tls_big_elf_start, airi_tls_big_elf_end /* 装载应拒绝这份超限模板。 */
+airi_tls_big_elf_start: /* 不把该程序当内核故障执行。 */
+.incbin AIRI_TLS_BIG_ELF /* 明确含4097字节TLS对象。 */
+airi_tls_big_elf_end: /* 输入边界供ELF校验。 */
+
+.balign 8 /* 最大TLS模板的纯零ELF。 */
+.global airi_ctls_page_elf_start, airi_ctls_page_elf_end /* 独立运行页与TCB页的实际程序。 */
+airi_ctls_page_elf_start: /* 没有TLS文件初值，但有4096字节内存模板。 */
+.incbin AIRI_CTLS_PAGE_ELF /* 真实链接器产生的PT_TLS，而非手工标记。 */
+airi_ctls_page_elf_end: /* 校验器可读输入的右端。 */

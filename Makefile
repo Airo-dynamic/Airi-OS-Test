@@ -196,7 +196,7 @@ lab-boot-info:
 	./build/labs/boot-info
 
 # 用户C使用自己的低地址模型、入口和库；绝不沿用内核高地址链接脚本。
-USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -msse2 -mno-avx -MMD -MP -mcmodel=small -Iinclude
+USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -msse2 -mno-avx -ftls-model=local-exec -MMD -MP -mcmodel=small -Iinclude
 # 每个配置拥有独立用户对象，避免跨配置复用旧二进制。
 USER_OBJECTS := $(OUT)/user/start.o $(OUT)/user/hello.o $(OUT)/user/bytes.o $(OUT)/user/syscall.o
 # 入口汇编与内核汇编分别形成对象，符号_start不在同一个链接目标中冲突。
@@ -402,3 +402,29 @@ $(OUT)/user/tls-reset.elf: $(USER_COMMON) $(OUT)/user/tls-reset.o labs/airios/pr
 $(OUT)/labs/airios/images.o: $(OUT)/user/tls.elf $(OUT)/user/tls-reset.elf
 # 文件路径通过预处理宏进入.incbin。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_TLS_ELF='"$(OUT)/user/tls.elf"' -DAIRI_TLS_RESET_ELF='"$(OUT)/user/tls-reset.elf"'
+
+# 三份静态TLS用户映像保持各自main，复用普通C入口和自有库。
+$(OUT)/user/ctls.elf: $(USER_COMMON) $(OUT)/user/ctls.o labs/airios/program.ld
+# local-exec重定位由LLD按PT_TLS静态跨度解析，内核不运行动态链接器。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/ctls.o -o $@
+# 单字节模板验证小于TCB对齐时的数据落点。
+$(OUT)/user/ctls-char.elf: $(USER_COMMON) $(OUT)/user/ctls-char.o labs/airios/program.ld
+# 不能与ctls.o一起链接，否则模板会混入大对齐变量。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/ctls-char.o -o $@
+# 只编译超限样本，装载器应在用户运行前返回-8。
+$(OUT)/user/tls-too-big.elf: $(USER_COMMON) $(OUT)/user/tls-too-big.o labs/airios/program.ld
+# 完整ELF用于真实guest失败事务，不用宿主字符串模拟拒绝。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/tls-too-big.o -o $@
+# 包装等待三份实际产物。
+$(OUT)/labs/airios/images.o: $(OUT)/user/ctls.elf $(OUT)/user/ctls-char.elf $(OUT)/user/tls-too-big.elf
+# 路径只供当前配置的.incbin。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CTLS_ELF='"$(OUT)/user/ctls.elf"' -DAIRI_CTLS_CHAR_ELF='"$(OUT)/user/ctls-char.elf"' -DAIRI_TLS_BIG_ELF='"$(OUT)/user/tls-too-big.elf"'
+
+# 四KiB纯零TLS需要第二页TCB，另立ELF不混入其他TLS初值。
+$(OUT)/user/ctls-page.elf: $(USER_COMMON) $(OUT)/user/ctls-page.o labs/airios/program.ld
+# 与其他用户相同入口和local-exec模型。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/ctls-page.o -o $@
+# 包装等待本配置最大模板映像。
+$(OUT)/labs/airios/images.o: $(OUT)/user/ctls-page.elf
+# 单独路径宏只由包装汇编使用。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CTLS_PAGE_ELF='"$(OUT)/user/ctls-page.elf"'

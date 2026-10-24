@@ -274,6 +274,11 @@
       "id": "K42",
       "title": "K42 · 用户FS基址、硬件寻址与生命周期",
       "document": "dev-log/core/42-user-fs-base.md"
+    },
+    {
+      "id": "K43",
+      "title": "K43 · 静态ELF模板与C11线程本地变量",
+      "document": "dev-log/core/43-static-tls.md"
     }
   ]
 }

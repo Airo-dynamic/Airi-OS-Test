@@ -71,9 +71,16 @@ def check_storage_restart(profile='normal'): # 对当前构建正常或图形正
                         limits = {'device':'airi-disk', 'bps':0, 'bps_rd':0, 'bps_wr':0, 'iops':1, 'iops_rd':0, 'iops_wr':0} # 明确单IOPS且无额外突发，不限制吞吐字节。
                         qmp_execute(qmp, 'block_set_io_throttle', limits) # QEMU实际限速，不在guest里伪造完成延迟。
                         (work / 'async-throttle.json').write_text(json.dumps(limits, indent=2) + '\n') # 只在QMP接受后记录本次配置。
+                    command_count = 1 # 普通会话只发送本次目标命令。
+                    if slow: # 限速器可能放行第一笔，先用真实只读请求消耗初始额度。
+                        warm_offset = len(text) # 不使用启动演示的旧恢复输出。
+                        wire.sendall(b'run recover\n') # 同一guest实际读取已提交记录，不修改正式日志。
+                        text = wait('[CONSOLE_UPDATE] view=0 commands=1 page=0', warm_offset) # 完整读回和会话清理后再发目标。
+                        assert '[RECOVERY_USER_OK]' in text[warm_offset:] # 初始额度由真实设备读取消耗，不靠宿主sleep猜测。
+                        command_count = 2 # async是同一新CPU的第二条监控命令。
                     offset = len(text) # 用户命令只消费之后的新输出。
                     wire.sendall((request + '\n').encode()) # 通过实际UART提交控制台命令。
-                    text = wait('[CONSOLE_UPDATE] view=0 commands=1 page=0', offset) # 等命令与用户会话全部收拢。
+                    text = wait(f'[CONSOLE_UPDATE] view=0 commands={command_count} page=0', offset) # 按实际已发送命令数等待完整收拢。
                     assert user_marker in text[offset:] and '[AIRI_PANIC]' not in text[offset:] # 标记来自本次ring3程序。
                     return text[offset:] # 交出本次请求的完整真实区间，finally仍先回收QEMU。
                 finally: # 正常和错误均收回设备与CPU。
@@ -98,7 +105,7 @@ def check_storage_restart(profile='normal'): # 对当前构建正常或图形正
         if registered.start() < progress < wake: # 子任务进展发生在同一次父调用等待期间。
             blocked = True # 不是凭QEMU仍运行推断并发。
     assert blocked and 'phase=start' in tail and 'phase=complete' in tail # 真设备接收、完成和其他用户继续必须同时成立。
-    result = {'passed':True, 'profile':profile, 'boots':3, 'restart_boots':2, 'recovered_records':1, 'throttled_async_iops':1, 'other_user_during_cq_wait':True, 'seconds':round(time.monotonic() - started, 2), 'model':'QEMU process restart, not physical power loss'} # 只记录实际完成的模型。
+    result = {'passed':True, 'profile':profile, 'boots':3, 'restart_boots':2, 'recovered_records':1, 'throttled_async_iops':1, 'other_user_during_cq_wait':True, 'throttle_warmed_by_real_recovery':True, 'seconds':round(time.monotonic() - started, 2), 'model':'QEMU process restart, not physical power loss'} # 只记录实际完成的模型。
     result_path.write_text(json.dumps(result, indent=2) + '\n') # 两次均完成才覆盖成功。
     print('PASS storage sessions: two-boot recovery + QMP-throttled CQ wait with other user progress') # 不用宿主读取文件猜客体行为。
     return result # 统一入口可收集当前结果。

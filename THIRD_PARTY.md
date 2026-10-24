@@ -36,3 +36,5 @@ CPU 特权、寄存器与页表参考 [Intel SDM](https://www.intel.com/content/
 K41 的CPU状态与调用约定参考 Intel SDM FXSAVE/FXRSTOR条目（https://cdrdv2-public.intel.com/812383/253666-sdm-vol-2a.pdf）及x86-64 psABI的寄存器约定（https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex）；没有导入其代码。QEMU v11.1.2 fpu_helper.c（https://github.com/qemu/qemu/blob/v11.1.2/target/i386/tcg/fpu_helper.c）用于对照本轮TCG保留位故障差异和FXSAVE对齐检查，未复制实现或增加运行依赖。
 
 K42 的FS寻址、Linux用法和FSGSBASE允许边界参考 Linux内核文档（https://docs.kernel.org/arch/x86/x86_64/fsgs.html）与Intel指导（https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/guidance-enabling-fsgsbase.html），只用于机制核对，未导入实现或新增依赖。
+
+K43静态local-exec、PT_TLS和TP前数据布局参考Ulrich Drepper《ELF Handling For Thread-Local Storage》v0.21（https://www.akkadia.org/drepper/tls.pdf）及现有LLD实际输出。没有导入文中代码，未加入动态TLS运行库或新依赖。

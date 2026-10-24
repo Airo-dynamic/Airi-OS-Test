@@ -1,0 +1,32 @@
+checkpoint: K43
+baseline: baseline.yaml
+start: K42
+current_operation: 普通C本地变量由PT_TLS模板在main前初始化，fork继承修改值、exec重建，大小对齐和超限失败都实测
+already_explained:
+- concept: ELF文件内容与内存长度
+  at: ../../../dev-log/core/21-user-elf.md#elf-load-owner
+  establishes: LOAD的filesz只复制有效初值，memsz剩余零填充，输入只借用至装载完成
+- concept: 真实FS寻址与页权限
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-address
+  establishes: FS基址加偏移仍由当前页表翻译，设置不固定页；该版本只有手工布局
+- concept: fork/exec中的基址生命周期
+  at: ../../../dev-log/core/42-user-fs-base.md#fs-owner
+  establishes: fork复制数值与页，exec新值从零构造、失败保留；返回所选用户时恢复
+first_use:
+- concept: C11存储类别与PT_TLS模板
+  at: ../../../dev-log/core/43-static-tls.md#ctls-template
+  establishes: tdata初值和tbss零尾部形成模板，TPOFF32由静态链接器解析，模板VA不是实例地址
+- concept: TP前的静态变量与最小TCB
+  at: ../../../dev-log/core/43-static-tls.md#ctls-layout
+  establishes: span按模板对齐、TP至少16对齐，初值偏移为pointer-span，FS0必须含self，TCB另计页
+- concept: 模板输入校验与预算
+  at: ../../../dev-log/core/43-static-tls.md#ctls-inspect
+  establishes: 唯一头、范围/权限/对齐与LOAD对应关系在分配前完整检查，额外运行页也计用户预算
+- concept: 未活动新根中的TLS副本
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: owned页先清零，再按目标页表写初值和TCB，设置fs_base后才允许main；fork复制当前值，exec重建默认值
+not_assumed:
+- pthread、共享地址空间线程、动态TLS/DTV、TLS析构器、C++动态本地初始化、errno或网络TLS已实现
+limits:
+- 一个静态local-exec模块，模板上限4KiB，对齐至多4096且VA/文件起点不偏斜，运行块固定0x60000000
+- 无模板程序保持FS0，手工基址实验与自动本地变量程序分别拥有其运行约定
