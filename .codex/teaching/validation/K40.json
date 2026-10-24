@@ -174,7 +174,23 @@
   "not_verified": [
     "Real board ACPI/PCI topology, shared IRQ dispatch, IOAPIC/MSI-X, SMP or tickless",
     "Injected device hot-resize/config change or malformed ISR",
-    "New GUI regression pending isolated combination",
     "Linux labs and native network/tunnel remain unverified/later work"
-  ]
+  ],
+  "gui": {
+    "path": "/tmp/airios-k39-gui-20261024",
+    "main_source_files": 133,
+    "main_source_equal": true,
+    "test_exit": 0,
+    "scope": "10 diagnostic profiles, 3 input paths, 3 storage sessions",
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_checks": 58,
+    "guest_day_night_viewed": true,
+    "artifacts": "artifacts/k40"
+  },
+  "release": {
+    "snapshots": 52,
+    "export": "/private/tmp/airios-k40-release-20261024",
+    "export_exit": 0
+  }
 }
