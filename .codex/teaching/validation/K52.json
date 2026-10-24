@@ -253,7 +253,29 @@
     "pthread/detach/cancel/main-thread-only exit/TLS destructors,thread-safe malloc and futex",
     "SMP,shared-memory interprocess futex and complete POSIX/Linux ABI",
     "Registered async buffer sharing is tested; multi-consumer SQ/CQ stress is not",
-    "No new GUI-specific run yet; K49 isolated combination retained",
     "Real board,native network and native Cloudflare tunnel absent"
-  ]
+  ],
+  "release": {
+    "snapshots_exit": 0,
+    "checkpoints": 64,
+    "snapshots_log": "artifacts/k52/snapshots.log",
+    "export_exit": 0,
+    "export_path": "/tmp/airios-k52-release-20261024",
+    "export_log": "artifacts/k52/export.log"
+  },
+  "graphics": {
+    "isolated_combination": true,
+    "main_owned_files_identical": 167,
+    "test_exit": 0,
+    "test_log": "artifacts/k52/graphics-test.log",
+    "ui_test_exit": 0,
+    "ui_test_log": "artifacts/k52/ui-test.log",
+    "host_snapshots": 84,
+    "contrast_cases": 58,
+    "guest_day_night_viewed": true,
+    "screenshots": [
+      "artifacts/k52/gui-day.png",
+      "artifacts/k52/gui-night.png"
+    ]
+  }
 }
