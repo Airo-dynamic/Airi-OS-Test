@@ -309,6 +309,11 @@
       "id": "K49",
       "title": "K49 · 用户内存所有权与exec局部替换",
       "document": "dev-log/core/49-user-memory-owner.md"
+    },
+    {
+      "id": "K50",
+      "title": "K50 · 用户执行现场与等待所有权",
+      "document": "dev-log/core/50-user-execution.md"
     }
   ]
 }

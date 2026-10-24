@@ -1,0 +1,34 @@
+checkpoint: K50
+baseline: baseline.yaml
+start: K49
+current_operation: 将CPU现场、陷入栈和等待借用收进执行者，调度同时选择进程内存与其执行链
+already_explained:
+- concept: 页面所有者与进程资源
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-owner
+  establishes: 用户数据页、页表、元数据归memory，FD与异步owner不随exec旧页清理
+- concept: 旧栈与新映像的交接
+  at: ../../../dev-log/core/49-user-memory-owner.md#memory-exec
+  establishes: exec替换用户内存、FS和FPU，真实frame仍在原内核栈，切根后回收旧页
+- concept: FPU状态与运行者匹配
+  at: ../../../dev-log/core/41-user-fpu-state.md#fpu-process-owner
+  establishes: 保存页独立持有，用户返回恢复目标身份，fork复制状态而非共享页
+- concept: 完整用户陷入现场
+  at: ../../../dev-log/core/20-user-boundary.md#int80-contract
+  establishes: 通用寄存器与iretq字段在真实内核栈上保存，返回必须检查权限与规范地址
+first_use:
+- concept: 进程资源与执行链的内嵌分离
+  at: ../../../dev-log/core/50-user-execution.md#execution-owner
+  establishes: execution拥有FS/FPU/内核栈/frame和等待借用，process保留内存/FD/PID和退出结果
+- concept: 按执行者创建陷入栈与FPU
+  at: ../../../dev-log/core/50-user-execution.md#execution-stack
+  establishes: create_stack显式接槽号，exec的短路条件不对局部候选计算数组内指针差，place_frame只消费执行栈
+- concept: 执行者销毁的栈限制
+  at: ../../../dev-log/core/50-user-execution.md#execution-destroy
+  establishes: 退出先切走，在其他栈上归还FPU和内核栈并撤销恢复资格，结构抽取不改变此顺序
+- concept: 调度时同时选择资源与现场
+  at: ../../../dev-log/core/50-user-execution.md#execution-dispatch
+  establishes: select_user使用process.memory与execution栈/frame，保存恢复使用同一执行者的FS/FPU与等待状态
+not_assumed:
+- 多执行者、共享线程资源、TID、join、pthread或futex已经实现
+limits:
+- 仍八个进程槽、一进程内嵌一执行者，未增加调用或更改frame汇编ABI

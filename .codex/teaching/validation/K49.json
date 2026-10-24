@@ -202,7 +202,29 @@
   "not_verified": [
     "Shared process resource references,threads,futex,SMP synchronization",
     "Linux unchanged: prior actual SSH255; guest does not establish Linux execution",
-    "No GUI presentation changes,prior K45 combination record only",
     "Real board,network/native tunnel and production allocator not implemented"
-  ]
+  ],
+  "release": {
+    "snapshots_exit": 0,
+    "snapshots": 61,
+    "export_exit": 0,
+    "path": "/private/tmp/airios-k49-release-20261024"
+  },
+  "graphics": {
+    "isolated_clone": "/tmp/airios-k39-gui-20261024",
+    "frozen_main_commit": "32220b9",
+    "owned_main_bytes_equal": 162,
+    "graphics_test_exit": 0,
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_combinations": 58,
+    "day_night_guest_images_viewed": [
+      "artifacts/k49/gui-day.png",
+      "artifacts/k49/gui-night.png"
+    ],
+    "logs": [
+      "/tmp/airios-k49-graphics-test.log",
+      "/tmp/airios-k49-ui-test.log"
+    ]
+  }
 }

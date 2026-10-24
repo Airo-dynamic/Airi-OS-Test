@@ -66,3 +66,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K48 用户对象分配](48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。
 
 [K49 用户内存所有权](49-user-memory-owner.md)将页表与页面记录单独持有，exec只转移新旧内存，保持内核栈、FD与进程身份，切根后再回收旧页。
+
+[K50 用户执行现场](50-user-execution.md)将CPU状态、陷入栈与等待条件集中到execution，调度同时选择内存与现场，并保持离开栈后再销毁的顺序。

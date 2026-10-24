@@ -30,3 +30,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K48](../dev-log/core/48-user-malloc.md)亲手实现用户对象包装：页面缓存与活请求分别统计，零长度策略、calloc溢出与每次清零、realloc峰值失败和fork/exec状态；当前固定256KiB且单线程，不等于生产分配器。
 
 [K49](../dev-log/core/49-user-memory-owner.md)亲手区分用户内存与执行状态：小描述转移不复制页面，fork仍深复制，exec保留进程资源并在切根后回收旧页；共享线程和最后引用退出规则尚待实现。
+
+[K50](../dev-log/core/50-user-execution.md)亲手归属执行现场与阻塞状态：页表归进程，CPU现场与内核栈归执行者，返回时二者必须匹配；销毁仍要求先离开目标栈。
