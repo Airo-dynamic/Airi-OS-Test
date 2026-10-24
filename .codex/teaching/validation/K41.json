@@ -204,7 +204,23 @@
   "not_verified": [
     "AVX/XSAVE, TLS/threads, SMP or kernel floating-point",
     "Real board and long-term soak",
-    "New GUI combination pending separate clone",
     "Linux labs/native network/tunnel unchanged"
-  ]
+  ],
+  "gui": {
+    "path": "/tmp/airios-k39-gui-20261024",
+    "main_source_files": 139,
+    "main_source_equal": true,
+    "test_exit": 0,
+    "scope": "10 diagnostic profiles, 3 inputs, 3 storage sessions",
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_checks": 58,
+    "guest_day_night_viewed": true,
+    "artifacts": "artifacts/k41"
+  },
+  "release": {
+    "snapshots": 53,
+    "export": "/private/tmp/airios-k41-release-20261024",
+    "export_exit": 0
+  }
 }
