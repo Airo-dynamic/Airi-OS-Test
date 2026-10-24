@@ -55,4 +55,5 @@ long airi_fs_set(uintptr_t base); // 自有ABI设置低半区FS基址，0停用�
 long airi_fs_base(void); // 返回当前用户FS基址，尚不是通用arch_prctl或完整TLS运行库。
 long airi_preadv(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 35号调用，负错误原样返回。
 long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 36号调用，一次至多256字节。
+long airi_seek_from(unsigned fd, int64_t delta, unsigned whence); // 37号调用，0/1/2按SET/CUR/END选择基准，可有符号回退。
 #endif // 结束包含保护。

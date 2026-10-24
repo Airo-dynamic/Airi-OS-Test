@@ -64,12 +64,10 @@ int pipe(int ends[2]) { // 直接交用户输出，内核在创建资源前验�
     _Static_assert(sizeof(int) == sizeof(unsigned), "pipe ABI integer width"); // 两个整数与原始ABI保持字节布局一致。
     return (int)result(airi_pipe((unsigned *)ends, 0)); // 阻塞模式；不借局部数组后再冒险写坏用户指针。
 }
-off_t lseek(int fd, off_t offset, int whence) { // 尚无文件长度/当前位置查询，不虚构完整定位能力。
-    if (offset < 0 || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) // 先拒绝明显非法输入。
-        return invalid(EINVAL); // 未修改共享位置。
-    if (whence != SEEK_SET) // 常量存在不表示操作已经实现。
-        return invalid(ENOSYS); // 调用方可明确识别当前缺口。
-    return result(airi_seek((unsigned)fd, (uint64_t)offset)); // 返回实际绝对位置。
+off_t lseek(int fd, off_t offset, int whence) { // 负差值可用于CUR/END，最终位置由内核有界检查。
+    if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) // 源码未知基准先拒绝。
+        return invalid(EINVAL); // 不查询或修改对象。
+    return result(airi_seek_from((unsigned)fd, offset, (unsigned)whence)); // 原子地读取共享基准并提交新位置，成功不清errno。
 }
 pid_t getpid(void) { // 当前原始getpid不会失败，仍复用一致转换。
     return result(airi_getpid()); // 使用可容纳完整内核PID的有符号类型。

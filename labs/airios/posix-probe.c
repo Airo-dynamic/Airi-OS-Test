@@ -31,8 +31,15 @@ int main(int argc, char **argv) { // 同一ELF另以libc-reset观察exec后的�
         return 234; // 显式偏移不是先seek再write的别名。
     if (read(fd, (void *)(uintptr_t)0xffff800000000000ull, 1) != -1 || errno != EFAULT || read(fd, output, 1) != 1 || output[0] != input[2] || errno != EFAULT) // 坏输出在消费偏移前拒绝，后一次成功保留旧错误。
         return 235; // 不让包装破坏原内核错误原子性。
-    if (pread(fd, output, 1, -1) != -1 || errno != EINVAL || lseek(fd, 0, SEEK_CUR) != -1 || errno != ENOSYS) // 本地负参数和当前未实现操作明确区分。
-        return 236; // 不虚构完整POSIX定位。
+    if (pread(fd, output, 1, -1) != -1 || errno != EINVAL || lseek(fd, 0, SEEK_CUR) != 3 || lseek(fd, -1, SEEK_CUR) != 2) // 显式读偏移不能为负，当前位置的合法负差值却应成功。
+        return 236; // 参数的意义不同，不能统一拒绝所有负数。
+    if (lseek(fd, -1, SEEK_END) != 299 || read(fd, output, 1) != 1 || output[0] != input[299] || lseek(fd, 10, SEEK_END) != 310 || read(fd, output, 1) != 0 || lseek(fd, 0, SEEK_END) != 300) // 文件尾、定位后EOF与不扩文件分别观察。
+        return 252; // 容量1024不能当作当前内容尾。
+    if (lseek(fd, 302, SEEK_SET) != 302 || write(fd, "Q", 1) != 1 || pread(fd, output, 3, 300) != 3 || output[0] || output[1] || output[2] != 'Q') // 真正写入才扩size并清零两字节洞。
+        return 253; // 不允许暴露原来未写的旧内容。
+    if (lseek(fd, -304, SEEK_END) != -1 || errno != EINVAL || lseek(fd, INT64_MIN, SEEK_CUR) != -1 || errno != EINVAL || lseek(fd, INT64_MAX, SEEK_CUR) != -1 || errno != EINVAL || lseek(fd, 0, 99) != -1 || errno != EINVAL || lseek(fd, 0, SEEK_CUR) != 303) // 最小/最大差值与非法基准不能修改旧位置。
+        return 254; // 不在有符号加法或对最小整数取负中产生UB。
+    airi_puts("[LIBC_SEEK_OK] set=1 cur=1 end=1 signed=checked hole=zero failure=unchanged\n"); // 新语义由guest实际核对。
     if (close(fd) || close(fd) != -1 || errno != EBADF || open("/missing", O_RDONLY) != -1 || errno != ENOENT || open("/seed", O_ACCMODE) != -1 || errno != EINVAL) // 真实内核错误和库参数错误都转换为-1+正errno。
         return 237; // 成功结果不能被旧errno遮蔽。
     fd = open("/seed", O_RDONLY); // 独立open从offset0开始。

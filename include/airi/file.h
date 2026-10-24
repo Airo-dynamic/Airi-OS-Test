@@ -24,6 +24,7 @@ long airi_fd_open(struct airi_fd_table *table, const char *path, unsigned flags)
 long airi_fd_close(struct airi_fd_table *table, unsigned fd); // 释放表项与其引用。
 long airi_fd_dup(struct airi_fd_table *table, unsigned fd, bool cloexec); // 新表项共享偏移。
 long airi_fd_seek(struct airi_fd_table *table, unsigned fd, uint64_t offset); // 首版只支持绝对偏移。
+long airi_fd_seek_from(struct airi_fd_table *table, unsigned fd, int64_t delta, unsigned whence); // SET/CUR/END在同一打开对象内取基准、检查并提交。
 long airi_fd_read(struct airi_fd_table *table, unsigned fd, void *buffer, size_t bytes, bool positioned, uint64_t offset); // 输出是内核副本。
 long airi_fd_write(struct airi_fd_table *table, unsigned fd, const void *buffer, size_t bytes, bool positioned, uint64_t offset); // 输入不被异步保留。
 bool airi_fd_console(const struct airi_fd_table *table, unsigned fd); // 终端发送由设备适配完成。

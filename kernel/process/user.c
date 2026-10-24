@@ -1020,6 +1020,14 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = current->fs_base; // 低半区基址可由long无歧义表示，不返回内核地址。
     else if (f->rax == 35 || f->rax == 36) // 自有显式偏移向量操作，R10保存第四参数。
         f->rax = (uint64_t)vector_transfer(current, f->rdi, f->rsi, f->rdx, f->r10, f->rax == 36); // 描述和前缀在调用内完成，不建立异步借用。
+    else if (f->rax == 37) { // 有符号相对定位仍由打开对象的所有者一次完成。
+        if (f->rdi >= AIRI_FD_COUNT) // 完整64位编号不能截成另一个合法FD。
+            f->rax = (uint64_t)-9ll; // -EBADF。
+        else if (f->rdx > 2) // 原始调用也不能靠窄化whence绕过检查。
+            f->rax = (uint64_t)-22ll; // -EINVAL。
+        else // RSI位模式在当前二补数x86-64目标解释为有符号偏移。
+            f->rax = (uint64_t)airi_fd_seek_from(&current->files, (unsigned)f->rdi, (int64_t)f->rsi, (unsigned)f->rdx); // 一次读取基准、验证并提交，旧14号绝对接口保留。
+    }
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。

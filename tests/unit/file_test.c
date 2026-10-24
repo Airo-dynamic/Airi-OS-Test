@@ -93,6 +93,17 @@ int main(void) { // 独立进程，每次建立干净RAM目录。
     airi_fd_close_all(&child,false); airi_fd_close_all(&parent,false); // 最后输入引用释放不能清空固定对象配置。
     airi_fd_init(&parent); assert(airi_fd_attach_input(&parent)); // 再次启动shell可重新使用相同输入对象。
     assert(airi_fd_input(&parent,0)); airi_fd_close_all(&parent,false); // 重复会话完整回收。
-    puts("PASS RAM files/pipes: offsets, fork/exec references, sparse zero, short I/O, FIFO wrap, endpoint lifetime, exhaustion"); // 全部边界通过才发布。
+    airi_fd_init(&parent); // 单独验证一次基准读取与共享位置提交。
+    assert(airi_fd_open(&parent, "/seed", AIRI_OPEN_READ) == 0); // 内容长度6，偏移0。
+    assert(airi_fd_seek_from(&parent, 0, -1, 2) == 5 && airi_fd_read(&parent, 0, data, 1, false, 0) == 1 && data[0] == 'f'); // END使用size而非容量。
+    assert(airi_fd_seek_from(&parent, 0, -2, 1) == 4); // 当前6回退2为4。
+    int alias = (int)airi_fd_dup(&parent, 0, false); // 同一对象的新引用。
+    assert(alias >= 0 && airi_fd_seek_from(&parent, (unsigned)alias, 1, 1) == 5 && airi_fd_seek_from(&parent, 0, 0, 1) == 5); // dup任一表项更新都反映在共享字段。
+    assert(airi_fd_seek_from(&parent, 0, INT64_MIN, 1) == -22 && airi_fd_seek_from(&parent, 0, INT64_MAX, 1) == -22); // 极值差不做未定义有符号运算。
+    assert(airi_fd_seek_from(&parent, 0, -7, 2) == -22 && airi_fd_seek_from(&parent, 0, 0, 99) == -22 && airi_fd_seek_from(&parent, 0, 0, 1) == 5); // 所有失败保持原5。
+    assert(airi_fd_seek_from(&parent, 0, 1024, 0) == 1024 && airi_fd_seek_from(&parent, 0, 1, 1) == -22 && airi_fd_seek_from(&parent, 0, 0, 2) == 6); // 最终位置上限与内容长度分别维护，定位不扩size。
+    assert(airi_fd_seek_from(&parent, 1, 0, 0) == -29 && airi_fd_seek_from(&parent, AIRI_FD_COUNT, 0, 0) == -9); // 终端不可定位与坏FD分开。
+    airi_fd_close_all(&parent, false); assert(!airi_files_open_count()); // 新观察不泄漏打开对象。
+    puts("PASS RAM files/pipes: offsets/signed seek, fork/exec references, sparse zero, short I/O, FIFO wrap, endpoint lifetime, exhaustion"); // 全部边界通过才发布。
     return 0; // 宿主测试成功。
 }

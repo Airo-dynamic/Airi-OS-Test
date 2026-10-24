@@ -58,3 +58,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K44 errno与文件包装](44-posix-errno.md)提供显式链接的用户POSIX源码子集，保留短操作、EOF和原始ABI，验证本地错误跨fork/exec的生命周期。
 
 [K45 显式偏移向量I/O](45-positioned-vectors.md)先复制描述与核对实际前缀，再以一次文件操作聚合/分散；保留短返回、共享偏移和坏后项无副作用。
+
+[K46 有符号定位](46-signed-seek.md)在共享打开对象中一次完成SET/CUR/END，验证负差值、极值失败保持和写入后的零洞。

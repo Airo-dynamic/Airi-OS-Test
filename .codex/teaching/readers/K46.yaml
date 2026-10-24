@@ -1,0 +1,26 @@
+checkpoint: K46
+baseline: baseline.yaml
+start: K45
+current_operation: SET/CUR/END在同一打开对象内读取基准并提交，合法负差值、极值失败保持与真实零洞
+already_explained:
+- concept: 文件节点与共享打开对象
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: 节点持内容、打开对象持offset，dup/fork共享后者，表项引用与文件内容分别持有
+- concept: 标准定位与原始包装边界
+  at: ../../../dev-log/core/44-posix-errno.md#posix-flags
+  establishes: K44只支持SET，CUR/END当时明确ENOSYS；源码常量不是Linux二进制ABI
+first_use:
+- concept: 基准、内容长度和容量
+  at: ../../../dev-log/core/46-signed-seek.md#seek-object
+  establishes: SET0、CUR共享offset、END节点size，定位不扩内容，后续写才清零洞
+- concept: 有符号差值的无溢出验证
+  at: ../../../dev-log/core/46-signed-seek.md#seek-arithmetic
+  establishes: 正向先比容量差，负向以-(delta+1)后转无符号补1求幅度，INT64_MIN不直接取负，失败不提交
+- concept: 一次内核对象操作承接有符号位模式
+  at: ../../../dev-log/core/46-signed-seek.md#seek-boundary
+  establishes: 37号完整检查FD/whence后解释RSI，旧14号绝对接口保留，用户不拆成查询再设置
+not_assumed:
+- SMP同步、无界文件、稀疏物理分配、SEEK_DATA/HOLE、fstat或持久化已实现
+limits:
+- 当前单核不可抢占RAM模型，最终offset限0至1024；一次提交不自动证明未来多核安全
+- 负显式pread偏移仍非法，合法CUR/END负差值与它不是同一参数语义

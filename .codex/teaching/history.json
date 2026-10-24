@@ -289,6 +289,11 @@
       "id": "K45",
       "title": "K45 · 显式偏移向量I/O与完整前缀检查",
       "document": "dev-log/core/45-positioned-vectors.md"
+    },
+    {
+      "id": "K46",
+      "title": "K46 · 共享打开对象中的有符号定位",
+      "document": "dev-log/core/46-signed-seek.md"
     }
   ]
 }

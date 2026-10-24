@@ -134,6 +134,29 @@ long airi_fd_seek(struct airi_fd_table *table, unsigned fd, uint64_t offset) { /
     file->offset = offset; // 所有dup/fork引用一起观察新偏移。
     return (long)offset; // 返回定位后的偏移。
 }
+long airi_fd_seek_from(struct airi_fd_table *table, unsigned fd, int64_t delta, unsigned whence) { // 一次内核操作读取并更新共享打开对象位置。
+    struct airi_open_file *file = get(table, fd); // 不把FD整数当文件地址。
+    if (!file) // 关闭或越界表项无目标。
+        return -9; // -EBADF，旧对象不变。
+    if (!file->node) // 管道、UART没有可定位的RAM节点。
+        return -29; // -ESPIPE，不伪造流位置。
+    if (whence > 2) // 0/1/2分别SET/CUR/END，未知值拒绝。
+        return -22; // -EINVAL。
+    uint64_t base = whence == 0 ? 0 : whence == 1 ? file->offset : file->node->size; // END使用内容长度，不是预留容量或当前偏移。
+    uint64_t next; // 只在完整合法后才写回共享对象。
+    if (delta >= 0) { // 非负方向先确认容量差，不做可能回绕的有符号相加。
+        if ((uint64_t)delta > FILE_BYTES - base) // 当前base本身始终位于0至1024。
+            return -22; // 超出本轮有界文件定位范围。
+        next = base + (uint64_t)delta; // 已确认结果在显式上限内。
+    } else { // 负偏移不能直接对INT64_MIN取负。
+        uint64_t magnitude = (uint64_t)(-(delta + 1)) + 1; // 先加1再取负，提升无符号后补1，完整表达2^63。
+        if (magnitude > base) // 最终位置将小于0。
+            return -22; // 原共享偏移保持。
+        next = base - magnitude; // 只有合法的向前回退。
+    }
+    file->offset = next; // 单核不可抢占内核中一次提交，dup/fork引用一起观察。
+    return (long)next; // 定位不扩文件，只有后续写入才会改变size并清零洞。
+}
 static long transfer(struct airi_fd_table *table, unsigned fd, void *buffer, size_t bytes, bool write, bool positioned, uint64_t offset) { // 这里只操作内核缓冲，不验证用户指针。
     struct airi_open_file *file = get(table, fd); // 当前表里的整数转内部对象。
     if (!file || !(file->flags & (write ? AIRI_OPEN_WRITE : AIRI_OPEN_READ))) // 错误访问模式也返回EBADF。

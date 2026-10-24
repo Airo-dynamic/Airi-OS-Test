@@ -132,3 +132,7 @@ long airi_preadv(unsigned fd, const struct airi_iovec *vectors, unsigned count, 
 long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset) { // 描述只借用到同步调用返回。
     return call4(36, fd, (uintptr_t)vectors, count, offset); // 实际短数量或原始负错误。
 }
+
+long airi_seek_from(unsigned fd, int64_t delta, unsigned whence) { // 有符号差值按完整64位二补数传入RSI。
+    return call3(37, fd, (uint64_t)delta, whence); // 基准由内核在同一打开对象上决定，不做用户侧查询加定位。
+}
