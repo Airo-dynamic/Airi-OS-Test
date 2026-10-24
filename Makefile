@@ -428,3 +428,18 @@ $(OUT)/user/ctls-page.elf: $(USER_COMMON) $(OUT)/user/ctls-page.o labs/airios/pr
 $(OUT)/labs/airios/images.o: $(OUT)/user/ctls-page.elf
 # 单独路径宏只由包装汇编使用。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CTLS_PAGE_ELF='"$(OUT)/user/ctls-page.elf"'
+
+# POSIX风格包装是显式用户库，不让早期原始FS和4KiB模板实验强行加入errno。
+$(OUT)/user/posix.o: labs/airios/libc/posix.c Makefile
+# 使用同一用户目标与自动头依赖，拒绝宿主头文件实现混入。
+	@mkdir -p $(dir $@)
+# posix.c的_Thread_local错误槽由静态模板装载，库不自己设置FS。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 此程序单独选择posix.o，USER_COMMON仍只包含原始入口和字节/系统调用库。
+$(OUT)/user/posix-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/posix-probe.o labs/airios/program.ld
+# 无宿主libc，所有标准名字由本项目用户库提供。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/posix-probe.o -o $@
+# 包装等待当前配置的完整用户ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/posix-probe.elf
+# 该路径宏不改变内核调用号或符号。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_POSIX_ELF='"$(OUT)/user/posix-probe.elf"'

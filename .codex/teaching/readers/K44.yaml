@@ -1,0 +1,32 @@
+checkpoint: K44
+baseline: baseline.yaml
+start: K43
+current_operation: 用户库将原始负错误变成-1和本地errno，文件/管道保留实际短返回，fork与exec观察错误槽
+already_explained:
+- concept: 编译器本地变量的运行副本
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: main前按模板建立TLS与TCB，fork复制当前值、exec重建原始初值
+- concept: 文件对象与FD引用
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: open独立偏移、dup/fork共享打开对象，FD是进程表项而非文件本体
+- concept: 用户缓冲区检查
+  at: ../../../dev-log/core/20-user-boundary.md#int80-contract
+  establishes: 复制前核对完整实际跨度，坏指针不能交给设备或改变有效数据
+first_use:
+- concept: 返回值与errno的不同有效范围
+  at: ../../../dev-log/core/44-posix-errno.md#errno-result
+  establishes: 失败转换为-1和正错误，成功/EOF不以旧errno判断失败；本库成功保留，不泛化为所有libc的保证
+- concept: 源码标志映射与访问模式
+  at: ../../../dev-log/core/44-posix-errno.md#posix-flags
+  establishes: O_RDONLY为0，低两位枚举先解释再映射原始ABI；未知位拒绝，mode形状不冒充权限实现
+- concept: 有界一次提交与部分进展
+  at: ../../../dev-log/core/44-posix-errno.md#posix-prefix
+  establishes: 长请求缩为至多256的一次提交，短返回由调用方继续；pread/pwrite保持共享位置，pipe输出直接在内核验证
+- concept: 显式链接用户兼容层
+  at: ../../../dev-log/core/44-posix-errno.md#posix-link
+  establishes: posix.o含4字节TLS错误槽，仅需要者链接；旧原始ABI、手工FS与4KiB模板程序不强行加入
+not_assumed:
+- 完整POSIX、libc/stdio/malloc、文件权限位、SEEK_CUR/END、信号、pthread或C++运行时
+limits:
+- 内核和原始airi_包装保持负错误；标准名字由用户库转换，源码重编译而非Linux二进制ABI
+- 当前RAM文件1024字节、单次副本256、管道64；errno只实测不同进程，未来线程还需独立TLS

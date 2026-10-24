@@ -38,3 +38,5 @@ K41 的CPU状态与调用约定参考 Intel SDM FXSAVE/FXRSTOR条目（https://c
 K42 的FS寻址、Linux用法和FSGSBASE允许边界参考 Linux内核文档（https://docs.kernel.org/arch/x86/x86_64/fsgs.html）与Intel指导（https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/guidance-enabling-fsgsbase.html），只用于机制核对，未导入实现或新增依赖。
 
 K43静态local-exec、PT_TLS和TP前数据布局参考Ulrich Drepper《ELF Handling For Thread-Local Storage》v0.21（https://www.akkadia.org/drepper/tls.pdf）及现有LLD实际输出。没有导入文中代码，未加入动态TLS运行库或新依赖。
+
+K44的错误左值、短读与open源码规则对照Linux man-pages errno(3)、read(2)、open(2)（https://man7.org/linux/man-pages/man3/errno.3.html 、https://man7.org/linux/man-pages/man2/read.2.html 、https://man7.org/linux/man-pages/man2/open.2.html）。自有用户包装未导入libc实现，常量与ABI范围由项目头文件明确声明。

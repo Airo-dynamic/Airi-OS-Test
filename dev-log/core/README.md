@@ -54,3 +54,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K42 用户FS基址](42-user-fs-base.md)将实际FS寻址接入统一用户保存与恢复，验证不同基址的抢占、fork/exec及释放后缺页。
 
 [K43 C11线程本地变量](43-static-tls.md)从静态ELF模板创建用户TLS副本，验证负偏移、初值/零尾部、fork继承、exec重建及超限拒绝。
+
+[K44 errno与文件包装](44-posix-errno.md)提供显式链接的用户POSIX源码子集，保留短操作、EOF和原始ABI，验证本地错误跨fork/exec的生命周期。

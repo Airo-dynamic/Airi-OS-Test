@@ -279,6 +279,11 @@
       "id": "K43",
       "title": "K43 · 静态ELF模板与C11线程本地变量",
       "document": "dev-log/core/43-static-tls.md"
+    },
+    {
+      "id": "K44",
+      "title": "K44 · 用户errno与有界POSIX文件源码接口",
+      "document": "dev-log/core/44-posix-errno.md"
     }
   ]
 }

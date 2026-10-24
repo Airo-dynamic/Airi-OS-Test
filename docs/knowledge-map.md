@@ -13,7 +13,7 @@
 | 提交与完成 | [K30–K32](../dev-log/core/30-block-begin-poll.md)：begin/poll、SQ/CQ、cookie、handle、epoch、退出晚完成 | [L07](../dev-log/linux/07-uring.md)liburing、部分提交、短读、错误CQ，待实测 | 注册buffer是内核副本，非Linux ABI或零拷贝固定页 |
 | 完整工作流 | [K33](../dev-log/core/33-shell-pipeline.md)：真实用户shell、页/FD/块请求、等待切换、继续和回收 | [L08](../dev-log/linux/08-comparison.md)相同TCP回显的三种等待路径，待实测 | UART独占，无参数/重定向/作业控制；不发布吞吐排名 |
 
-自有用户libc支持头文件明确列出的字节函数和系统调用包装，错误直接返回负值，没有完整errno/stdio/locale/malloc语义；内核基础库与用户库分开链接。[用户头文件](../labs/airios/include/airi_libc.h)是当前支持范围，不能据“libc”名称推定完整C标准库。
+自有用户libc支持头文件明确列出的字节函数和系统调用包装，错误直接返回负值，原始包装不含errno；K44另有显式链接的errno及POSIX文件子集，仍无stdio/locale/malloc；内核基础库与用户库分开链接。[用户头文件](../labs/airios/include/airi_libc.h)是当前支持范围，不能据“libc”名称推定完整C标准库。
 
 图形支线已提供绘图、输入、主题、控件与窗口参考，但窗口不是独立进程，参考Files/Tasks不是guest持久文件或调度数据。图形TTY、IPC和共享表面属于后续接入；无屏主线不受其进度影响。
 
@@ -23,4 +23,4 @@
 
 P7 已亲手实现的新增路径：[K34](../dev-log/core/34-orphan-reaper.md)孤儿托管、[K35](../dev-log/core/35-user-page-release.md)整页归还与空洞复用、[K36](../dev-log/core/36-init-supervisor.md)常驻用户init、单一UART消费身份与阻塞重启、[K37](../dev-log/core/37-user-capacity.md)按需页记录、大映像与跨页用户栈，以及[K38](../dev-log/core/38-kernel-heap-growth.md)堆扩展和缓存/活对象核对、[K39](../dev-log/core/39-service-boot.md)初始化与诊断分离、自动init与坏初始映像恢复、[K40](../dev-log/core/40-block-interrupts.md)PCI/PIC设备提示与普通used收集。真实板、网络、线程与C++ runtime仍按[部署路线](deployment-roadmap.md)继续，已提供解释不代表读者已掌握。
 
-P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每次陷入保存、返回恢复、fork继承、exec重建、GP隔离。[K42](../dev-log/core/42-user-fs-base.md)已提供用户FS基址与硬件寻址隔离，[K43](../dev-log/core/43-static-tls.md)提供静态ELF TLS模板与C11变量，线程、errno、futex与C++ runtime继续追加；不是完整POSIX或AVX环境。
+P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每次陷入保存、返回恢复、fork继承、exec重建、GP隔离。[K42](../dev-log/core/42-user-fs-base.md)已提供用户FS基址与硬件寻址隔离，[K43](../dev-log/core/43-static-tls.md)提供静态ELF TLS模板与C11变量，[K44](../dev-log/core/44-posix-errno.md)再提供显式用户errno和文件源码包装，线程、futex与C++ runtime继续追加；不是完整POSIX或AVX环境。

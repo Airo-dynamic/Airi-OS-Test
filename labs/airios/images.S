@@ -128,3 +128,9 @@ airi_tls_big_elf_end: /* 输入边界供ELF校验。 */
 airi_ctls_page_elf_start: /* 没有TLS文件初值，但有4096字节内存模板。 */
 .incbin AIRI_CTLS_PAGE_ELF /* 真实链接器产生的PT_TLS，而非手工标记。 */
 airi_ctls_page_elf_end: /* 校验器可读输入的右端。 */
+
+.balign 8 /* POSIX风格包装仍在用户ELF中，不进内核ABI。 */
+.global airi_posix_elf_start, airi_posix_elf_end /* 普通和reset目录项共用映像字节。 */
+airi_posix_elf_start: /* 含errno静态TLS的新ELF。 */
+.incbin AIRI_POSIX_ELF /* 只有该显式目标链接posix.o。 */
+airi_posix_elf_end: /* 完整用户文件边界。 */
