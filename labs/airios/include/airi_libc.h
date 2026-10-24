@@ -1,5 +1,6 @@
 #ifndef AIRI_USER_LIBC_H // 用户库头与内核基础库分开。
 #define AIRI_USER_LIBC_H // 包含保护。
+#include <airi/vector_abi.h> // 显式偏移向量描述采用固定16字节原始记录。
 #include <airi/io_abi.h> // 自有固定宽度提交、完成和只读状态，不包含内核结构。
 #include <stddef.h> // 用户对象字节长度。
 #include <stdint.h> // 用户ABI的64位寄存器值。
@@ -52,4 +53,6 @@ long airi_release(void *address, size_t bytes); // 解除一至六十四个完�
 long airi_programs(char *names, size_t capacity); // 真实初始ELF目录，每行名称，容量不足不截断。
 long airi_fs_set(uintptr_t base); // 自有ABI设置低半区FS基址，0停用；不创建或固定映射。
 long airi_fs_base(void); // 返回当前用户FS基址，尚不是通用arch_prctl或完整TLS运行库。
+long airi_preadv(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 35号调用，负错误原样返回。
+long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 36号调用，一次至多256字节。
 #endif // 结束包含保护。

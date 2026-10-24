@@ -134,3 +134,9 @@ airi_ctls_page_elf_end: /* 校验器可读输入的右端。 */
 airi_posix_elf_start: /* 含errno静态TLS的新ELF。 */
 .incbin AIRI_POSIX_ELF /* 只有该显式目标链接posix.o。 */
 airi_posix_elf_end: /* 完整用户文件边界。 */
+
+.balign 8 /* 向量用户程序同样经过独立ELF装载。 */
+.global airi_vector_elf_start, airi_vector_elf_end /* 真实用户映像范围。 */
+airi_vector_elf_start: /* 含POSIX包装的观察程序。 */
+.incbin AIRI_VECTOR_ELF /* 本配置交叉链接产物。 */
+airi_vector_elf_end: /* 只读输入的右端。 */

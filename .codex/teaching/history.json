@@ -284,6 +284,11 @@
       "id": "K44",
       "title": "K44 · 用户errno与有界POSIX文件源码接口",
       "document": "dev-log/core/44-posix-errno.md"
+    },
+    {
+      "id": "K45",
+      "title": "K45 · 显式偏移向量I/O与完整前缀检查",
+      "document": "dev-log/core/45-positioned-vectors.md"
     }
   ]
 }

@@ -2,6 +2,7 @@
 #include <errno.h> // 可修改错误左值由本地槽提供。
 #include <fcntl.h> // 源码标志进入原始ABI前显式转换。
 #include <unistd.h> // 导出当前已提供的POSIX风格类型与函数。
+#include <sys/uio.h> // 标准源码iovec布局对应固定宽度原始描述。
 #include <limits.h> // LONG_MAX限制可表示的单次字节数。
 static _Thread_local int error_number; // 零初值来自PT_TLS.tbss，每个进程/未来线程应各自持有。
 int *__airi_errno_location(void) { // 不把进程号当数组下标，直接使用编译器本地地址。
@@ -75,4 +76,18 @@ pid_t getpid(void) { // 当前原始getpid不会失败，仍复用一致转换�
 }
 void _exit(int code) { // 直接退出，不提供完整C标准exit或析构流程。
     airi_exit((unsigned)code); // 原内核按低八位编码普通退出值。
+}
+
+_Static_assert(sizeof(struct iovec) == sizeof(struct airi_iovec), "iovec ABI size"); // 当前目标指针与size_t都是64位。
+_Static_assert(offsetof(struct iovec, iov_base) == offsetof(struct airi_iovec, address), "iovec base offset"); // 第一项按地址数字读取。
+_Static_assert(offsetof(struct iovec, iov_len) == offsetof(struct airi_iovec, bytes), "iovec length offset"); // 第二项为完整64位长度。
+ssize_t preadv(int fd, const struct iovec *vectors, int count, off_t offset) { // 只转换结果，不在用户库预读指针数组。
+    if (count < 0 || offset < 0) // 保留源码有符号参数语义。
+        return invalid(EINVAL); // 负数不转换成大正索引。
+    return result(airi_preadv((unsigned)fd, (const struct airi_iovec *)vectors, (unsigned)count, (uint64_t)offset)); // 布局由上面断言约束，所有描述复制在内核。
+}
+ssize_t pwritev(int fd, const struct iovec *vectors, int count, off_t offset) { // 多段写仍是一个文件层操作。
+    if (count < 0 || offset < 0) // 同一参数策略。
+        return invalid(EINVAL); // 没有文件副作用。
+    return result(airi_pwritev((unsigned)fd, (const struct airi_iovec *)vectors, (unsigned)count, (uint64_t)offset)); // 实际前缀数量交给调用者继续。
 }

@@ -125,3 +125,10 @@ long airi_fs_set(uintptr_t base) { // 用户代码只提交数值，内核先排
 long airi_fs_base(void) { // 通过受检查入口观察本次陷入时真实硬件状态。
     return call3(34, 0, 0, 0); // 当前只支持低半区，可用非负long表示。
 }
+
+long airi_preadv(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset) { // 不在用户库解引用未知描述数组。
+    return call4(35, fd, (uintptr_t)vectors, count, offset); // 第四参数沿既有R10约定，不移动共享文件偏移。
+}
+long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset) { // 描述只借用到同步调用返回。
+    return call4(36, fd, (uintptr_t)vectors, count, offset); // 实际短数量或原始负错误。
+}

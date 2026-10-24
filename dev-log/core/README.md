@@ -56,3 +56,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K43 C11线程本地变量](43-static-tls.md)从静态ELF模板创建用户TLS副本，验证负偏移、初值/零尾部、fork继承、exec重建及超限拒绝。
 
 [K44 errno与文件包装](44-posix-errno.md)提供显式链接的用户POSIX源码子集，保留短操作、EOF和原始ABI，验证本地错误跨fork/exec的生命周期。
+
+[K45 显式偏移向量I/O](45-positioned-vectors.md)先复制描述与核对实际前缀，再以一次文件操作聚合/分散；保留短返回、共享偏移和坏后项无副作用。

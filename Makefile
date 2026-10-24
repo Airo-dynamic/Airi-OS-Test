@@ -443,3 +443,12 @@ $(OUT)/user/posix-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/posi
 $(OUT)/labs/airios/images.o: $(OUT)/user/posix-probe.elf
 # 该路径宏不改变内核调用号或符号。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_POSIX_ELF='"$(OUT)/user/posix-probe.elf"'
+
+# 向量程序选择相同POSIX错误转换，内核仍使用独立固定宽度描述。
+$(OUT)/user/vector-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/vector-probe.o labs/airios/program.ld
+# 一份用户main与自有库，不调用宿主readv实现。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/vector-probe.o -o $@
+# 包装等待当前配置的实际向量程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/vector-probe.elf
+# 文件路径以C字符串宏交给预处理汇编。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_VECTOR_ELF='"$(OUT)/user/vector-probe.elf"'

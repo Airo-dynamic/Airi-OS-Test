@@ -40,3 +40,5 @@ K42 的FS寻址、Linux用法和FSGSBASE允许边界参考 Linux内核文档（h
 K43静态local-exec、PT_TLS和TP前数据布局参考Ulrich Drepper《ELF Handling For Thread-Local Storage》v0.21（https://www.akkadia.org/drepper/tls.pdf）及现有LLD实际输出。没有导入文中代码，未加入动态TLS运行库或新依赖。
 
 K44的错误左值、短读与open源码规则对照Linux man-pages errno(3)、read(2)、open(2)（https://man7.org/linux/man-pages/man3/errno.3.html 、https://man7.org/linux/man-pages/man2/read.2.html 、https://man7.org/linux/man-pages/man2/open.2.html）。自有用户包装未导入libc实现，常量与ABI范围由项目头文件明确声明。
+
+K45向量顺序、显式偏移与短字节数对照Linux man-pages readv(2)（https://man7.org/linux/man-pages/man2/readv.2.html）；未导入实现，当前只提供有界preadv/pwritev，与完整Linux ABI、阻塞流和零拷贝均有明确边界。

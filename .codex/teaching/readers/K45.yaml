@@ -1,0 +1,32 @@
+checkpoint: K45
+baseline: baseline.yaml
+start: K44
+current_operation: 多段用户缓冲在一次显式偏移文件操作聚合/分散，描述快照、短前缀与坏后项保持旧内容
+already_explained:
+- concept: 用户范围检查与复制
+  at: ../../../dev-log/core/20-user-boundary.md#int80-contract
+  establishes: 不直接解引用用户指针，跨页与权限在副作用前验证
+- concept: 显式偏移和共享打开对象
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: 打开对象拥有共享偏移，定位读写不改变该字段，FD引用与内容分别持有
+- concept: 一次有界提交与用户错误转换
+  at: ../../../dev-log/core/44-posix-errno.md#posix-prefix
+  establishes: 短返回由调用方继续，负错误在用户库变成-1与errno，不隐式循环写满
+first_use:
+- concept: 向量逻辑串联与实际字节前缀
+  at: ../../../dev-log/core/45-positioned-vectors.md#vector-prefix
+  establishes: 顺序决定gather/scatter，返回总字节数，短操作可能在一项中间结束，尾部保持
+- concept: 描述数组和数据的双层检查
+  at: ../../../dev-log/core/45-positioned-vectors.md#vector-copy-check
+  establishes: 先复制最多八项，检查总长无溢出，再校验本次至多256字节前缀；坏后项不产生前项副作用
+- concept: 同步聚合与一次文件层调用
+  at: ../../../dev-log/core/45-positioned-vectors.md#vector-kernel
+  establishes: 局部buffer只活到调用返回，文件层一次操作后只分散真实结果，流ESPIPE不建立等待
+- concept: 标准iovec与固定ABI的对应
+  at: ../../../dev-log/core/45-positioned-vectors.md#vector-source-abi
+  establishes: 大小和两个字段偏移分别断言，用户库不读坏描述，内核独立核对完整参数
+not_assumed:
+- readv/writev阻塞流、异步任意iovec、零拷贝、物理连续、落盘原子性或完整POSIX
+limits:
+- 只提供preadv/pwritev，至多八项，每次至多256字节；256以外的数据地址不访问
+- 当前RAM文件、单线程进程、内核不可抢占；共享线程和可抢占I/O需要延长快照/固定页生命周期

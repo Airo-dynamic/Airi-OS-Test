@@ -1,3 +1,4 @@
+#include <airi/vector_abi.h> // 向量描述在一次内核调用内完整复制，文件操作前检查本次前缀。
 #include <airi/tls.h> // 每次真实用户陷入取回FS，内核处理期间清零。
 #include <airi/fpu.h> // 每进程拥有一份非用户映射的浮点/SSE状态。
 #include <airi/async.h> // 进程轮次与固定缓冲资源的生命周期。
@@ -59,6 +60,7 @@ extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // �
 extern const uint8_t airi_user_rsp_bad_start[], airi_user_rsp_bad_end[]; // 不规范用户返回栈。
 extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独立用户C程序。
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
+extern const uint8_t airi_vector_elf_start[], airi_vector_elf_end[]; // 显式偏移向量正常与坏范围观察。
 extern const uint8_t airi_posix_elf_start[], airi_posix_elf_end[]; // 显式链接errno与POSIX风格文件包装。
 extern const uint8_t airi_ctls_elf_start[], airi_ctls_elf_end[]; // 编译器_Thread_local与静态模板。
 extern const uint8_t airi_ctls_char_elf_start[], airi_ctls_char_elf_end[]; // 单字节小对齐模板。
@@ -85,6 +87,7 @@ struct executable { const char *name; const uint8_t *start, *end; }; // 初始�
 static const struct executable executables[] = { // 每份映像字节由内核只读段长期持有。
     {"sh", airi_shell_elf_start, airi_shell_elf_end}, // 独占串口输入的可选用户程序。
     {"init", airi_init_elf_start, airi_init_elf_end}, // 管理前台shell的常驻用户进程。
+    {"vector", airi_vector_elf_start, airi_vector_elf_end}, // 聚合、分散、短前缀与错误原子性。
     {"libc", airi_posix_elf_start, airi_posix_elf_end}, // 用户库错误与文件结果转换。
     {"libc-reset", airi_posix_elf_start, airi_posix_elf_end}, // 同一ELF新错误槽和CLOEXEC观察。
     {"ctls", airi_ctls_elf_start, airi_ctls_elf_end}, // 自动建立静态TLS后运行普通C。
@@ -223,6 +226,49 @@ static long file_transfer(struct user_process *p, uint64_t fd, uint64_t address,
     if (result > 0 && !copy_user(p, buffer, address, (size_t)result, true)) // 目标阻塞且单线程，已检查映射不应变化。
         airi_panic("validated file output mapping changed"); // 内部错误不丢字节后假装成功。
     return result; // 完成前缀或明确负错误。
+}
+static long vector_transfer(struct user_process *p, uint64_t fd, uint64_t descriptors, uint64_t count, uint64_t offset, bool write) { // 当前只支持可定位文件，一次有界副本。
+    if (fd >= AIRI_FD_COUNT) // 在窄化整数前检查完整FD。
+        return -9; // -EBADF。
+    if (count > AIRI_VECTOR_COUNT || offset > INT64_MAX) // 负count/offset转为无符号后也会在这里拒绝。
+        return -22; // -EINVAL，不读取描述或改变文件。
+    struct airi_iovec vectors[AIRI_VECTOR_COUNT]; // 当前调用持有的128字节描述快照。
+    if (count && !copy_user(p, vectors, descriptors, (size_t)count * sizeof(vectors[0]), false)) // 整个数组必须可读，不在用户库中直接解引用。
+        return -14; // -EFAULT，文件尚未操作。
+    uint64_t total = 0; // 所有项串联的逻辑长度，不把溢出截成小请求。
+    for (unsigned i = 0; i < count; ++i) { // 固定最多八项。
+        if (vectors[i].bytes > (uint64_t)INT64_MAX - total) // 返回类型可表达范围在做加法前检查。
+            return -22; // -EINVAL，拒绝负数式回绕或不可表示总量。
+        total += vectors[i].bytes; // 总长仅决定本次有限前缀。
+    }
+    size_t bytes = total > AIRI_VECTOR_BYTES ? AIRI_VECTOR_BYTES : (size_t)total; // 长向量也只发起一次至多256字节操作。
+    size_t planned = 0; // 本次会触及的前缀，越过256后的地址不访问。
+    for (unsigned i = 0; i < count && planned < bytes; ++i) { // 先验证全部实际前缀，再进行任何I/O或输出。
+        size_t part = vectors[i].bytes > bytes - planned ? bytes - planned : (size_t)vectors[i].bytes; // 一项可能只使用前半。
+        if (part && !user_access(p, vectors[i].address, part, !write)) // 写文件读用户，读文件写用户；零长不检查无意义基址。
+            return -14; // -EFAULT，前面合法项也未产生文件或输出副作用。
+        planned += part; // 不用地址加长度形成可能回绕的右端。
+    }
+    uint8_t buffer[AIRI_VECTOR_BYTES]; // 同步调用内聚合/分散，不给设备DMA，不跨返回保留。
+    size_t copied = 0; // gather按数组顺序形成同一文件操作的连续输入。
+    if (write) // preadv不读取目标用户缓冲内容。
+        for (unsigned i = 0; i < count && copied < bytes; ++i) { // 只聚合本次已验证前缀。
+            size_t part = vectors[i].bytes > bytes - copied ? bytes - copied : (size_t)vectors[i].bytes; // 当前项实际长度。
+            if (part && !copy_user(p, buffer + copied, vectors[i].address, part, false)) // 映射在不可抢占、单线程内核中保持。
+                airi_panic("validated vector input changed"); // 不变量破坏不能交出半份文件操作。
+            copied += part; // 下一项紧随上一个实际字节。
+        }
+    long result = write ? airi_fd_write(&p->files, (unsigned)fd, buffer, bytes, true, offset) : airi_fd_read(&p->files, (unsigned)fd, buffer, bytes, true, offset); // 仅调用一次文件层，显式偏移不改共享位置。
+    if (!write && result > 0) { // 只分散实际读到的字节，不用零覆盖尚未完成尾部。
+        copied = 0; // 从第一个目标重新开始。
+        for (unsigned i = 0; i < count && copied < (size_t)result; ++i) { // 本轮返回数不超过已验证256字节。
+            size_t part = vectors[i].bytes > (size_t)result - copied ? (size_t)result - copied : (size_t)vectors[i].bytes; // EOF可能在项中间结束。
+            if (part && !copy_user(p, buffer + copied, vectors[i].address, part, true)) // 描述快照不受输出覆盖用户数组影响。
+                airi_panic("validated vector output changed"); // 不能消费文件后掩盖复制失败。
+            copied += part; // 未触及目标保留原有内容。
+        }
+    }
+    return result; // 实际短数量、EOF0或原始负错误，不伪造全部完成。
 }
 static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身不复制、分配或打印。
     for (unsigned i = 0; i < PROCESS_COUNT; ++i) { // 本阶段有界等待队列由进程槽直接表示。
@@ -972,6 +1018,8 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     }
     else if (f->rax == 34) // 查询的是陷入时从硬件读取的真实当前值。
         f->rax = current->fs_base; // 低半区基址可由long无歧义表示，不返回内核地址。
+    else if (f->rax == 35 || f->rax == 36) // 自有显式偏移向量操作，R10保存第四参数。
+        f->rax = (uint64_t)vector_transfer(current, f->rdi, f->rsi, f->rdx, f->r10, f->rax == 36); // 描述和前缀在调用内完成，不建立异步借用。
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。
