@@ -206,5 +206,11 @@
     "Linux unchanged: prior actual SSH255",
     "No K50-specific GUI run; K49 isolated Day/Night and84snapshot/58contrast record retained",
     "Real board and native network/tunnel absent"
-  ]
+  ],
+  "release": {
+    "snapshots_exit": 0,
+    "snapshots": 62,
+    "export_exit": 0,
+    "path": "/private/tmp/airios-k50-release-20261024"
+  }
 }

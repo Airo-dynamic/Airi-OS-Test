@@ -87,17 +87,17 @@ const char *airi_elf_inspect(const void *image, size_t bytes, struct airi_elf_vi
     if (!result.count || !entry_found) // 没有LOAD或没有有效入口就不能启动。
         return "ELF entry is outside executable file contents"; // 不靠CPU故障验证基本文件格式。
     if (result.tls.memory_bytes) { // 所有LOAD都已读完，TLS头可以出现在它们之前。
-        bool contained = false; // 模板必须由一个普通可读LOAD完整提供，而非任意文件字节。
+        bool contained = false; // 文件初值必须由一个LOAD提供，tbss零尾部不占普通LOAD内存长度。
         for (unsigned i = 0; i < result.count; ++i) { // 最多八项，逐个核对对应关系。
             const struct airi_elf_segment *segment = &result.segments[i]; // 已验证用户范围与文件边界。
             if (result.tls.address < segment->address) // 用减法前先确认有非负偏移。
                 continue; // 不能将负值回绕成小范围。
             uint64_t delta = result.tls.address - segment->address; // TLS模板在该段中的相对位置。
-            if (delta > segment->memory_bytes || result.tls.memory_bytes > segment->memory_bytes - delta) // 总模板含零填充必须在段内。
-                continue; // 不接受孤立或越界TLS描述。
+            if (delta > segment->memory_bytes) // 非空初值锚定段内，纯零模板也允许锚定段的右端。
+                continue; // 仍不接受完全脱离LOAD的模板起点。
             if (result.tls.file_bytes && (delta > segment->file_bytes || result.tls.file_bytes > segment->file_bytes - delta || result.tls.offset != segment->offset + delta)) // 有初值时VA和文件位置必须对应同一LOAD字节。
-                continue; // 零初值只需要内存范围，不读取文件偏移处内容。
-            contained = true; // 由一个完整合法段覆盖。
+                continue; // 纯零尾部不读取文件字节，也不要求普通LOAD为它保留全部VA跨度。
+            contained = true; // 初值完整且起点合法，运行副本仍单独分配memory_bytes。
         }
         if (!contained || result.tls.pages > AIRI_ELF_PAGES - result.pages) // 运行副本也占用户预算，不能因模板已计页就漏算复制页。
             return "ELF TLS is outside LOAD or exceeds the user page budget"; // 真正分配前拒绝，旧view不变。

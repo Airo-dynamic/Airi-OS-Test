@@ -48,3 +48,5 @@ K46的SET/CUR/END、定位不扩长度与零洞语义对照Linux man-pages lseek
 K47时钟种类与查询形式对照Linux man-pages clock_gettime(2)（https://man7.org/linux/man-pages/man2/clock_gettime.2.html），当前仅为PIT名义单调计数，不导入外部实现或声称墙钟精度。
 
 K48对象接口参考Open Group malloc（https://pubs.opengroup.org/onlinepubs/9799919799/functions/malloc.html）、realloc（https://pubs.opengroup.org/onlinepubs/009696899/functions/realloc.html）及free/calloc接口合同；块链和包装均为自有代码，未导入外部分配器。固定C11零长度策略、有界单线程arena不宣称完整现代POSIX/C库兼容；依赖锁文件保持。
+
+K51的TLS NOBITS与普通LOAD区别参考LLVM D13838（https://reviews.llvm.org/D13838）及固定测试05ff6e7948df3c152982814ea2367c7b83138cea（https://github.com/llvm/llvm-project/blob/05ff6e7948df3c152982814ea2367c7b83138cea/lld/test/ELF/tls.s），与本机LLD23.1.4实际输出对照。未复制LLVM实现或测试代码，未增加运行依赖。

@@ -100,6 +100,8 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 assert '[CTLS_CHILD_OK]' in ctls_output and '[CTLS_EXEC_RESET_OK]' in ctls_output and '[CTLS_CHAR_OK] bytes=1 alignment=1 tp=16 value=9' in ctls_output # 大小对齐与成功exec均实际运行。
                 assert '[CTLS_PAGE_OK] bytes=4096 initialized=0 pages=2 tcb=second zeroed=all' in ctls_output # 最大纯零模板实际访问第二页TCB。
                 assert 'ELF TLS size or alignment is unsupported' in ctls_output # 超限真实样本必须在装载器拒绝。
+                offset=len(text); wire.sendall(b'ctls-tail\n'); text=wait('[SHELL_COMMAND_DONE] name=ctls-tail code=0',offset) # 真实LLD的TLS零尾部可以超过普通LOAD内存长度。
+                assert '[CTLS_TAIL_OK] initialized=4 zero_tail=257 ordinary_bss=1 independent=1' in text[offset:] # 普通BSS与本地运行块必须分别可写且互不覆盖。
                 offset=len(text); wire.sendall(b'libc\n'); text=wait('[SHELL_COMMAND_DONE] name=libc code=0',offset) # 用户库转换真实内核结果，errno来自编译器TLS。
                 libc_output=text[offset:] # 不使用旧映像或启动期输出。
                 assert '[LIBC_CLOCK_OK] monotonic=1 quantum_ns=10000000 sleep=blocked invalid=unchanged' in libc_output # 真实PIT窗口、输出权限和墙钟拒绝均由guest核对。

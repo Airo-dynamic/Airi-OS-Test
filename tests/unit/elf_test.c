@@ -71,6 +71,15 @@ static void tls_cases(void) { // 主机只核对元数据与布局，真实FS访
     assert(!airi_elf_inspect(image, sizeof(image), &view)); // 合法TLS不能继续沿旧策略拒绝。
     assert(view.pages == 3 && view.tls.file_bytes == 4 && view.tls.memory_bytes == 73); // LOAD预算和运行副本长度分别记录。
     assert(view.tls.pointer_offset == 80 && view.tls.data_offset == 0 && view.tls.pages == 1); // 73按16向上舍入为80，TCB仍在同页。
+    put(160, 4, 8); // 普通LOAD只含四字节tdata，TLS零尾部不要求占同样的虚拟范围。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && view.pages == 2 && view.tls.memory_bytes == 73); // 对应真实LLD的短普通BSS与较长tbss组合。
+    put(152, 1, 8); put(160, 1, 8); // LOAD自身合法但只提供一字节，不能提供四字节TLS初值。
+    rejected(sizeof(image)); // 放开零尾部不能放过缺失的文件初值。
+    tls_fixture(); put(160, 4, 8); put(208, 0, 8); put(192, 0x401004, 8); put(224, 1, 8); // 纯零模板可以从LOAD右端开始，无需读取那个位置。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && !view.tls.file_bytes); // 运行副本的73字节仍单独清零。
+    put(192, 0x500000, 8); // 完全离开LOAD范围仍是本子集不接受的孤立模板。
+    rejected(sizeof(image)); // 零初值不能跳过锚点与受控地址检查。
+    tls_fixture(); // 恢复原合法模板，再观察后续小对齐和极值路径。
     put(208, 1, 8); put(216, 1, 8); put(224, 1, 8); // 只有一字节且只要求1字节对齐。
     assert(!airi_elf_inspect(image, sizeof(image), &view)); // 小于TCB对齐的模板仍合法。
     assert(view.tls.pointer_offset == 16 && view.tls.data_offset == 15 && view.tls.pages == 1); // 变量位于TP-1，不能从块首错误初始化。

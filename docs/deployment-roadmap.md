@@ -40,11 +40,11 @@ P1–P6 的旧检查点保留。升级从 K34 追加，自己的 day2 目录仍�
 
 Cloudflare 创建流程依据[官方本地管理文档](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)，本轮[参考客户端记录](../.codex/teaching/validation/cloudflare-reference-20261023.json)只作为后续自研实现的对照，不计为自研隧道功能。
 
-P7当前停点已到K40：K34–K36提供持续回收与用户监督，K37扩大用户容量，K38增加有界内核堆，K39提供独立service启动与坏初始ELF恢复，K40接通当前q35块设备IRQ及PIT后备。P8已追加K41用户x87/SSE2状态，K42追加用户FS基址与隔离，K43已接静态ELF TLS与C11本地变量，K44提供errno与文件源码包装，K45已提供有界preadv/pwritev，K46补齐有符号定位，K47增加名义单调查询，K48接入单线程用户对象分配，K49再分出用户内存所有权与exec局部替换，K50归拢执行现场和等待，后续继续共享线程和运行库；尚未开始真实板部署或长时间稳定性验收。
+P7当前停点已到K40：K34–K36提供持续回收与用户监督，K37扩大用户容量，K38增加有界内核堆，K39提供独立service启动与坏初始ELF恢复，K40接通当前q35块设备IRQ及PIT后备。P8已追加K41用户x87/SSE2状态，K42追加用户FS基址与隔离，K43已接静态ELF TLS与C11本地变量，K44提供errno与文件源码包装，K45已提供有界preadv/pwritev，K46补齐有符号定位，K47增加名义单调查询，K48接入单线程用户对象分配，K49再分出用户内存所有权与exec局部替换，K50归拢执行现场和等待，K51修正TLS零尾部与普通LOAD的关联，后续继续共享线程和运行库；尚未开始真实板部署或长时间稳定性验收。
 
-## P8 从 K50 继续的实现顺序
+## P8 从 K51 继续的实现顺序
 
-以下是尚未实现的下一组工作，不能用当前回归通过替代它们的验收。K41–K50已经具备用户CPU状态、静态TLS、errno、文件源码包装、显式偏移向量、有符号定位、名义单调时间、有界用户对象分配、独立用户内存所有者和执行现场。
+以下是尚未实现的下一组工作，不能用当前回归通过替代它们的验收。K41–K51已经具备用户CPU状态、静态TLS、errno、文件源码包装、显式偏移向量、有符号定位、名义单调时间、有界用户对象分配、独立用户内存所有者和执行现场。
 
 K48已将纯堆算法另编译进用户ELF，按需申请256KiB arena，提供单线程malloc/free/calloc/realloc。真实guest验证页预算不足后的首次申请重试、16字节对齐、复用清零、乘法溢出、瞬时容量不足时保留旧对象、128轮复用及fork/exec隔离；free保留页面缓存到exit/exec。后续运行库若需要更大容量或并发，再扩展这项明确边界。
 

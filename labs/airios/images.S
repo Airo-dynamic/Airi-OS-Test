@@ -146,3 +146,9 @@ airi_vector_elf_end: /* 只读输入的右端。 */
 airi_malloc_elf_start: /* 用户页与对象借用的真实观察程序。 */
 .incbin AIRI_MALLOC_ELF /* 由本配置静态链接，不借宿主malloc。 */
 airi_malloc_elf_end: /* 输入范围的排他右端。 */
+
+.balign 8 /* TLS零尾部观察仍经真实静态ELF装载。 */
+.global airi_ctls_tail_elf_start, airi_ctls_tail_elf_end /* 输入范围供真实初始程序目录使用。 */
+airi_ctls_tail_elf_start: /* 普通BSS小于tbss的最小程序。 */
+.incbin AIRI_CTLS_TAIL_ELF /* 当前配置真正链接的模板与LOAD描述。 */
+airi_ctls_tail_elf_end: /* 完整文件的排他右端。 */

@@ -32,3 +32,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K49](../dev-log/core/49-user-memory-owner.md)亲手区分用户内存与执行状态：小描述转移不复制页面，fork仍深复制，exec保留进程资源并在切根后回收旧页；共享线程和最后引用退出规则尚待实现。
 
 [K50](../dev-log/core/50-user-execution.md)亲手归属执行现场与阻塞状态：页表归进程，CPU现场与内核栈归执行者，返回时二者必须匹配；销毁仍要求先离开目标栈。
+
+[K51](../dev-log/core/51-tls-zero-tail.md)亲手区分TLS初值、运行总长与普通LOAD长度；真实LLD样本和宿主损坏输入分别验证合法零尾部与缺失初值。

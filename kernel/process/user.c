@@ -76,6 +76,7 @@ extern const uint8_t airi_posix_elf_start[], airi_posix_elf_end[]; // 显式链�
 extern const uint8_t airi_ctls_elf_start[], airi_ctls_elf_end[]; // 编译器_Thread_local与静态模板。
 extern const uint8_t airi_ctls_char_elf_start[], airi_ctls_char_elf_end[]; // 单字节小对齐模板。
 extern const uint8_t airi_ctls_page_elf_start[], airi_ctls_page_elf_end[]; // 最大纯零模板与独立TCB页。
+extern const uint8_t airi_ctls_tail_elf_start[], airi_ctls_tail_elf_end[]; // TLS零尾部大于普通LOAD的真实链接器布局。
 extern const uint8_t airi_tls_big_elf_start[], airi_tls_big_elf_end[]; // 真正含超限PT_TLS的错误ELF。
 extern const uint8_t airi_tls_elf_start[], airi_tls_elf_end[]; // FS本地数据与切换探针。
 extern const uint8_t airi_tls_reset_elf_start[], airi_tls_reset_elf_end[]; // 成功exec清基址观察。
@@ -107,6 +108,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"ctls-reset", airi_ctls_elf_start, airi_ctls_elf_end}, // 同一映像成功exec后观察新模板。
     {"ctls-char", airi_ctls_char_elf_start, airi_ctls_char_elf_end}, // 小模板的负偏移与TP对齐。
     {"ctls-page", airi_ctls_page_elf_start, airi_ctls_page_elf_end}, // 两页运行块的真实边界。
+    {"ctls-tail", airi_ctls_tail_elf_start, airi_ctls_tail_elf_end}, // 普通BSS与TLS零尾部各自分配。
     {"tls-too-big", airi_tls_big_elf_start, airi_tls_big_elf_end}, // 真实装载器必须拒绝，不进入用户main。
     {"tls", airi_tls_elf_start, airi_tls_elf_end}, // 每个用户身份独立FS基址。
     {"tls-reset", airi_tls_reset_elf_start, airi_tls_reset_elf_end}, // 新ELF不沿用旧FS。

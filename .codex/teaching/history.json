@@ -314,6 +314,11 @@
       "id": "K50",
       "title": "K50 · 用户执行现场与等待所有权",
       "document": "dev-log/core/50-user-execution.md"
+    },
+    {
+      "id": "K51",
+      "title": "K51 · TLS初值与零尾部分别校验",
+      "document": "dev-log/core/51-tls-zero-tail.md"
     }
   ]
 }

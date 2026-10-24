@@ -473,3 +473,12 @@ $(OUT)/user/malloc-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/hea
 $(OUT)/labs/airios/images.o: $(OUT)/user/malloc-probe.elf
 # 本配置产物路径仅作为.incbin输入。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MALLOC_ELF='"$(OUT)/user/malloc-probe.elf"'
+
+# 单独观察TLS零尾部与较小普通BSS，不需要先实现多个执行者。
+$(OUT)/user/ctls-tail.elf: $(USER_COMMON) $(OUT)/user/ctls-tail.o labs/airios/program.ld
+# 文件初值来自tdata，tbss运行空间不由普通LOAD长度替代。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始映像等当前配置的完整链接结果。
+$(OUT)/labs/airios/images.o: $(OUT)/user/ctls-tail.elf
+# 只读incbin路径在包装对象中消费。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CTLS_TAIL_ELF='"$(OUT)/user/ctls-tail.elf"'

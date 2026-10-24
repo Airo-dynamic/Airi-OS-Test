@@ -1,0 +1,28 @@
+checkpoint: K51
+baseline: baseline.yaml
+start: K50
+current_operation: 装载四字节TLS初值与257字节零数组，普通BSS仅一字节，分别观察LOAD和TLS运行存储
+already_explained:
+- concept: TLS模板与运行块
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: 初值复制到独立用户TLS页，零尾部清零，FS指向运行副本而非ELF模板VA
+- concept: ELF完整输入与先校验后发布
+  at: ../../../dev-log/core/43-static-tls.md#ctls-inspect
+  establishes: 程序头完整读取后检查模板关联与页预算，失败保留旧view
+first_use:
+- concept: TLS零尾部不占普通LOAD跨度
+  at: ../../../dev-log/core/51-tls-zero-tail.md#tls-tail-model
+  establishes: PT_TLS memsz给运行副本总长，只有filesz初值必须由LOAD提供，较短普通BSS不应导致合法模板被拒
+- concept: 初值的文件与VA对应关系
+  at: ../../../dev-log/core/51-tls-zero-tail.md#tls-tail-validation
+  establishes: delta锚定合法LOAD，非零初值完整落文件范围且偏移一致，纯零模板可锚定段右端
+- concept: 放开零尾部与保持恶意初值拒绝
+  at: ../../../dev-log/core/51-tls-zero-tail.md#tls-tail-faults
+  establishes: 缩短LOAD但保留初值通过，实际文件初值不足拒绝，孤立零模板仍拒绝
+- concept: 程序头的实际长度观察
+  at: ../../../dev-log/core/51-tls-zero-tail.md#tls-tail-observe
+  establishes: llvm-readelf显示TLS4/273与LOAD4/5，真实用户分别读写本地边界与普通BSS
+not_assumed:
+- 动态TLS、动态链接、多个执行者或完整ELF兼容已经实现
+limits:
+- 静态local-exec与4KiB模板上限保持，旧K43实现链不重写，从K51起修正过严的零尾部包含检查
