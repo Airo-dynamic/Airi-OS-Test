@@ -223,7 +223,23 @@
   "not_verified": [
     "Threads, errno, dynamic modules/DTV and C++ TLS construction/destruction",
     "Other toolchain TLS skew or alignments over4096",
-    "Real board, Linux labs and native network/tunnel",
-    "New isolated GUI combination pending"
-  ]
+    "Real board, Linux labs and native network/tunnel"
+  ],
+  "gui": {
+    "path": "/tmp/airios-k39-gui-20261024",
+    "main_source_files": 147,
+    "main_source_equal": true,
+    "test_exit": 0,
+    "scope": "10 diagnostic profiles, 3 inputs, 3 storage sessions with real throttle warmup",
+    "ui_test_exit": 0,
+    "snapshots": 84,
+    "contrast_checks": 58,
+    "guest_day_night_viewed": true,
+    "artifacts": "artifacts/k43"
+  },
+  "release": {
+    "snapshots": 55,
+    "export": "/private/tmp/airios-k43-release-20261024",
+    "export_exit": 0
+  }
 }
