@@ -74,7 +74,11 @@ int main(void) { // 本程序只验证解析器，不替代guest的BSS和权限�
     corrupt(24, 0x401000, 8); // 入口落入可写NX数据段。
     corrupt(64, 3, 4); // PT_INTERP不能被静默忽略。
     corrupt(64, 7, 4); // 未实现TLS也不能当普通静态程序。
-    corrupt(104, 64ull*4096, 8); // 程序超过给初始栈预留后的页预算。
+    fixture(); // 大BSS只有memsz增长，文件本身不需要装下零填充字节。
+    put(160, (AIRI_ELF_PAGES - 1ull) * 4096, 8); // 一代码页加其余数据页，刚好达到ELF预算。
+    assert(!airi_elf_inspect(image, sizeof(image), &view) && view.pages == AIRI_ELF_PAGES); // 栈预留之后的精确上界仍可接受。
+    put(160, AIRI_ELF_PAGES * 4096ull, 8); // 总段页数比预算多一页。
+    rejected(sizeof(image)); // 失败保持上一份输出，不开始物理分配。
     puts("PASS elf: target, bounds, overflow, permissions, overlap, entry, budget, unchanged output"); // 所有失败与正常路径均成立。
     return 0; // 正常退出宿主观察。
 }

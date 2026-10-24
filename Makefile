@@ -341,3 +341,12 @@ $(OUT)/user/init.elf: $(USER_COMMON) $(OUT)/user/init.o labs/airios/program.ld
 $(OUT)/labs/airios/images.o: $(OUT)/user/init.elf
 # init文件路径作为明确的预处理宏。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_INIT_ELF='"$(OUT)/user/init.elf"'
+
+# 大映像容量观察复用用户库，但保持独立main。
+$(OUT)/user/capacity.elf: $(USER_COMMON) $(OUT)/user/capacity.o labs/airios/program.ld
+# BSS只占memsz，不能把零填充强塞进内核输入文件。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/capacity.o -o $@
+# 包装必须等到本配置容量程序链接完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/capacity.elf
+# 原始ELF路径只由此对象的预处理变量消费。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CAPACITY_ELF='"$(OUT)/user/capacity.elf"'

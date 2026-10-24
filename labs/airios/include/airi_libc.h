@@ -48,6 +48,6 @@ long airi_io_submit(unsigned operation, uint64_t handle, const struct airi_io_su
 long airi_io_next(struct airi_io_completion *completion, unsigned wait); // 0不等，1阻塞；返回0仅表示交出一条CQ。
 long airi_io_state_get(struct airi_io_state *state); // 当前轮次与同PID退役ACTIVE的只读数值。
 long airi_sleep(unsigned ticks); // 0立即成功，1至6000tick真阻塞；此时钟100Hz，不是墙钟。
-long airi_release(void *address, size_t bytes); // 解除一至四个完整动态页；允许部分范围，失败不改整段。
+long airi_release(void *address, size_t bytes); // 解除一至六十四个完整动态页；允许部分范围，失败不改整段。
 long airi_programs(char *names, size_t capacity); // 真实初始ELF目录，每行名称，容量不足不截断。
 #endif // 结束包含保护。

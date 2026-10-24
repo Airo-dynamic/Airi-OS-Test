@@ -244,6 +244,11 @@
       "id": "K36",
       "title": "K36 · 常驻用户init、唯一UART输入与阻塞重启",
       "document": "dev-log/core/36-init-supervisor.md"
+    },
+    {
+      "id": "K37",
+      "title": "K37 · 用户内存扩容、分页元数据与大映像替换",
+      "document": "dev-log/core/37-user-capacity.md"
     }
   ]
 }

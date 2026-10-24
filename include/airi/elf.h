@@ -3,7 +3,8 @@
 #include <stdbool.h> // 校验器使用布尔范围与入口状态。
 #include <airi/base.h> // 固定宽度字段与自有字节复制。
 #define AIRI_ELF_SEGMENTS 8u // 教学程序最多八个LOAD段。
-#define AIRI_ELF_PAGES 63u // 留出第64页给初始用户栈。
+#include <airi/user_limits.h> // ELF验证必须为实际初始栈预留容量。
+#define AIRI_ELF_PAGES (AIRI_USER_PAGES - AIRI_USER_STACK_PAGES) // 段最多1008页，栈的16页单独建立。
 struct airi_elf_segment { // 从外部字节校验后复制出的段事实。
     uint64_t address, offset, file_bytes, memory_bytes; // 用户VA、映像偏移、初始化长度和总内存长度。
     unsigned flags; // 原ELF PF_R/PF_W/PF_X，不能当作x86 PTE直接写入。

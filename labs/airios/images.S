@@ -79,3 +79,9 @@ airi_memory_elf_end: /* 文件右端。 */
 airi_init_elf_start: /* 文件首。 */
 .incbin AIRI_INIT_ELF /* 当前配置的独立静态ELF。 */
 airi_init_elf_end: /* 文件右端。 */
+
+.section .rodata /* 大BSS程序仍只嵌入实际文件，不嵌入运行时零填充页。 */
+.global airi_capacity_elf_start, airi_capacity_elf_end /* 新初始映像的输入边界。 */
+airi_capacity_elf_start: /* ELF文件首。 */
+.incbin AIRI_CAPACITY_ELF /* 当前配置刚链接完成的独立用户程序。 */
+airi_capacity_elf_end: /* 文件半开右端。 */

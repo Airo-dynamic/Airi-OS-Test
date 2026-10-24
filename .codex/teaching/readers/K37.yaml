@@ -1,0 +1,35 @@
+checkpoint: K37
+baseline: baseline.yaml
+start: K36
+current_operation: 用户shell装载大BSS程序，在满1024页与跨页用户栈上fork、失败exec、成功exec，再归还并继续
+already_explained:
+- concept: ELF文件长度与进程内存长度
+  at: ../../../dev-log/core/21-user-elf.md#elf-file-memory
+  establishes: PT_LOAD的filesz只复制文件内容，memsz剩余先清零；用户物理页不采用p_paddr
+- concept: 进程页所有权与fork
+  at: ../../../dev-log/core/22-processes.md#fork-copy-wait
+  establishes: 父VA和权限保留，孩子拥有新物理页；复制用户调用链但不复制内核C栈
+- concept: 整段释放与末项补洞
+  at: ../../../dev-log/core/35-user-page-release.md#release-order
+  establishes: 全段预检后unmap/invlpg、归还物理页、压缩无序记录，坏范围保持原映射
+first_use:
+- concept: 按需分配的页归属记录
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-records
+  establishes: 小控制块保存七个物理地址，170项一页，除法与余数选记录，count缩小后才裁空尾页
+- concept: 数据页和记录页的分别回滚
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-load
+  establishes: 记录页先准备，数据页映射成功后发布count；部分失败与最终清理都归还空元数据页
+- concept: 含页地址控制块的所有权转移
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-transfer
+  establishes: fork不能共享记录页；exec局部旧副本只清理未转移资源，新副本发布后不能再清理
+- concept: 有界大栈与真实容量观察
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-workload
+  establishes: 十六页初始栈保持顶地址，volatile和noinline产生跨页局部帧，四轮满预算fork/exec并观察保护页PF
+- concept: 控制块调试布局
+  at: ../../../dev-log/core/37-user-capacity.md#capacity-observe
+  establishes: llvm-dwarfdump读取本轮ELF的DW_AT_byte_size，768字节不含外部持有资源
+not_assumed:
+- Linux延迟分配、COW、自动扩栈、通用malloc、TLS和C++运行时已经在AiriOS实现
+limits:
+- 每进程1024数据页、ELF最多1008页、初始栈16页、每次动态请求最多64页；八进程单线程，内核小对象堆仍64KiB
+- 本轮实际耗尽每进程页预算；未人为耗尽整机物理页，不把回滚代码核对写成真实整机OOM验证
