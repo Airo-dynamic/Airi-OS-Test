@@ -1,3 +1,4 @@
+#include <airi/time_abi.h> // 单调时间只输出固定数值，用户指针由当前根验证。
 #include <airi/vector_abi.h> // 向量描述在一次内核调用内完整复制，文件操作前检查本次前缀。
 #include <airi/tls.h> // 每次真实用户陷入取回FS，内核处理期间清零。
 #include <airi/fpu.h> // 每进程拥有一份非用户映射的浮点/SSE状态。
@@ -1027,6 +1028,15 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
             f->rax = (uint64_t)-22ll; // -EINVAL。
         else // RSI位模式在当前二补数x86-64目标解释为有符号偏移。
             f->rax = (uint64_t)airi_fd_seek_from(&current->files, (unsigned)f->rdi, (int64_t)f->rsi, (unsigned)f->rdx); // 一次读取基准、验证并提交，旧14号绝对接口保留。
+    }
+    else if (f->rax == 38) { // 只提供PIT单调时钟，不伪造RTC墙钟。
+        if (f->rdi != AIRI_CLOCK_MONOTONIC) // 完整参数不截成另一个合法编号。
+            f->rax = (uint64_t)-22ll; // -EINVAL，输出保持。
+        else { // tick仅由真实IRQ增加，同一CPU读出一次完整快照。
+            uint64_t ticks = airi_timer_ticks(); // 基准是本内核PIT初始化，不含固件启动时间。
+            struct airi_time_value value = {ticks / 100, (ticks % 100) * 10000000ull}; // 名义100Hz换算；纳秒单位不提高实际分辨率。
+            f->rax = copy_user(current, &value, f->rsi, sizeof(value), true) ? 0 : (uint64_t)-14ll; // 完整输出先验证，坏指针不产生用户CPU故障。
+        }
     }
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。

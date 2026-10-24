@@ -294,6 +294,11 @@
       "id": "K46",
       "title": "K46 · 共享打开对象中的有符号定位",
       "document": "dev-log/core/46-signed-seek.md"
+    },
+    {
+      "id": "K47",
+      "title": "K47 · 受检查的名义单调时钟",
+      "document": "dev-log/core/47-monotonic-clock.md"
     }
   ]
 }

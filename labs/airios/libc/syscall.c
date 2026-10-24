@@ -136,3 +136,7 @@ long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count,
 long airi_seek_from(unsigned fd, int64_t delta, unsigned whence) { // 有符号差值按完整64位二补数传入RSI。
     return call3(37, fd, (uint64_t)delta, whence); // 基准由内核在同一打开对象上决定，不做用户侧查询加定位。
 }
+
+long airi_clock_get(unsigned clock, struct airi_time_value *value) { // 用户库不先解引用可能非法的输出。
+    return call3(38, clock, (uintptr_t)value, 0); // 内核一次形成并复制16字节值，负错误原样交回。
+}

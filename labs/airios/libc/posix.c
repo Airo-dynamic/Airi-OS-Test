@@ -2,6 +2,7 @@
 #include <errno.h> // 可修改错误左值由本地槽提供。
 #include <fcntl.h> // 源码标志进入原始ABI前显式转换。
 #include <unistd.h> // 导出当前已提供的POSIX风格类型与函数。
+#include <time.h> // 标准源码结构对应固定时间输出记录。
 #include <sys/uio.h> // 标准源码iovec布局对应固定宽度原始描述。
 #include <limits.h> // LONG_MAX限制可表示的单次字节数。
 static _Thread_local int error_number; // 零初值来自PT_TLS.tbss，每个进程/未来线程应各自持有。
@@ -88,4 +89,10 @@ ssize_t pwritev(int fd, const struct iovec *vectors, int count, off_t offset) { 
     if (count < 0 || offset < 0) // 同一参数策略。
         return invalid(EINVAL); // 没有文件副作用。
     return result(airi_pwritev((unsigned)fd, (const struct airi_iovec *)vectors, (unsigned)count, (uint64_t)offset)); // 实际前缀数量交给调用者继续。
+}
+
+_Static_assert(sizeof(struct timespec) == sizeof(struct airi_time_value), "timespec ABI size"); // 固定目标两个8字节字段。
+_Static_assert(offsetof(struct timespec, tv_nsec) == offsetof(struct airi_time_value, nanoseconds), "timespec nanosecond offset"); // 正数秒与纳秒的布局一致。
+int clock_gettime(clockid_t clock, struct timespec *value) { // 结果仍由原有errno转换，不写用户局部替代坏输出。
+    return (int)result(airi_clock_get((unsigned)clock, (struct airi_time_value *)value)); // 当前两个字段始终为可表示的非负数。
 }

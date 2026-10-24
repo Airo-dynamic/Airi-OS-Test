@@ -1,0 +1,22 @@
+checkpoint: K47
+baseline: baseline.yaml
+start: K46
+current_operation: 查询名义单调时间，真正sleep三tick后比较，坏时钟与输出在内核边界拒绝
+already_explained:
+- concept: PIT真实IRQ计数
+  at: ../../../dev-log/core/18-timer.md#pit-pic-route
+  establishes: 设备经PIC和IF交付IRQ32，tick来自处理器处理的时钟事件
+- concept: 用户错误转换
+  at: ../../../dev-log/core/44-posix-errno.md#errno-result
+  establishes: 负错误在用户库转为-1与正errno，成功不能由旧errno判断失败
+first_use:
+- concept: 单调计数、墙钟与表示单位
+  at: ../../../dev-log/core/47-monotonic-clock.md#clock-value
+  establishes: 同一tick快照除100取秒、余数乘10ms取纳秒，纳秒单位不提高分辨率
+- concept: 查询输出的受检查交接
+  at: ../../../dev-log/core/47-monotonic-clock.md#clock-boundary
+  establishes: 原始38号在内核形成16字节数值，用户库不解引用坏指针，REALTIME明确拒绝
+not_assumed:
+- 可信墙钟、RTC、NTP、高精度clocksource、休眠时间或完整POSIX时钟已实现
+limits:
+- 100Hz名义PIT计数，长关中断可能漏计，不用于证书日期或精确时长保证

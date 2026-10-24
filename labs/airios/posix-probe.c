@@ -1,6 +1,7 @@
 #include <airi_libc.h> // 原始进程控制暂与POSIX风格文件接口共存，原始调用不设置errno。
 #include <errno.h> // 错误变量是当前TLS的可修改左值。
 #include <fcntl.h> // open源码标志由用户库转换。
+#include <time.h> // 单调时间不是日历日期，超时以此比较。
 #include <unistd.h> // 有符号字节数、显式偏移与标准文件调用名。
 int main(int argc, char **argv) { // 同一ELF另以libc-reset观察exec后的错误初值。
     if (errno) // .tbss中的错误槽必须在main前初始化为0。
@@ -12,6 +13,15 @@ int main(int argc, char **argv) { // 同一ELF另以libc-reset观察exec后的�
         airi_puts("[LIBC_EXEC_RESET_OK] errno=zero cloexec=closed\n"); // 只在两项实际观察完成后报告。
         _exit(0); // 标准名字调用用户库，仍由原内核退出当前身份。
     }
+    struct timespec before, after, guard = {71, 83}; // 真实时间与失败输出哨兵分别持有。
+    if (clock_gettime(CLOCK_REALTIME, &guard) != -1 || errno != EINVAL || guard.tv_sec != 71 || guard.tv_nsec != 83 || clock_gettime(CLOCK_MONOTONIC, (void *)(uintptr_t)0xffff800000000000ull) != -1 || errno != EFAULT) // 未实现墙钟和坏输出都不能改有效对象。
+        return 20; // 用户程序应继续而非因库解引用坏指针退出。
+    if (clock_gettime(CLOCK_MONOTONIC, &before) || before.tv_sec < 0 || before.tv_nsec < 0 || before.tv_nsec >= 1000000000 || before.tv_nsec % 10000000 || airi_sleep(3) || clock_gettime(CLOCK_MONOTONIC, &after)) // 原始sleep真实阻塞至少三个PIT tick。
+        return 21; // 不把宿主等待当作guest时钟推进。
+    uint64_t elapsed = (uint64_t)(after.tv_sec - before.tv_sec) * 1000000000ull + (uint64_t)after.tv_nsec - (uint64_t)before.tv_nsec; // 无符号算术处理跨秒的纳秒回绕，当前观察差距有界。
+    if (after.tv_sec < before.tv_sec || (after.tv_sec == before.tv_sec && after.tv_nsec < before.tv_nsec) || elapsed < 30000000ull) // 不能倒退且真实阻塞窗口应至少30ms名义时间。
+        return 22; // 实际PIT分辨率不等于真实墙钟精度。
+    airi_puts("[LIBC_CLOCK_OK] monotonic=1 quantum_ns=10000000 sleep=blocked invalid=unchanged\n"); // 当前只承诺名义100Hz单调时间。
     unsigned char input[300], output[300]; // 请求故意超过当前256字节系统调用副本。
     for (unsigned i = 0; i < sizeof(input); ++i) // 逐位置可辨识，不能只比较固定重复值。
         input[i] = (unsigned char)(i * 7u + 3u); // 字节内容独立于错误返回和偏移。

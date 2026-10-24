@@ -1,5 +1,6 @@
 #ifndef AIRI_USER_LIBC_H // 用户库头与内核基础库分开。
 #define AIRI_USER_LIBC_H // 包含保护。
+#include <airi/time_abi.h> // 单调时钟输出的固定字段。
 #include <airi/vector_abi.h> // 显式偏移向量描述采用固定16字节原始记录。
 #include <airi/io_abi.h> // 自有固定宽度提交、完成和只读状态，不包含内核结构。
 #include <stddef.h> // 用户对象字节长度。
@@ -56,4 +57,5 @@ long airi_fs_base(void); // 返回当前用户FS基址，尚不是通用arch_prc
 long airi_preadv(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 35号调用，负错误原样返回。
 long airi_pwritev(unsigned fd, const struct airi_iovec *vectors, unsigned count, uint64_t offset); // 36号调用，一次至多256字节。
 long airi_seek_from(unsigned fd, int64_t delta, unsigned whence); // 37号调用，0/1/2按SET/CUR/END选择基准，可有符号回退。
+long airi_clock_get(unsigned clock, struct airi_time_value *value); // 38号调用，当前只支持单调时钟1。
 #endif // 结束包含保护。
