@@ -1,6 +1,9 @@
 #include <airi_mutex.h> // owner布局与对外返回合同。
 #include <airi_threads.h> // 真实执行身份与比较并等待。
 #include <airi_libc.h> // 已交付PIT事件计数，不使用墙钟。
+#ifdef AIRI_MUTEX_OBSERVE // 只在单独观察对象中启用，不进入普通互斥库。
+void airi_mutex_observe(airi_mutex *mutex, unsigned stage, long result); // 用户夹具暂停1登记前/2复查前/3WAIT前，4报告真实返回。
+#endif // 普通编译没有回调依赖。
 _Static_assert(sizeof(airi_mutex) == 8 && _Alignof(airi_mutex) >= 4, "mutex needs two aligned four-byte words"); // 两个四字节原子字段，WAIT仍只使用owner地址。
 _Static_assert(__atomic_always_lock_free(4, 0), "mutex needs native four-byte atomics"); // 当前目标不能导入未实现的libatomic。
 static int valid(airi_mutex *mutex) { // C库仍要求调用者提供有效存活对象。
@@ -24,14 +27,26 @@ long airi_mutex_lock(airi_mutex *mutex, unsigned ticks) { // 首次失败后只�
     uint64_t now = airi_ticks(); // 从首次确需等待的位置计算名义时间。
     if (now > UINT64_MAX - ticks) return -75; // 截止不能回绕。
     uint64_t deadline = now + ticks; // 重试或通知都不能延长这次总预算。
+#ifdef AIRI_MUTEX_OBSERVE // 首次失败已发生，当前仍没有参与登记。
+    airi_mutex_observe(mutex, 1, 0); // 允许主执行者在人数0时释放。
+#endif // 观察之外没有主动交接。
     __atomic_fetch_add(&mutex->contenders, 1, __ATOMIC_SEQ_CST); // 先登记可能等待的参与者，再重新检查owner，不能反过来留下漏通知窗口。
+#ifdef AIRI_MUTEX_OBSERVE // 现在已经参加，但还没有二次CAS。
+    airi_mutex_observe(mutex, 2, 0); // 允许一次找不到内核等待者的通知。
+#endif // 之后恢复同一个锁调用。
     long result; // 所有登记后的成功/失败共用一个撤销出口。
     for (;;) { // 初次也先重新CAS；醒来只说明可重试，不代表已经获锁。
         if (acquire(mutex, tid, &observed)) { result = 0; break; } // 登记后锁可能早已空闲，先争取避免带旧owner睡下。
         if (observed == tid) { result = -35; break; } // 错误重入仍须撤销本次参与计数。
+#ifdef AIRI_MUTEX_OBSERVE // 本次复查仍失败，故意留出实际WAIT以前的窗口。
+        airi_mutex_observe(mutex, 3, 0); // 释放后仍带本次observed进入内核比较。
+#endif // 仅观察版本暂停，不修改owner或计数。
         now = airi_ticks(); // 所有重试共用同一次固定截止，不续借预算。
         if (now >= deadline) { result = -110; break; } // 相减前先拒绝到期，防止无符号回绕。
         result = airi_futex_wait(&mutex->owner, observed, (unsigned)(deadline - now)); // 登记到内核前再次比较实际owner，解决复查以后的释放。
+#ifdef AIRI_MUTEX_OBSERVE // 记录已经返回的真实43号结果，不伪造通知/比较失败。
+        airi_mutex_observe(mutex, 4, result); // 夹具只统计，不在返回点暂停。
+#endif // 普通路径保留原来的分支。
         if (result && result != -11) break; // 超时/错误统一撤销，值改变-11则回循环争取。
     }
     __atomic_fetch_sub(&mutex->contenders, 1, __ATOMIC_SEQ_CST); // 取得、超时及错误各减一次；重试期间一直保留登记。

@@ -551,3 +551,18 @@ $(OUT)/user/identity.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/t
 $(OUT)/labs/airios/images.o: $(OUT)/user/identity.elf
 # 本配置文件路径交给只读incbin。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_IDENTITY_ELF='"$(OUT)/user/identity.elf"'
+
+# 与普通mutex-lib.o来自同一源码，观察点只用于受控交错ELF。
+$(OUT)/user/mutex-observe.o: labs/airios/libc/mutex.c Makefile
+# 不覆盖普通对象，也不把回调加进USER_COMMON。
+	@mkdir -p $(dir $@)
+# 只有此对象可引用观察程序定义的暂停函数。
+	$(CC) $(USER_FLAGS) -DAIRI_MUTEX_OBSERVE -Ilabs/airios/include -c $< -o $@
+# 最终ELF只选观察锁版本，避免同名函数重复定义。
+$(OUT)/user/mutex-races.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/mutex-observe.o $(OUT)/user/mutex-races.o labs/airios/program.ld
+# 共用真实用户入口与线程运行库，不借宿主并发。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 镜像只打包已链接的观察程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/mutex-races.elf
+# 本配置路径只供incbin消费。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MUTEX_RACES_ELF='"$(OUT)/user/mutex-races.elf"'

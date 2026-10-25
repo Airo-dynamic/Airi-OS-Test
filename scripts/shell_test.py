@@ -125,6 +125,18 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 assert '[MUTEX_USER_OK] counter=64 critical_yield=1 foreign=denied self=deadlock timeout=pit owner_death=nonrobust' in mutex_output # 所有权、真实等待和非robust寿命都由guest核对。
                 assert '[MUTEX_PARTICIPANTS_OK] blocked=2 timeout=withdrawn acquired=withdrawn dead_owner=retained' in mutex_output # 真实竞争和到期均撤销参与者，死亡owner仍保留。
                 assert len(re.findall(r'\[FUTEX_WAIT\] pid=',mutex_output))>=4 and 'result=-110' in mutex_output # 两位争用者、超时者和死亡所有者观察确实进入等待。
+                offset=len(text); wire.sendall(b'mutex-races\n'); text=wait('[SHELL_COMMAND_DONE] name=mutex-races code=0',offset) # 同一用户锁在三个受控窗口及一个真实睡眠位置继续。
+                races_output=text[offset:] # 只使用当前命令的实际回调和内核日志。
+                assert '[MUTEX_RACES_OK] stages=4 actual_wait=1 compare_mismatch=1 normal_library=unchanged' in races_output # guest已核对真实返回及参与者撤销。
+                for stage in range(1,5): # 每轮有独立串口边界，不能互相借日志。
+                    begin='[MUTEX_RACE_BEGIN] stage='+str(stage) # str把本轮整数放进固定标记。
+                    end='[MUTEX_RACE_DONE] stage='+str(stage) # 只切当前轮结束以前的记录。
+                    assert races_output.count(begin)==1 and races_output.count(end)==1 # 不接受缺轮或重复成功。
+                    section=races_output.split(begin,1)[1].split(end,1)[0] # 两次最多切一刀，保留这轮真实事件。
+                    waits=re.findall(r'\[FUTEX_WAIT\] pid=',section) # -11不登记，因此第三轮也没有WAIT记录。
+                    wakes=re.findall(r'\[FUTEX_WAKE\] pid=\d+ address=0x[0-9a-f]+ count=1 woken=(\d+)',section) # 实际通知数量来自内核，不从用户标记猜测。
+                    assert len(waits)==(1 if stage==4 else 0) # 只有第四轮真正进入睡眠集合。
+                    assert wakes==([] if stage==1 else ['1' if stage==4 else '0']) # 第一轮省略，第二/三轮空通知，第四轮真实唤醒一人。
                 offset=len(text); wire.sendall(b'heap-threads\n'); text=wait('[SHELL_COMMAND_DONE] name=heap-threads code=0',offset) # 四个真实执行者共享唯一arena，观察对象交接。
                 heap_threads=text[offset:] # 不用旧heap命令代替并发结果。
                 assert '[MALLOC_THREADS_OK] workers=4 rounds=96 arena=262144 cross_free=4 snapshots=consistent errno=private critical_yield=1' in heap_threads # 每个工作者和主快照均由guest核对。
@@ -189,7 +201,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'echo after-shell\n'); text=wait('[CONSOLE_UPDATE] view=0 commands=2 page=0',offset) # 回到内核后输入仍完整。
                 assert 'after-shell' in text[offset:] # 不只是退出而丢了后续UART。
                 result={'passed':True,'ring3_shell':True,'ram_file_and_device_readback':True,'other_user_during_cq_wait':True,'qmp_iops':1,'error_exec_survived':True,'returned_to_monitor':True,'orphan_rounds':24,'memory_reuse_rounds':128,'capacity_rounds':4,'capacity_pages':1024,'simd_preempt_fork_exec':True,'fs_base_preempt_fork_exec':True,'compiler_static_tls':True,'posix_errno_io_subset':True,'positioned_vectors':True} # 只发布已观察事实。
-                result.update(per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
+                result.update(mutex_race_stages=4,mutex_race_actual_waits=1,mutex_race_mismatches=1,per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
                 result_path.write_text(json.dumps(result,indent=2)+'\n'); print('PASS user shell: alloc/file/async wait/other task/CQ/readback, failed exec, return to monitor') # 阶段演示实际完成。
                 return result # 总入口可收集。
             finally: # 包括断言、超时和QEMU错误。

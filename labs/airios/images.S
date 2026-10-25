@@ -182,3 +182,8 @@ airi_heap_threads_elf_end: /* 输入的排他右端。 */
 airi_identity_elf_start: /* 同一文件支持普通入口与exec重建观察。 */
 .incbin AIRI_IDENTITY_ELF /* 当前配置的静态程序，不是宿主模拟查询。 */
 airi_identity_elf_end: /* 输入的排他右端。 */
+.balign 16 /* 新的观察ELF保持独立只读范围。 */
+.global airi_mutex_races_elf_start, airi_mutex_races_elf_end /* 内核目录只借实际文件字节。 */
+airi_mutex_races_elf_start: /* 包含完整ELF头与段。 */
+.incbin AIRI_MUTEX_RACES_ELF /* 不调用宿主程序冒充观察。 */
+airi_mutex_races_elf_end: /* 范围右端不含字节。 */

@@ -359,6 +359,11 @@
       "id": "K58",
       "title": "K58 · 无竞争时省去解锁通知",
       "document": "dev-log/core/58-mutex-notification.md"
+    },
+    {
+      "id": "K59",
+      "title": "K59 · 在四个真实交错位置继续同一次加锁",
+      "document": "dev-log/core/59-mutex-races.md"
     }
   ]
 }

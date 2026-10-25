@@ -1,0 +1,32 @@
+checkpoint: K59
+baseline: baseline.yaml
+start: K58
+current_operation: 在同一真实lock调用的三个用户窗口暂停，再与真正睡下的第四轮比较
+already_explained:
+- concept: 参与者与睡眠分开
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-participant-window
+  establishes: 登记覆盖未睡、已睡和已醒；二次CAS避免多余WAIT，内核比较是最终检查
+- concept: 每执行者测量与结束查询
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
+  establishes: 不混入其他执行者，结束45号需扣一次，打印移出窗口
+- concept: 观察版本与普通版本
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-shared-build
+  establishes: 同源码条件编译主动调度只进入单独观察对象，不覆盖普通库
+first_use:
+- concept: 四个受控交错
+  at: ../../../dev-log/core/59-mutex-races.md#races-four-positions
+  establishes: 登记前、登记后、复查后和内核等待的真实字段/通知/返回分别对应
+- concept: 回调暂停与继续原调用
+  at: ../../../dev-log/core/59-mutex-races.md#races-handshake
+  establishes: parked/gate独立原子握手，armed交换只停一次，返回后恢复原调用栈，位置4统计真实43号结果
+- concept: 两种对象的链接边界
+  at: ../../../dev-log/core/59-mutex-races.md#races-build-boundary
+  establishes: 宏只定义于观察对象，最终ELF只选一份锁，由夹具提供回调定义
+- concept: 请求与实际内核登记不同
+  at: ../../../dev-log/core/59-mutex-races.md#races-host-records
+  establishes: -11实际进入43但没有WAIT记录，分轮日志与返回统计共同核对
+borrowed:
+- component: LLVM nm与既有条件编译、int80和用户线程调度
+  contract: nm只读对象符号，暂停仅为观察，不测普通库性能或推断全部SMP交错
+feedback: []
+not_inferred: 四轮运行与重建不推断掌握，不声称穷尽并发调度

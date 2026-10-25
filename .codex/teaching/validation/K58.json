@@ -224,5 +224,15 @@
     "same_paths_and_values": true,
     "continuous_reading": true,
     "specific_correction": "Retained kernel compare as final pre-sleep check; second CAS also avoids unnecessary WAIT, rather than inventing a broken old WAIT scenario. Corrected reader anchor to existing futex-wait-record."
+  },
+  "release": {
+    "source_commit": "d902c5f",
+    "snapshots": 71,
+    "export": "/tmp/airios-k58-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k58/snapshots.log",
+      "artifacts/k58/export.log"
+    ]
   }
 }
