@@ -235,5 +235,16 @@
       "artifacts/k59/snapshots.log",
       "artifacts/k59/export.log"
     ]
+  },
+  "mbp_sync": {
+    "attempted": true,
+    "verified_received": false,
+    "ssh_exit_code": 255,
+    "error": "Timeout, server mbp.airi-dynamic.top not responding.",
+    "log": "artifacts/k59/mbp-sync.log",
+    "target": "/Users/bilibili/Desktop/AiriOS-dev-sync-20261024/updates/K59-20261025",
+    "remote_preparation_succeeded": true,
+    "payload_completion": "unknown; no receipt received",
+    "local_payload": "/tmp/airios-k59-mbp-payload-20261025.tar.gz"
   }
 }

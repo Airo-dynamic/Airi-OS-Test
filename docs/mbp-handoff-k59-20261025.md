@@ -16,3 +16,9 @@
 Linux最近实际连接仍为K53的SSH255，K56–K59没有新的远端运行；GUI保留K52历史组合，未新增截图。板卡、完整pthread/C++运行时、网络及原生Cloudflare仍在后续。不把用户原子SC等同于SMP内核，不把少八次请求等同于延迟测量。隧道密钥不在交付中。
 
 本次交付使用新的 `updates/K59-20261025/source` 及 `evidence`，以K55交付的独立Git副本作增量基础。原教程目录、旧初始交付目录和K55交付目录只读校验，均不得checkout/reset/覆盖。最终以远端sync-receipt.json为已接收依据；远端只核对源码和证据，不伪称重新运行QEMU。
+
+## 暂停记录
+
+2026-10-25用户要求暂停并提交。开发停在K59，K60尚未开始实现。K56–K59及交接提交已上传GitHub，工作区无待提交实现；完整test、独立重建与阶段导出证据如上。
+
+MBP目标新目录准备成功，但随后传输SSH返回255，错误为 `Timeout, server mbp.airi-dynamic.top not responding.`，未收到完成回执，因此不能确认本轮交付完整。远端目标可能有部分文件，恢复时先只读检查，不能覆盖可能已被作者编辑的source。完整本地交接包保留在 `/tmp/airios-k59-mbp-payload-20261025.tar.gz`，日志位于 `artifacts/k59/mbp-sync.log`。上一次已确认接收的交付仍为K55。
