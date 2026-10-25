@@ -218,5 +218,13 @@
   "linux": {
     "verified": false,
     "scope": "K53 p5-threads actual SSH255 retained; no repeated attempt claimed"
+  },
+  "release": {
+    "snapshots": 68,
+    "snapshots_exit": 0,
+    "snapshots_log": "artifacts/k55/snapshots.log",
+    "export_exit": 0,
+    "export_path": "/tmp/airios-k55-release-20261025",
+    "export_log": "artifacts/k55/export.log"
   }
 }
