@@ -22,10 +22,10 @@ static long inspect(void) { // 每次恰做一次原始42号，其他身份读�
     for (unsigned i = 0; i < 128; ++i) require(airi_thread_id() == actual, "fast identity stable"); // 应只有TCB读，不重复42号查询。
     airi_mutex own = AIRI_MUTEX_INITIALIZER; // 当前调用栈独有，不制造另一项竞争。
     uint64_t before = airi_thread_syscalls(); // 记录当前执行者计数，不用全局计数混入其他工作者。
-    for (unsigned i = 0; i < 8; ++i) require(airi_mutex_lock(&own, 0) == 0 && airi_mutex_unlock(&own) == 0, "mutex uses local identity"); // unlock仍调用44，不能把整个锁宣称为零陷入。
+    for (unsigned i = 0; i < 8; ++i) require(airi_mutex_lock(&own, 0) == 0 && airi_mutex_unlock(&own) == 0, "mutex uses local identity"); // 有效TCB且无人参与竞争，八对操作应全部留在用户态。
     uint64_t after = airi_thread_syscalls(); // 结束查询自身也增加一次，不能当作锁的开销。
-    require(after - before == 9, "uncontended mutex syscall baseline"); // 八次unlock44加一次结束查询，身份读取已不陷入。
-    airi_puts("[MUTEX_PROFILE] loops=8 delta=9\n"); // 只有实际内核计数差符合才打印，不从函数名猜次数。
+    require(after - before == 1, "uncontended mutex skips notification"); // 只有结束查询45的一次，八对锁不额外发出请求。
+    airi_puts("[MUTEX_PROFILE] loops=8 delta=1\n"); // 只有实际内核计数差符合才打印，不从函数名猜次数。
     return actual; // 后续用独立原始参考比较，不自证同一缓存。
 }
 static long worker(void *argument) { // 原始声明值与本次内核TID都须属于新执行者。

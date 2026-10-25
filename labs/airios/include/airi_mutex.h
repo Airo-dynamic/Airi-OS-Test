@@ -1,8 +1,8 @@
 #ifndef AIRI_MUTEX_H // 有界私有互斥接口，不使用宿主pthread类型。
 #define AIRI_MUTEX_H // 防止重复声明。
 #include <stdint.h> // 锁字与TID同为四字节，0保留为空闲。
-typedef struct { uint32_t owner; } airi_mutex; // 并发访问只经过运行库原子操作，不直接读写owner。
-#define AIRI_MUTEX_INITIALIZER {0} // 在发布给其他执行者以前静态或局部初始化。
+typedef struct { uint32_t owner, contenders; } airi_mutex; // owner为持有TID，contenders为慢路径参与者数；并发访问均须原子操作。
+#define AIRI_MUTEX_INITIALIZER {0, 0} // 发布以前同时清空所有权与参与者数，不覆盖正在使用的锁。
 #ifdef __cplusplus // C++可以包含同一声明，不在头内暴露_Atomic语法。
 extern "C" { // 调用已链接的C实现，保持符号名。
 #endif // C编译时跳过链接语言范围。

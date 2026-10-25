@@ -354,6 +354,11 @@
       "id": "K57",
       "title": "K57 · 数清同一执行者真正发出的系统调用",
       "document": "dev-log/core/57-syscall-count.md"
+    },
+    {
+      "id": "K58",
+      "title": "K58 · 无竞争时省去解锁通知",
+      "document": "dev-log/core/58-mutex-notification.md"
     }
   ]
 }

@@ -82,3 +82,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K56 运行头身份](56-runtime-identity.md)由内核在启动、原始fork、exec及工作槽复用时发布版本化TCB，普通TID读取留在用户态，后备查询有独立陷入证据。
 
 [K57 请求计数](../core/57-syscall-count.md)在真实128号入口按执行者计数，区分fork新建与exec保留，测出八对无竞争锁的八次通知基线。
+
+[K58 通知快路径](../core/58-mutex-notification.md)用SC参与者登记、再次争取和统一撤销保留真实竞争等待，同一八对无竞争锁减少八次系统调用。

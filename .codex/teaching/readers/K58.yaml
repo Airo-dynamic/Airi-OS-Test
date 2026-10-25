@@ -1,0 +1,32 @@
+checkpoint: K58
+baseline: baseline.yaml
+start: K57
+current_operation: 登记慢路径参与者并复查owner，无竞争解锁不再调用44号
+already_explained:
+- concept: 所有权与普通数据发布
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-acquire-release
+  establishes: CAS取得owner后才能访问普通对象，release/acquire通过owner传递临界区写入
+- concept: 内核比较后登记与私有键
+  at: ../../../dev-log/core/53-private-futex.md#futex-wait-record
+  establishes: 固定单CPU不可抢占内核使比较与登记连贯，通知不授锁，醒来重新检查
+- concept: 实际请求基线
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
+  establishes: 八对局部锁原差值9，其中结束查询一次，真正通知八次
+first_use:
+- concept: 参与者与已睡人数不同
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-participant-window
+  establishes: 登记先于二次争取，取得/超时/错误统一撤销，重试不重复登记
+- concept: 两原子对象的SC总顺序
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-sc-order
+  establishes: X登记/Y复查与A1释放/A2查人数统一排序，失败CAS也参与，推导不能双方漏看
+- concept: 固定截止及一次撤销
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-participant-lifetime
+  establishes: 初次CAS不碰人数，慢路径统一出口减一，内核比较覆盖复查后释放，SC不代表SMP内核已完成
+- concept: 相同测量窗口与成本范围
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-fast-results
+  establishes: 同一路径4到5代替4到13，零额外锁请求不等于零耗时或所有malloc零请求
+borrowed:
+- component: 编译器__atomic SC内建和既有私有futex
+  contract: 原子定义依照官方文档，锁协议为自有有界实现；对象布局从4到8需全部重编
+feedback: []
+not_inferred: 次数和重建检查不推断掌握；无新Linux或GUI实测

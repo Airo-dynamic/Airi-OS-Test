@@ -123,6 +123,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'mutex\n'); text=wait('[SHELL_COMMAND_DONE] name=mutex code=0',offset) # 真正共享普通数据在带锁yield时也不能半更新。
                 mutex_output=text[offset:] # 当前程序而非旧日志提供结果。
                 assert '[MUTEX_USER_OK] counter=64 critical_yield=1 foreign=denied self=deadlock timeout=pit owner_death=nonrobust' in mutex_output # 所有权、真实等待和非robust寿命都由guest核对。
+                assert '[MUTEX_PARTICIPANTS_OK] blocked=2 timeout=withdrawn acquired=withdrawn dead_owner=retained' in mutex_output # 真实竞争和到期均撤销参与者，死亡owner仍保留。
                 assert len(re.findall(r'\[FUTEX_WAIT\] pid=',mutex_output))>=4 and 'result=-110' in mutex_output # 两位争用者、超时者和死亡所有者观察确实进入等待。
                 offset=len(text); wire.sendall(b'heap-threads\n'); text=wait('[SHELL_COMMAND_DONE] name=heap-threads code=0',offset) # 四个真实执行者共享唯一arena，观察对象交接。
                 heap_threads=text[offset:] # 不用旧heap命令代替并发结果。
@@ -153,12 +154,13 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 assert len(counts)==5 and sum(map(len,counts.values()))==18 # 父三次、孩子跨exec六次、三位worker各三次。
                 root_counts=counts[(root_id,root_id)] # 父执行者已有shell exec请求，不硬编码第一项。
                 child_counts=counts[(child_id,child_id)] # exec只换映像，仍积累同一执行者的请求。
-                assert len(root_counts)==3 and root_counts[2]-root_counts[1]==9 # 八次unlock通知，加结束查询自身一次。
-                assert len(child_counts)==6 and child_counts[0]==1 and child_counts[2]-child_counts[1]==9 and child_counts[5]-child_counts[4]==9 and child_counts[3]>child_counts[2] # fork清零、exec保留，两个相同局部锁窗口分别计数。
+                assert len(root_counts)==3 and root_counts[2]-root_counts[1]==1 # 八对锁不发请求，只有结束查询自身一次。
+                assert len(child_counts)==6 and child_counts[0]==1 and child_counts[2]-child_counts[1]==1 and child_counts[5]-child_counts[4]==1 and child_counts[3]>child_counts[2] # fork清零、exec保留，两个相同局部锁窗口分别计数。
                 for tid in identity_workers: # 工作者可以交替运行，仍分别验证各自三个值。
                     samples=counts[(root_id,tid)] # 共享PID不能合并不同TID的测量。
-                    assert len(samples)==3 and samples[0]==1 and samples[2]-samples[1]==9 # 新执行者首查询为1，无竞争八对操作仍有八次通知。
-                assert identity_output.count('[MUTEX_PROFILE] loops=8 delta=9')==6 # guest与宿主按同一真实测量各自核对。
+                    assert len(samples)==3 and samples[0]==1 and samples[2]-samples[1]==1 # 新执行者首查询为1，八对无竞争操作省去全部通知。
+                assert identity_output.count('[MUTEX_PROFILE] loops=8 delta=1')==6 # guest与宿主按同一真实测量各自核对。
+                assert '[FUTEX_WAIT]' not in identity_output and '[FUTEX_WAKE]' not in identity_output # 局部锁没有竞争者，不能用返回0的空通知冒充用户态路径。
                 for repetition in range(2): # 同一shell连续完成两次线程命令，上一组退出回收后应能重新创建。
                     offset=len(text); wire.sendall(b'threads\n'); text=wait('[SHELL_COMMAND_DONE] name=threads code=0',offset) # 真正同地址空间执行，不能由fork复制或宿主线程模拟。
                     thread_output=text[offset:] # 所有身份与标记均限定在这条命令之后。
@@ -187,7 +189,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'echo after-shell\n'); text=wait('[CONSOLE_UPDATE] view=0 commands=2 page=0',offset) # 回到内核后输入仍完整。
                 assert 'after-shell' in text[offset:] # 不只是退出而丢了后续UART。
                 result={'passed':True,'ring3_shell':True,'ram_file_and_device_readback':True,'other_user_during_cq_wait':True,'qmp_iops':1,'error_exec_survived':True,'returned_to_monitor':True,'orphan_rounds':24,'memory_reuse_rounds':128,'capacity_rounds':4,'capacity_pages':1024,'simd_preempt_fork_exec':True,'fs_base_preempt_fork_exec':True,'compiler_static_tls':True,'posix_errno_io_subset':True,'positioned_vectors':True} # 只发布已观察事实。
-                result.update(per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=8,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
+                result.update(per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
                 result_path.write_text(json.dumps(result,indent=2)+'\n'); print('PASS user shell: alloc/file/async wait/other task/CQ/readback, failed exec, return to monitor') # 阶段演示实际完成。
                 return result # 总入口可收集。
             finally: # 包括断言、超时和QEMU错误。

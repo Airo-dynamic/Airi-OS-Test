@@ -230,5 +230,15 @@
       "artifacts/k57/replay-build.log",
       "artifacts/k57/replay-shell.log"
     ]
+  },
+  "release": {
+    "source_commit": "29e083d",
+    "snapshots": 70,
+    "export": "/tmp/airios-k57-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k57/snapshots.log",
+      "artifacts/k57/export.log"
+    ]
   }
 }

@@ -46,3 +46,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K56](../dev-log/core/56-runtime-identity.md)亲手区分普通TLS运行数据与内核发布的线程身份，固定16字节版本头、原始fork和exec更新、槽复用、用户加载与特权陷入；以七次真实参考/后备查询和目标反汇编核对快路径，不推断整个互斥已无系统调用。
 
 [K57 每执行者请求观察](../dev-log/core/57-syscall-count.md)亲手实现实际入口计数，明确查询自身的开销与fork/exec生命周期；不把次数当耗时，不用其他执行者的请求污染局部测量。
+
+[K58 参与者与通知](../dev-log/core/58-mutex-notification.md)亲手连接两个原子字段的SC顺序，区分登记、内核睡眠、通知与取得，验证超时撤销以及无竞争零额外请求。尚未提供公平、PI、robust或SMP内核。

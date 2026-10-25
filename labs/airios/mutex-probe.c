@@ -44,11 +44,14 @@ int main(void) { // 单独ELF初始counter为0，guard空闲。
         require(airi_ticks() - start < 100, "contender deadline"); airi_yield(); // 准备阶段不伪装为锁实现。
     }
     require(airi_sleep(3) == 0, "contender registration"); // 后面的FUTEX_WAIT日志核对真实登记。
+    require(__atomic_load_n(&guard.contenders, __ATOMIC_SEQ_CST) == 2, "two registered contenders"); // 两人均在主执行者持锁期间等待，诊断读取也必须原子化。
     long tester = airi_thread_create(foreign, 0), result; // 在仍持有guard时进行非法释放和超时观察。
     require(tester > 0 && airi_thread_join(tester, &result) == 0 && result == -110, "foreign owner and timeout"); // 主join期间仍持锁，第三人必须到期。
+    require(__atomic_load_n(&guard.contenders, __ATOMIC_SEQ_CST) == 2, "timeout withdrew contender"); // 第三人到期退出以后恰好剩原来两位，不残留计数。
     require(counter == 0 && checksum == 0x5a5a && airi_mutex_unlock(&guard) == 0, "publish initial release"); // 两位工作者此前都没有进入临界区。
     require(airi_thread_join(first, &result) == 0 && result == 32, "join first"); // 主执行者等真实结果，不读取运行中的普通数据。
     require(airi_thread_join(second, &result) == 0 && result == 32, "join second"); // 两人的临界区现已全部结束。
+    require(__atomic_load_n(&guard.contenders, __ATOMIC_SEQ_CST) == 0, "all contenders withdrew"); // 已取得和正常结束的慢路径同样必须撤销。
     require(airi_mutex_trylock(&guard) == 0 && counter == 64 && checksum == (64 ^ 0x5a5a), "protected ordinary data"); // 加锁后核对最终状态。
     require(airi_mutex_unlock(&guard) == 0, "final unlock"); // 不把持锁对象复制到下面的fork。
     long child = airi_fork(); require(child >= 0, "owner death fork"); // 本时刻没有worker且锁空闲。
@@ -56,11 +59,13 @@ int main(void) { // 单独ELF初始counter为0，guard空闲。
         long owner = airi_thread_create(abandon, 0); // 新TID不会在本次内核启动内复用。
         require(owner > 0 && airi_thread_join(owner, &result) == 0 && result == 9, "abandoned owner joined"); // 执行者已收拢，锁字仍保存它的旧身份。
         require(airi_mutex_lock(&guard, 3) == -110 && airi_mutex_unlock(&guard) == -1, "nonrobust owner remains"); // 不假冒EOWNERDEAD恢复或强制解锁。
+        require(__atomic_load_n(&guard.contenders, __ATOMIC_SEQ_CST) == 0, "dead owner timeout withdrew"); // 超时清参与数，不伪造死亡owner已释放。
         airi_exit(41); // 用进程重启边界结束这份不可恢复的观察状态。
     }
     int status; // 孩子退出结果和worker的long返回值分开。
     require(airi_waitpid(child, &status) == child && status == 41, "nonrobust child observed"); // 父从另一页表取得进程状态。
     require(airi_mutex_lock(&guard, 0) == 0 && airi_mutex_unlock(&guard) == 0, "parent mutex unchanged"); // 子的遗留锁不污染父进程。
+    airi_puts("[MUTEX_PARTICIPANTS_OK] blocked=2 timeout=withdrawn acquired=withdrawn dead_owner=retained\n"); // 登记和撤销均经真实竞争路径核对。
     airi_puts("[MUTEX_USER_OK] counter=64 critical_yield=1 foreign=denied self=deadlock timeout=pit owner_death=nonrobust\n"); // 所有正常、错误和寿命场景完成后才发布。
     return 0; // shell取得当前命令的真实成功结果。
 }
