@@ -137,6 +137,14 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                     wakes=re.findall(r'\[FUTEX_WAKE\] pid=\d+ address=0x[0-9a-f]+ count=1 woken=(\d+)',section) # 实际通知数量来自内核，不从用户标记猜测。
                     assert len(waits)==(1 if stage==4 else 0) # 只有第四轮真正进入睡眠集合。
                     assert wakes==([] if stage==1 else ['1' if stage==4 else '0']) # 第一轮省略，第二/三轮空通知，第四轮真实唤醒一人。
+                offset=len(text); wire.sendall(b'events\n'); text=wait('[SHELL_COMMAND_DONE] name=events code=0',offset) # 变化序号与通知分开，旧快照、无变化通知和真实广播均运行。
+                events_output=text[offset:] # 不能借其他命令的等待记录。
+                assert '[EVENT_USER_OK] old_snapshot=changed timeout=pit false_wake=rechecked broadcast=2 late_wait=timeout saturation=refused' in events_output # guest已核对饱和与每位worker返回2。
+                event_waits=re.findall(r'\[FUTEX_WAIT\] pid=(\d+) tid=(\d+) address=(0x[0-9a-f]+) expected=(\d+)',events_output) # 实际登记来自内核，零预算不登记。
+                assert len(event_waits)==6 and len({(pid,address) for pid,tid,address,expected in event_waits})==1 # 两次主超时加两位各两次等待，同一私有键。
+                assert [expected for pid,tid,address,expected in event_waits].count('1')==5 and event_waits[-1][3]=='2' # 最后新快照不会领取旧通知。
+                event_wakes=re.findall(r'\[FUTEX_WAKE\] pid=\d+ address=0x[0-9a-f]+ count=16 woken=(\d+)',events_output) # 饱和对象末次发布、先发布、无变化通知、最后广播。
+                assert event_wakes==['0','0','2','2'] # 拒绝回绕不发通知；两次真正广播分别唤醒两人。
                 offset=len(text); wire.sendall(b'heap-threads\n'); text=wait('[SHELL_COMMAND_DONE] name=heap-threads code=0',offset) # 四个真实执行者共享唯一arena，观察对象交接。
                 heap_threads=text[offset:] # 不用旧heap命令代替并发结果。
                 assert '[MALLOC_THREADS_OK] workers=4 rounds=96 arena=262144 cross_free=4 snapshots=consistent errno=private critical_yield=1' in heap_threads # 每个工作者和主快照均由guest核对。
@@ -201,7 +209,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'echo after-shell\n'); text=wait('[CONSOLE_UPDATE] view=0 commands=2 page=0',offset) # 回到内核后输入仍完整。
                 assert 'after-shell' in text[offset:] # 不只是退出而丢了后续UART。
                 result={'passed':True,'ring3_shell':True,'ram_file_and_device_readback':True,'other_user_during_cq_wait':True,'qmp_iops':1,'error_exec_survived':True,'returned_to_monitor':True,'orphan_rounds':24,'memory_reuse_rounds':128,'capacity_rounds':4,'capacity_pages':1024,'simd_preempt_fork_exec':True,'fs_base_preempt_fork_exec':True,'compiler_static_tls':True,'posix_errno_io_subset':True,'positioned_vectors':True} # 只发布已观察事实。
-                result.update(mutex_race_stages=4,mutex_race_actual_waits=1,mutex_race_mismatches=1,per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
+                result.update(sequence_event=True,event_waits=6,event_broadcast_workers=2,event_false_wake_rechecked=True,mutex_race_stages=4,mutex_race_actual_waits=1,mutex_race_mismatches=1,per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
                 result_path.write_text(json.dumps(result,indent=2)+'\n'); print('PASS user shell: alloc/file/async wait/other task/CQ/readback, failed exec, return to monitor') # 阶段演示实际完成。
                 return result # 总入口可收集。
             finally: # 包括断言、超时和QEMU错误。

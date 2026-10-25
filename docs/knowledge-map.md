@@ -50,3 +50,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K58 参与者与通知](../dev-log/core/58-mutex-notification.md)亲手连接两个原子字段的SC顺序，区分登记、内核睡眠、通知与取得，验证超时撤销以及无竞争零额外请求。尚未提供公平、PI、robust或SMP内核。
 
 [K59 受控调度观察](../dev-log/core/59-mutex-races.md)实现独立原子握手，恢复同一次未结束的锁调用，亲自区分慢路径人数、等待请求、内核登记和通知结果；普通库没有观察回调。
+
+[K60 变化通知](../dev-log/core/60-sequence-events.md)亲手实现序号快照、发布CAS和有界等待；实际区分早发布、无变化通知、双人广播与新快照到期，32位范围到顶明确失败。

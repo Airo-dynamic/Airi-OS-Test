@@ -187,3 +187,8 @@ airi_identity_elf_end: /* 输入的排他右端。 */
 airi_mutex_races_elf_start: /* 包含完整ELF头与段。 */
 .incbin AIRI_MUTEX_RACES_ELF /* 不调用宿主程序冒充观察。 */
 airi_mutex_races_elf_end: /* 范围右端不含字节。 */
+.balign 16 /* 独立变化通知观察映像。 */
+.global airi_events_elf_start, airi_events_elf_end /* 目录借用实际ELF范围。 */
+airi_events_elf_start: /* 从文件头开始校验。 */
+.incbin AIRI_EVENTS_ELF /* 完整静态用户程序，不执行宿主程序。 */
+airi_events_elf_end: /* 范围右端不含字节。 */

@@ -364,6 +364,11 @@
       "id": "K59",
       "title": "K59 · 在四个真实交错位置继续同一次加锁",
       "document": "dev-log/core/59-mutex-races.md"
+    },
+    {
+      "id": "K60",
+      "title": "K60 · 用变化序号连接观察与等待",
+      "document": "dev-log/core/60-sequence-events.md"
     }
   ]
 }

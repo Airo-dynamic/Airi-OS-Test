@@ -1,0 +1,32 @@
+checkpoint: K60
+baseline: baseline.yaml
+start: K59
+current_operation: 用四字节变化版本连接旧快照与futex等待，两位worker在无变化通知后重新检查
+already_explained:
+- concept: 比较并登记的睡眠边界
+  at: ../../../dev-log/core/53-private-futex.md#futex-lost-notification
+  establishes: 旧观察可能在等待前失效，内核比较不符立即返回，固定单CPU使比较登记连贯
+- concept: 发请求与实际睡下不同
+  at: ../../../dev-log/core/59-mutex-races.md#races-host-records
+  establishes: 43号-11没有WAIT登记，通知0与真正睡眠返回分开核对
+- concept: 查询本身计入测量
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
+  establishes: 同执行者两次查询的差值扣结束一次，打印放窗口外
+first_use:
+- concept: 版本不是通知令牌或业务谓词
+  at: ../../../dev-log/core/60-sequence-events.md#event-version-model
+  establishes: 旧0遇到1直接重查，新读1只等后续变化，返回0也可能版本未变
+- concept: 发布CAS与饱和
+  at: ../../../dev-log/core/60-sequence-events.md#event-publication
+  establishes: 失败更新expected重试，release发布，UINT32_MAX拒绝回绕；有限生命周期不宣称最终长驻组件
+- concept: 同一预算下的重查循环
+  at: ../../../dev-log/core/60-sequence-events.md#event-worker-loop
+  establishes: start只读一次，无变化返回继续消耗原预算，唯一条件为原子版本而非未同步业务数据
+- concept: 两人广播与新快照
+  at: ../../../dev-log/core/60-sequence-events.md#event-before-and-after
+  establishes: 真正发布与原始wake分开，两人返回2，后来新读2等待仍到期
+borrowed:
+- component: 既有43/44号、原子内建、LLVM静态链接
+  contract: 同进程/VA、四字节键、十六执行者上限；不是Linux eventfd或完整pthread条件变量
+feedback: []
+not_inferred: 重建和运行不推断掌握，未宣称SMP、无限代次或新Linux/GUI验证

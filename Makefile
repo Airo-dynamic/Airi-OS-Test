@@ -566,3 +566,18 @@ $(OUT)/user/mutex-races.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/use
 $(OUT)/labs/airios/images.o: $(OUT)/user/mutex-races.elf
 # 本配置路径只供incbin消费。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MUTEX_RACES_ELF='"$(OUT)/user/mutex-races.elf"'
+
+# 变化通知只链接到显式选择它的用户程序。
+$(OUT)/user/event-lib.o: labs/airios/libc/event.c Makefile
+# 不与观察程序events.o混名。
+	@mkdir -p $(dir $@)
+# 使用相同用户目标和传递头依赖。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 真实线程等待沿既有int80边界，不借宿主同步库。
+$(OUT)/user/events.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/event-lib.o $(OUT)/user/events.o labs/airios/program.ld
+# 独立ELF包含自有通知算法和完整观察入口。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录只借最终链接字节。
+$(OUT)/labs/airios/images.o: $(OUT)/user/events.elf
+# 当前配置路径交给incbin，串口主线不读取图形。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_EVENTS_ELF='"$(OUT)/user/events.elf"'
