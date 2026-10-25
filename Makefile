@@ -644,3 +644,18 @@ $(OUT)/user/futex64.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/th
 $(OUT)/labs/airios/images.o: $(OUT)/user/futex64.elf
 # 当前配置路径交给incbin。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_FUTEX64_ELF='"$(OUT)/user/futex64.elf"'
+
+# 宽事件是独立源码接口，旧32位event继续保留。
+$(OUT)/user/event64-lib.o: labs/airios/libc/event64.c Makefile
+# 与观察main的events64.o分别命名。
+	@mkdir -p $(dir $@)
+# 同一用户目标，完整宽原子无需宿主库。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 序号与通知分离观察只选择原始线程运行库。
+$(OUT)/user/events64.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/event64-lib.o $(OUT)/user/events64.o labs/airios/program.ld
+# 数据与错误返回均在真实guest中验证。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录只读实际完整ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/events64.elf
+# 路径仅供incbin消费。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_EVENTS64_ELF='"$(OUT)/user/events64.elf"'

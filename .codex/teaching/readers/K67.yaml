@@ -1,0 +1,29 @@
+checkpoint: K67
+baseline: baseline.yaml
+start: K66
+current_operation: 完整uint64快照与状态分开返回，实际区分只推进、只通知、重查和真正变化
+already_explained:
+- concept: 宽私有等待
+  at: ../../../dev-log/core/66-futex64.md#wide-futex-user-entry
+  establishes: uint64期望完整进入46号，47号只通知同进程/VA/八字节键
+- concept: 版本不是任务令牌
+  at: ../../../dev-log/core/60-sequence-events.md#event-version-model
+  establishes: 旧快照遇变化重查，新快照只等未来，通知不保证条件已真
+first_use:
+- concept: 完整值与错误通道
+  at: ../../../dev-log/core/67-wide-events.md#event64-result-shape
+  establishes: 全部64位数据无法再与负错误共享一个long，status返回0而私人uint64输出保留最高位/全1，失败保持
+- concept: 推进和通知分开
+  at: ../../../dev-log/core/67-wide-events.md#event64-advance-notify
+  establishes: advance原子改版本但不结束已登记等待，notify不改版本但可要求重查，业务数据仍需锁
+- concept: 最大值与高位真实路径
+  at: ../../../dev-log/core/67-wide-events.md#event64-high-and-errors
+  establishes: 0x8000000000000001实际进入宽WAIT，UINT64_MAX是成功数据，下一advance才饱和失败
+- concept: 两个动作分别观察
+  at: ../../../dev-log/core/67-wide-events.md#event64-two-actions-observation
+  establishes: notify1旧值重查，advance后done仍0，notify16才完成两人，迟到新快照没有通知信用
+borrowed:
+- component: 既有原始线程、64位futex和原子内建
+  contract: 仅私人有效输出，有限uint64范围、固定单CPU；旧32位event和队列不在本节迁移
+feedback: []
+not_inferred: 全值与状态运行不推断掌握，未宣称条件变量/SMP/新Linux或GUI

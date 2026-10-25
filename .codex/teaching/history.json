@@ -399,6 +399,11 @@
       "id": "K66",
       "title": "K66 · 八字节等待与同地址宽度隔离",
       "document": "dev-log/core/66-futex64.md"
+    },
+    {
+      "id": "K67",
+      "title": "K67 · 完整宽快照、错误状态与独立通知",
+      "document": "dev-log/core/67-wide-events.md"
     }
   ]
 }

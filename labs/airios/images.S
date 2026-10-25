@@ -217,3 +217,8 @@ airi_pthread_mutex_elf_end: /* 范围右端不含字节。 */
 airi_futex64_elf_start: /* 从静态ELF头校验。 */
 .incbin AIRI_FUTEX64_ELF /* 不使用宿主futex替身。 */
 airi_futex64_elf_end: /* 右端不含字节。 */
+.balign 16 /* 完整64位序号接口的实际用户观察。 */
+.global airi_events64_elf_start, airi_events64_elf_end /* 目录借用只读文件范围。 */
+airi_events64_elf_start: /* 从静态ELF头开始。 */
+.incbin AIRI_EVENTS64_ELF /* 不以宿主计算结果替代guest。 */
+airi_events64_elf_end: /* 右端不含字节。 */
