@@ -29,3 +29,9 @@ long airi_futex_wake(uint32_t *word, unsigned count) { // 用户先发布新条�
 uint64_t airi_thread_syscalls(void) { // 此观察本身是一次真实45号系统调用。
     return (uint64_t)thread_call(45, 0, 0, 0); // 保留完整64位无符号计数，上限饱和不回绕。
 }
+long airi_futex_wait64(uint64_t *word, uint64_t expected, unsigned ticks) { // 自有46号，不是Linux futex扩展ABI。
+    return thread_call(46, (uintptr_t)word, expected, ticks); // 高32位完整进入RSI，参数不窄化。
+}
+long airi_futex_wake64(uint64_t *word, unsigned count) { // 宽键显式使用47号，不能让调用者自己猜宽度。
+    return thread_call(47, (uintptr_t)word, count, 0); // 同样返回真实已唤醒数量。
+}

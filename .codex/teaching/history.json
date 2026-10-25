@@ -394,6 +394,11 @@
       "id": "K65",
       "title": "K65 · pthread互斥的默认类型与对象寿命",
       "document": "dev-log/core/65-pthread-mutex.md"
+    },
+    {
+      "id": "K66",
+      "title": "K66 · 八字节等待与同地址宽度隔离",
+      "document": "dev-log/core/66-futex64.md"
     }
   ]
 }

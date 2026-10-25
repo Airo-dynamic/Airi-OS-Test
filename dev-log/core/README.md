@@ -98,3 +98,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K64 对等join](../core/64-peer-join.md)在目标上唯一认领结果，登记前检查有界等待链，实测重复认领、闭环和坏输出保持。
 
 [K65 pthread互斥](../core/65-pthread-mutex.md)映射默认ERRORCHECK，维护静态/动态寿命，并在内部200tick到期以后继续公开无总超时lock。
+
+[K66 八字节等待](../core/66-futex64.md)保留完整64位期望值，把宽度纳入私有键，并用相同VA的两种通知顺序验证隔离。

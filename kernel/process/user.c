@@ -24,7 +24,7 @@
 #define WORKER_COUNT 8u // 全系统最多八条额外用户执行链，主执行者仍各占进程槽。
 #define EXECUTION_COUNT (PROCESS_COUNT + WORKER_COUNT) // 调度同时遍历主执行者和工作执行者。
 enum user_state { USER_UNUSED, USER_RUNNABLE, USER_RUNNING, USER_WAITING, USER_IO_WAIT, USER_ZOMBIE, USER_REAP_PENDING }; // 退出与回收是两个不同状态。
-enum io_operation { IO_NONE, IO_READ, IO_WRITE, IO_READY, IO_ASYNC, IO_SLEEP, IO_JOIN, IO_FUTEX }; // 等待保存操作条件，不保留内核局部buffer。
+enum io_operation { IO_NONE, IO_READ, IO_WRITE, IO_READY, IO_ASYNC, IO_SLEEP, IO_JOIN, IO_FUTEX, IO_FUTEX64 }; // 等待保存操作条件，不保留内核局部buffer。
 struct user_page { uint64_t address, physical; unsigned flags; }; // fork需要把同一VA映射到另一个物理页。
 #define PAGE_RECORDS (4096u / sizeof(struct user_page)) // 一物理页放170项，余下16字节不用。
 #define RECORD_CHUNKS ((AIRI_USER_PAGES + PAGE_RECORDS - 1) / PAGE_RECORDS) // 1024项最多借七个记录页。
@@ -90,6 +90,7 @@ extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算�
 extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
 extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
 extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
+extern const uint8_t airi_futex64_elf_start[], airi_futex64_elf_end[]; // 同地址宽度隔离和完整64位比较。
 extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
 extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
@@ -131,6 +132,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
     {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
     {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
+    {"futex64", airi_futex64_elf_start, airi_futex64_elf_end}, // 宽键与原四字节键共存。
     {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
     {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
     {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
@@ -369,16 +371,24 @@ static void complete_io(struct user_execution *execution, long result) { // 普�
     ++io_wake_count; // 实际结束一次阻塞，包括错误和超时。
     airi_log("[WAIT_WAKE] pid=%u result=%ld", execution->process->pid, result); // 不在IRQ中打印或复制。
 }
-static long futex_wake(uint64_t address, uint64_t count) { // 私有键由进程对象和用户虚拟地址共同组成。
-    if ((address & 3) || count > EXECUTION_COUNT) // 必须四字节对齐，完整64位数量不能窄化。
+static bool futex_value(uint64_t address, bool wide, uint64_t *value) { // 按请求宽度复制到同类型内核局部值，不靠字节序扩展窄读取。
+    if (wide) return copy_user(current, value, address, sizeof(*value), false); // 验证并复制完整八字节，保留高32位。
+    uint32_t narrow; // 原接口仍只读四字节。
+    if (!copy_user(current, &narrow, address, sizeof(narrow), false)) return false; // 失败不读取未初始化局部值。
+    *value = narrow; // C无符号扩展为64位，不把窄键变成八字节访问。
+    return true; // 只有完整复制成功才参与比较。
+}
+static long futex_wake(uint64_t address, uint64_t count, enum io_operation kind) { // 私有键由进程对象、VA及等待宽度共同组成。
+    unsigned bytes = kind == IO_FUTEX64 ? 8 : 4; // 只有固定系统调用入口能选择这两种内部类型。
+    if ((address & (bytes - 1)) || count > EXECUTION_COUNT) // 按四/八字节自然对齐，完整数量不窄化。
         return -22; // -EINVAL，尚未唤醒任何等待者。
-    if (!user_access(current, address, sizeof(uint32_t), false)) // wake虽不读写字值，也要求当前地址有效。
+    if (!user_access(current, address, bytes, false)) // wake虽不读写字值，也要求当前地址有效。
         return -14; // -EFAULT，不能用内核地址匹配某个队列。
     uint64_t now = airi_timer_ticks(); // 同一次wake内采用固定截止快照。
     unsigned woken = 0; // 仅成功wake的数量，不包含过期清理。
     for (unsigned i = 0; i < EXECUTION_COUNT && woken < count; ++i) { // 最多扫描十六槽，无额外分配。
         struct user_execution *target = execution_at(i); // 借当前执行表中的稳定槽。
-        if (target->process != current || target->state != USER_IO_WAIT || target->io != IO_FUTEX || target->io_address != address) // fork后的相同VA属于不同进程键。
+        if (target->process != current || target->state != USER_IO_WAIT || target->io != kind || target->io_address != address) // 同VA不同宽度或fork后的进程都不混合。
             continue; // 不影响别的地址、进程或等待种类。
         if (now >= target->io_deadline) { // 到期与通知相遇时先给出超时结果。
             complete_io(target, -110); // -ETIMEDOUT，不能算作成功唤醒。
@@ -387,7 +397,7 @@ static long futex_wake(uint64_t address, uint64_t count) { // 私有键由进程
         complete_io(target, 0); // 不修改用户字，也不替用户取得互斥锁。
         ++woken; // 仅累计原来确实已经阻塞的执行者。
     }
-    airi_log("[FUTEX_WAKE] pid=%u address=0x%llx count=%llu woken=%u", current->pid, (unsigned long long)address, (unsigned long long)count, woken); // 明确私有进程与实际数量。
+    airi_log(kind == IO_FUTEX64 ? "[FUTEX64_WAKE] pid=%u address=0x%llx count=%llu woken=%u" : "[FUTEX_WAKE] pid=%u address=0x%llx count=%llu woken=%u", current->pid, (unsigned long long)address, (unsigned long long)count, woken); // 明确私有进程与实际数量。
     return woken; // 0表示此刻没有匹配等待，不保存通知信用。
 }
 static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身不复制、分配或打印。
@@ -412,7 +422,7 @@ static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身�
                     result = 0; // 唯一收取成功。
                 }
             }
-        } else if (execution->io == IO_FUTEX) { // 内存字变化不会自动结束等待，必须显式wake或截止。
+        } else if (execution->io == IO_FUTEX || execution->io == IO_FUTEX64) { // 四/八字节内存等待都只由显式通知或截止结束。
             if (airi_timer_ticks() < execution->io_deadline) // 未到期只保留登记，不重新读取条件字。
                 continue; // 用户需要先发布条件，再调用wake。
             result = -110; // -ETIMEDOUT，不伪造成功通知。
@@ -1362,33 +1372,36 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = running->tid; // 内核身份始终来自真实正在运行的执行者。
         airi_log("[THREAD_ID_QUERY] pid=%u tid=%u", current->pid, running->tid); // 普通系统调用中记录真实陷入，不能用用户缓存计数冒充。
     }
-    else if (f->rax == 43) { // 自有私有futex等待，超时单位为名义PIT tick，不是Linux ABI。
-        uint32_t value; // 本次比较取得四字节数值副本，不跨阻塞保留HHDM指针。
+    else if (f->rax == 43 || f->rax == 46) { // 保留四字节接口，46号显式选择八字节私有等待。
+        bool wide = f->rax == 46; // 在返回值覆盖RAX以前固定本次宽度。
+        uint64_t value; // 类型化读取后统一比较，宽等待保留高位，不跨阻塞保留HHDM指针。
         uint64_t now = airi_timer_ticks(); // 截止只计算一次，不因轮询延长。
-        if ((f->rdi & 3) || f->rsi > UINT32_MAX || f->rdx > 6000) // 对齐、期望值宽度与有界超时先完整检查。
+        if ((f->rdi & (wide ? 7 : 3)) || (!wide && f->rsi > UINT32_MAX) || f->rdx > 6000) // 八/四对齐、窄期望值与完整超时先检查。
             f->rax = (uint64_t)-22ll; // -EINVAL，尚未读取或登记。
-        else if (!copy_user(current, &value, f->rdi, sizeof(value), false)) // 以进程页表验证整个四字节读范围。
+        else if (!futex_value(f->rdi, wide, &value)) // 以当前进程页表验证并复制所选完整跨度。
             f->rax = (uint64_t)-14ll; // -EFAULT，内核不直接解引用用户VA。
-        else if (value != (uint32_t)f->rsi) // 另一执行者若已发布新值，旧等待决定已失效。
+        else if (value != f->rsi) // 另一执行者若已发布新值，旧等待决定已失效。
             f->rax = (uint64_t)-11ll; // -EAGAIN，立即返回用户重查条件。
         else if (!f->rdx) // 值相等但不给等待预算，也不能登记一个永不到期项。
             f->rax = (uint64_t)-110ll; // -ETIMEDOUT。
         else if (now > UINT64_MAX - f->rdx) // 截止加法不能回绕。
             f->rax = (uint64_t)-75ll; // -EOVERFLOW。
         else { // 当前固定单CPU、内核不可抢占；比较到登记之间没有其他用户store或wake。
-            running->io = IO_FUTEX; // 等待身份属于执行者，不属于共享进程本身。
+            running->io = wide ? IO_FUTEX64 : IO_FUTEX; // 宽度进入等待键，不仅决定本次读取多少字节。
             running->io_fd = running->io_events = 0; // 内存等待不占FD。
             running->io_address = f->rdi; // 保存用户VA；进程指针已由execution持有。
             running->io_bytes = 0; // 不保存旧字值；醒来由用户重查同步协议。
             running->io_deadline = now + f->rdx; // 到期由普通服务栈结束原调用。
             running->state = USER_IO_WAIT; // 条件完整后再从可运行集合撤销。
             ++io_block_count; // 只记录真实阻塞，不计EAGAIN。
-            airi_log("[FUTEX_WAIT] pid=%u tid=%u address=0x%llx expected=%u", current->pid, running->tid, (unsigned long long)f->rdi, value); // 明确本次登记的实际身份。
+            airi_log(wide ? "[FUTEX64_WAIT] pid=%u tid=%u address=0x%llx expected=%llu" : "[FUTEX_WAIT] pid=%u tid=%u address=0x%llx expected=%llu", current->pid, running->tid, (unsigned long long)f->rdi, (unsigned long long)value); // 明确本次登记的实际身份。
             return schedule(REASON_IO); // 其他执行者继续；全阻塞时回启动栈hlt。
         }
     }
-    else if (f->rax == 44) // 显式通知至多给定数量，不保存信号量计数。
-        f->rax = (uint64_t)futex_wake(f->rdi, f->rsi); // 不修改用户字，返回真正唤醒的数量。
+    else if (f->rax == 44 || f->rax == 47) { // 两种宽度分别通知至多给定数量，不混合匹配。
+        enum io_operation kind = f->rax == 47 ? IO_FUTEX64 : IO_FUTEX; // 先固定键类型再写返回值。
+        f->rax = (uint64_t)futex_wake(f->rdi, f->rsi, kind); // 不修改用户字，返回真正唤醒的数量。
+    }
     else if (f->rax == 45) { // 每执行者观察计数，不把其他工作者的请求混入同一次测量。
         f->rax = running->syscall_count; // 包括本次查询入口，测量差值需扣掉结束查询的一次。
         airi_log("[THREAD_SYSCALLS] pid=%u tid=%u count=%llu", current->pid, running->tid, (unsigned long long)running->syscall_count); // 真实内核计数，不是用户推测。

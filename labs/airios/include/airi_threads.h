@@ -11,6 +11,8 @@ long airi_thread_id(void); // 有效静态TLS头直接提供当前TID，旧版�
 uint64_t airi_thread_syscalls(void); // 当前执行者累计用户请求数，含本次查询，fork/worker重新开始，exec保留。
 long airi_futex_wait(uint32_t *word, uint32_t expected, unsigned ticks); // 私有键、四字节对齐，有限PIT预算；0通知、-11值不符、-110到期。
 long airi_futex_wake(uint32_t *word, unsigned count); // 至多唤醒十六个同进程已登记者，不修改字值，不累计通知。
+long airi_futex_wait64(uint64_t *word, uint64_t expected, unsigned ticks); // 八字节对齐，全64位比较，键与同VA四字节等待隔离。
+long airi_futex_wake64(uint64_t *word, unsigned count); // 只通知同进程/VA的八字节等待，不改值或唤醒窄等待。
 #ifdef __cplusplus // 结束链接语言范围。
 } // 工作函数ABI仍为普通当前目标C调用。
 #endif // 结束语言差异。

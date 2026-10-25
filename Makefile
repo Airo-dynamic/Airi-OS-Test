@@ -635,3 +635,12 @@ $(OUT)/user/pthread-mutex.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/he
 $(OUT)/labs/airios/images.o: $(OUT)/user/pthread-mutex.elf
 # 本配置路径交给incbin。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_PTHREAD_MUTEX_ELF='"$(OUT)/user/pthread-mutex.elf"'
+
+# 宽等待观察只选择原始线程库，不把pthread语义混入46/47号。
+$(OUT)/user/futex64.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/futex64-probe.o labs/airios/program.ld
+# 静态链接真实八/四字节比较与通知调用者。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录只借实际完成ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/futex64.elf
+# 当前配置路径交给incbin。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_FUTEX64_ELF='"$(OUT)/user/futex64.elf"'

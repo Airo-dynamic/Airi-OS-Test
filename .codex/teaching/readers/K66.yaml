@@ -1,0 +1,29 @@
+checkpoint: K66
+baseline: baseline.yaml
+start: K65
+current_operation: 内核完整八字节比较，按同进程/VA/宽度登记，两种同址通知顺序实际隔离
+already_explained:
+- concept: 比较并登记与私有地址
+  at: ../../../dev-log/core/53-private-futex.md#futex-lost-notification
+  establishes: 旧观察可能失效，固定单CPU内核比较登记连贯，VA经页表验证不裸解引用
+- concept: 变化版本的有限范围
+  at: ../../../dev-log/core/60-sequence-events.md#event-publication
+  establishes: 32位拒绝回绕但有有限寿命，发布与通知不是无限代次
+first_use:
+- concept: 高低字节与类型化读取
+  at: ../../../dev-log/core/66-futex64.md#wide-futex-value
+  establishes: 同低32位不代表全64位相同，八字节对齐；窄读uint32再扩展不靠未初始化高位
+- concept: 宽度进入等待键
+  at: ../../../dev-log/core/66-futex64.md#wide-futex-key
+  establishes: process/VA/kind共同匹配，IO_FUTEX64与IO_FUTEX不混唤醒，跨度/对齐随宽度变化
+- concept: 宽系统调用参数
+  at: ../../../dev-log/core/66-futex64.md#wide-futex-dispatch
+  establishes: 覆盖RAX以前固定wide，完整RSI与RDX先验证，旧32期望限制保持
+- concept: 双向同VA隔离观察
+  at: ../../../dev-log/core/66-futex64.md#wide-futex-two-orders
+  establishes: 先窄后宽和先宽后窄都只置一个returned位，所有登记VA相同而通知类型不同
+borrowed:
+- component: 既有copy_user、等待截止、原始int80与工作执行者
+  contract: 自有46/47号，不是Linux ABI；固定单CPU，未增加新的跨进程64实验或SMP保证
+feedback: []
+not_inferred: 重建和高位/键检查不推断掌握，旧event尚未升级

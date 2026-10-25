@@ -212,3 +212,8 @@ airi_join_elf_end: /* 右端不包含字节。 */
 airi_pthread_mutex_elf_start: /* 从ELF文件头开始。 */
 .incbin AIRI_PTHREAD_MUTEX_ELF /* 自有线程、锁与包装，不执行主机例子。 */
 airi_pthread_mutex_elf_end: /* 范围右端不含字节。 */
+.balign 16 /* 八字节私有等待的真实用户观察。 */
+.global airi_futex64_elf_start, airi_futex64_elf_end /* 目录借完整文件边界。 */
+airi_futex64_elf_start: /* 从静态ELF头校验。 */
+.incbin AIRI_FUTEX64_ELF /* 不使用宿主futex替身。 */
+airi_futex64_elf_end: /* 右端不含字节。 */

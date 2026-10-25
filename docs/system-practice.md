@@ -58,3 +58,5 @@ K56减少运行库反复取得TID的陷入，并检验fork复制普通TLS时不�
 [K64](../dev-log/core/64-peer-join.md)让worker真实创建并join child；另一组A/B证明主争抢B不偷结果，B反向等待A报35，原A等待继续成功，资源收拢后fork仍能推进。
 
 [K65](../dev-log/core/65-pthread-mutex.md)真实持锁205tick触发底层200tick到期，公开两worker仍取得锁并完成64次普通数据更新；无竞争八对公共操作仍无额外系统调用。
+
+[K66](../dev-log/core/66-futex64.md)将1改为仅高32位变化的0x1122334400000001，旧1宽等待立即不符；同址32/64各一等待者，两种通知顺序均隔离。它为宽变化序号提供机制，不是Linux ABI或旧event已升级的证明。
