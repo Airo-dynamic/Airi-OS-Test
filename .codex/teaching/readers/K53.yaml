@@ -1,0 +1,38 @@
+checkpoint: K53
+baseline: baseline.yaml
+start: K52
+current_operation: 从共享字1的旧判断进入比较和登记，显式唤醒或超时后从原系统调用继续
+already_explained:
+- concept: 进程资源与执行者归属
+  at: ../../../dev-log/core/52-shared-executions.md#thread-resource-owner
+  establishes: 同进程共享memory与FD，execution分别持有CPU状态，整个进程退出终止全部worker
+- concept: 调度资格和等待现场
+  at: ../../../dev-log/core/50-user-execution.md#execution-dispatch
+  establishes: 调度同时选择地址空间与执行现场，原frame保留用户系统调用继续点
+- concept: 原子发布共享输入
+  at: ../../../dev-log/core/52-shared-executions.md#thread-user-publication
+  establishes: 同一原子对象的release写和对应acquire读发布普通数据，volatile与调度不替代同步
+first_use:
+- concept: before与after局部编辑
+  at: ../../../dev-log/core/53-private-futex.md#futex-editing
+  establishes: 核对完整唯一旧窗口后替换，未列出内容保留，不要求先实现作者工具
+- concept: 比较到登记之间的丢通知空隙
+  at: ../../../dev-log/core/53-private-futex.md#futex-lost-notification
+  establishes: 用户旧判断不能直接授权睡眠，单CPU不可抢占内核中再比较并登记，不能泛化到SMP
+- concept: 私有进程和VA联合键
+  at: ../../../dev-log/core/53-private-futex.md#futex-private-key
+  establishes: fork后相同VA不共用等待，当前不支持跨进程共享页futex
+- concept: 裸通知与原调用结果
+  at: ../../../dev-log/core/53-private-futex.md#futex-wait-record
+  establishes: wake只交付0并恢复资格，不改字或授锁，超时交付-110且清条件
+- concept: C原子对象地址与系统调用
+  at: ../../../dev-log/core/53-private-futex.md#futex-user-boundary
+  establishes: 用户通过原子操作访问，地址转换只服务ABI，内核按字节复制且不持有普通用户指针
+- concept: 跨单次输出上限的目录发送
+  at: ../../../dev-log/core/53-private-futex.md#futex-image-catalog
+  establishes: 查询整份目录和实际输出是两个动作，循环按返回的短前缀推进，不含NUL
+borrowed:
+- component: 已有PIT、线程、管道和Linux对照
+  contract: guest等待在自己的调度器中实现，Linux对照需个人主机实际执行，不以宿主线程模拟
+feedback: []
+not_inferred: 运行及重建通过不记为掌握，不设置练习或门槛

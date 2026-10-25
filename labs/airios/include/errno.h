@@ -19,6 +19,7 @@
 #define ESPIPE 29 // 字节流不能定位。
 #define EPIPE 32 // 没有读端；当前内核不附带SIGPIPE。
 #define ENOSYS 38 // 当前未实现的操作。
+#define ETIMEDOUT 110 // 有界等待预算已经用完。
 #define EOVERFLOW 75 // 不能表示请求结果。
 #ifdef __cplusplus // 同一头以后可被C++源码使用，函数仍用C链接名。
 extern "C" { // 防止把运行库入口编码成C++重载符号。

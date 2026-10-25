@@ -14,3 +14,9 @@ long airi_thread_join(long tid, long *result) { // 内核在输出前核对完�
 long airi_thread_id(void) { // 只返回当前执行身份，不产生资源所有权。
     return thread_call(42, 0, 0, 0); // PID仍使用原始airi_getpid查询。
 }
+long airi_futex_wait(uint32_t *word, uint32_t expected, unsigned ticks) { // 不改errno，返回自有内核原始结果。
+    return thread_call(43, (uintptr_t)word, expected, ticks); // 条件字由调用者以原子操作读写，内核只负责比较和阻塞。
+}
+long airi_futex_wake(uint32_t *word, unsigned count) { // 用户先发布新条件，再通知已登记者。
+    return thread_call(44, (uintptr_t)word, count, 0); // 返回数可能为0，不代表内存条件没有改变。
+}

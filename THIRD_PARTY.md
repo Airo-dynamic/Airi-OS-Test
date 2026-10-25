@@ -52,3 +52,7 @@ K48对象接口参考Open Group malloc（https://pubs.opengroup.org/onlinepubs/9
 K51的TLS NOBITS与普通LOAD区别参考LLVM D13838（https://reviews.llvm.org/D13838）及固定测试05ff6e7948df3c152982814ea2367c7b83138cea（https://github.com/llvm/llvm-project/blob/05ff6e7948df3c152982814ea2367c7b83138cea/lld/test/ELF/tls.s），与本机LLD23.1.4实际输出对照。未复制LLVM实现或测试代码，未增加运行依赖。
 
 K52的共享进程资源、线程返回与进程退出、浮点环境继承参考Linux/POSIX手册（https://man7.org/linux/man-pages/man7/pthreads.7.html 、https://www.man7.org/linux/man-pages/man3/pthread_create.3p.html），原子发布沿C11草案N1570的既有L05依据。自有调度、TLS建立、用户桥接器和生命周期均未导入pthread实现；stdatomic为固定LLVM工具链头及目标指令，未链接libatomic或宿主运行库。
+
+## 私有内存等待的语义参考
+
+K53的比较并等待、实际唤醒数与返回后重查条件参考 [Linux FUTEX_WAIT](https://man7.org/linux/man-pages/man2/FUTEX_WAIT.2const.html) 和 [FUTEX_WAKE](https://man7.org/linux/man-pages/man2/FUTEX_WAKE.2const.html)。内核等待、单CPU边界及用户观察由本项目编写，未复制Linux实现，不提供Linux futex ABI。T04的编辑器来自本项目MBP未提交教程工具更新，另追加检查点保留旧源码状态。

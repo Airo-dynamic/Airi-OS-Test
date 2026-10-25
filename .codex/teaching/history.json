@@ -329,6 +329,11 @@
       "id": "T04",
       "title": "T04 · 只替换已确认的源码窗口",
       "document": "dev-log/tools/04-exact-edits.md"
+    },
+    {
+      "id": "K53",
+      "title": "K53 · 条件仍成立时睡眠，再按地址唤醒",
+      "document": "dev-log/core/53-private-futex.md"
     }
   ]
 }

@@ -23,7 +23,7 @@ static void execute(const char *name) { // 一条无参数程序名对应一个�
 }
 int main(void) { // 内核监控台run sh后从此用户入口继续。
     char guard[1]={'Q'}; // 小容量失败不能覆盖用户哨兵。
-    if (airi_programs(guard,1)!=-28 || guard[0]!='Q' || airi_programs((char *)0,256)!=-14 || airi_read(0,guard,0)!=0 || airi_read(0,(void *)0,1)!=-14) // 目录与UART输出先完整验证，空读不阻塞。
+    if (airi_programs(guard,1)!=-28 || guard[0]!='Q' || airi_programs((char *)0,512)!=-14 || airi_read(0,guard,0)!=0 || airi_read(0,(void *)0,1)!=-14) // 目录与UART输出先完整验证，空读不阻塞。
         return 2; // 未通过不能发布shell就绪。
     char line[64]; size_t used=0; int overflow=0,skip_lf=0; // 固定输入预算，过长行不截断执行。
     airi_puts("[USER_SHELL_READY]\nCommands: help programs exit, or one program name.\n"); // 交互与内核monitor的run语法不同。
@@ -49,8 +49,18 @@ int main(void) { // 内核监控台run sh后从此用户入口继续。
         if (equal(line,"exit")) { airi_puts("[USER_SHELL_EXIT]\n"); return 0; } // 退出与普通孩子结束分开。
         if (equal(line,"help")) { airi_puts("Use programs, one name, or exit. No arguments, redirects, jobs or nested sh.\n"); continue; } // 准确说明当前语法。
         if (equal(line,"programs")) { // 目录从内核真实注册表查询，避免维护第二套名单。
-            char names[256]; long n=airi_programs(names,sizeof names); // 完整结果或错误，不显示半目录。
-            if (n>=0) airi_puts(names); else airi_puts("catalog unavailable\n"); // 名称文本没有内部指针。
+            char names[512]; long n=airi_programs(names,sizeof names); // 完整结果或错误，不显示半目录。
+            if (n < 0) airi_puts("catalog unavailable\n"); // 查询失败不能消费未初始化目录。
+            else { // 目录超过一次write上限，逐段提交实际有效字节。
+                size_t sent = 0; // 已成功交给终端的前缀，不含末尾NUL。
+                while (sent < (size_t)n) { // 短写只前进实际数量，不跳过尚未发送的部分。
+                    size_t part = (size_t)n - sent; // 当前仍未输出的字节。
+                    if (part > 256) part = 256; // 原始write仍保留有界输入合同。
+                    long step = airi_write(1, names + sent, part); // 目录在本次命令栈上持续有效。
+                    if (step <= 0) { airi_puts("catalog output failed\n"); break; } // 错误或零进度不能无限重试。
+                    sent += (size_t)step; // 仅交付实际成功的前缀。
+                }
+            }
             continue; // 内建查询不用fork。
         }
         if (equal(line,"sh")) { airi_puts("nested sh has no separate input terminal\n"); continue; } // 不与父竞争单UART。

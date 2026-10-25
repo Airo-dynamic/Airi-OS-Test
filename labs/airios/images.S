@@ -158,3 +158,9 @@ airi_threads_elf_end: /* 完整输入文件的排他右端。 */
 airi_ctls_tail_elf_start: /* 普通BSS小于tbss的最小程序。 */
 .incbin AIRI_CTLS_TAIL_ELF /* 当前配置真正链接的模板与LOAD描述。 */
 airi_ctls_tail_elf_end: /* 完整文件的排他右端。 */
+
+.balign 8 /* 私有内存等待探针仍经静态ELF装载。 */
+.global airi_futex_elf_start, airi_futex_elf_end /* 完整只读输入范围。 */
+airi_futex_elf_start: /* 含自有线程库的用户程序。 */
+.incbin AIRI_FUTEX_ELF /* 当前配置交叉链接产物。 */
+airi_futex_elf_end: /* 输入文件的排他右端。 */

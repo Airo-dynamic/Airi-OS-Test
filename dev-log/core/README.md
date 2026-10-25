@@ -72,3 +72,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K51 TLS零尾部](51-tls-zero-tail.md)以较短普通BSS复现真实LLD布局，修正过严的TLS总长检查，同时保持完整文件初值、孤立模板与页预算校验。
 
 [K52 同进程工作执行者](52-shared-executions.md)共享用户内存、FD与异步buffer，独立保存栈、TLS和CPU环境，提供阻塞join并验证容量、复用和整个进程的退出故障。
+
+[K53 私有内存等待](53-private-futex.md)加入条件比较与登记、显式有界唤醒、PIT超时与进程/VA私有键，并把真实程序目录分段输出。

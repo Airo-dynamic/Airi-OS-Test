@@ -503,3 +503,12 @@ $(OUT)/user/ctls-tail.elf: $(USER_COMMON) $(OUT)/user/ctls-tail.o labs/airios/pr
 $(OUT)/labs/airios/images.o: $(OUT)/user/ctls-tail.elf
 # 只读incbin路径在包装对象中消费。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_CTLS_TAIL_ELF='"$(OUT)/user/ctls-tail.elf"'
+
+# 私有futex观察选择共享执行库，不链接errno或宿主pthread。
+$(OUT)/user/futex.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/futex-probe.o labs/airios/program.ld
+# 同一静态链接器和用户段权限仍由既有脚本固定。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 包装对象等待本配置的真实新程序。
+$(OUT)/labs/airios/images.o: $(OUT)/user/futex.elf
+# incbin只读取本配置文件，不读取宿主程序。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_FUTEX_ELF='"$(OUT)/user/futex.elf"'

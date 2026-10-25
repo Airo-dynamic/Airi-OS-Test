@@ -136,3 +136,5 @@ K50将FS/FPU、内核陷入栈、frame/initial、时钟/故障与等待条件收
 K51修正TLS关联校验：初值filesz必须完整对应某个LOAD文件范围，零尾部memsz不要求被普通LOAD memsz包住；模板起点仍锚定合法段，纯零模板可在段右端。运行副本页预算与清零保持，ctls-tail实际TLS4/273、普通LOAD4/5，分别读写互不覆盖。
 
 K52保留八进程组，增加全局八worker，调度遍历十六execution。current指所属进程，running指实际执行者；process唯一拥有共享内存/FD/异步owner，execution独立持有FS、FPU、内核栈与等待。创建继承父FPU环境并从ELF重新建立TLS；主执行者负责创建/join，工作return保留结果，原始exit或用户故障结束整组。join后安全归还内核栈/FPU，用户栈/TLS最多144页缓存至进程exec/exit。并发期间拒绝fork/exec/waitpid/release，等待中的FD拒绝close；无pthread/detach/cancel、主执行者独立退出或线程安全malloc。目录实测255字节，仍用256容量。
+
+K53以进程对象和用户VA作为私有futex键，43号比较四字节条件后登记execution等待，44号最多通知十六人。原子性依据固定单CPU和不可抢占内核，不能泛化到SMP。完成出口统一交付原frame结果；poll只处理到期，wake不改字也不授锁，整组退出撤销等待资格后安全回收。新增程序使目录含NUL达261字节，内核/用户查询容量512，shell按原write上限分段并处理短返回。

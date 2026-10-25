@@ -92,3 +92,5 @@ P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路
 [K52 同进程工作执行者](core/52-shared-executions.md)共享用户内存、FD与异步buffer，独立保存栈、TLS和CPU环境，提供阻塞join并验证容量、复用和整个进程的退出故障。
 
 [T04 精确编辑](tools/04-exact-edits.md)增加 before/after 局部替换，核对唯一旧窗口，并保护整章失败前的源码状态。
+
+[K53 私有内存等待](core/53-private-futex.md)加入条件比较与登记、显式有界唤醒、PIT超时与进程/VA私有键，并把真实程序目录分段输出。
