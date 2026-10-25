@@ -37,7 +37,7 @@ _Static_assert(sizeof(struct user_memory) <= 128, "user memory owner must stay b
 struct user_process; // 执行者回指所属进程，资源定义稍后闭合。
 struct user_execution { // 一条用户执行链的CPU现场、内核陷入栈和等待条件。
     struct user_process *process; // 借所属进程的共享内存、FD与异步owner，不独立归还它们。
-    unsigned tid, join_tid; // 全局不复用的执行身份，以及当前主执行者等待的工作身份。
+    unsigned tid, join_tid, joiner_tid; // 本执行者身份、正在等待的目标，以及认领本执行者结果的唯一收取者；0表示尚无。
     long result; // 工作函数的64位返回值，join取得后才能收拢执行者。
     uint64_t fs_base; // 当前执行者的用户FS基址，不拥有对应用户数据页。
     uint64_t fpu_physical; // 独立内核状态页，保存本执行者的x87/SSE寄存器。
@@ -88,6 +88,7 @@ extern const uint8_t airi_mutex_races_elf_start[], airi_mutex_races_elf_end[]; /
 extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
 extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
 extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
+extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
 extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
 extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
@@ -127,6 +128,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
     {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
     {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
+    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
     {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
     {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
     {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
@@ -393,17 +395,20 @@ static void poll_waiters(void) { // 仅普通内核上下文运行，IRQ本身�
         if (execution->state != USER_IO_WAIT) // 不碰正在运行、wait孩子或已退出者。
             continue; // 检查下一个等待槽。
         long result; // 恢复到用户同一次调用的结果。
-        if (execution->io == IO_JOIN) { // 只有主执行者能登记，目标不会被其他工作者收取。
-            struct user_execution *target = find_worker(p, execution->join_tid); // 主执行者保留完整等待身份。
-            if (!target) // 目标内部丢失时向调用者报告，不解引用失效槽。
+        if (execution->io == IO_JOIN) { // 主或worker均可等待，目标必须仍由这个执行者唯一认领。
+            struct user_execution *target = find_worker(p, execution->join_tid); // 等待身份属于当前同进程worker，不借槽指针。
+            if (!target) // 内部丢失目标仍明确返回，不解引用已经清除的槽。
                 result = -3; // -ESRCH。
-            else if (target->state != USER_ZOMBIE) // 工作函数还没有结束。
-                continue; // 主执行者仍然阻塞，其他工作者可继续。
-            else if (execution->io_address && !copy_user(p, &target->result, execution->io_address, sizeof(target->result), true)) // 先形成用户输出，再撤销目标的可join状态。
-                result = -14; // -EFAULT，目标仍保留ZOMBIE供重试。
-            else { // 结果已完整交出，不能重复join。
-                target->state = USER_REAP_PENDING; // 此时可能仍使用目标内核栈，只登记延后回收。
-                result = 0; // 成功取得一次工作返回值。
+            else { // 目标存活时核对认领方向，不能由另一个等待者抢走。
+                if (target->joiner_tid != execution->tid) airi_panic("join waiter lost its claim"); // 内核不变量，不能伪造成成功。
+                if (target->state != USER_ZOMBIE) continue; // 原调用保持阻塞，目标仍可运行或等其他条件。
+                if (execution->io_address && !copy_user(p, &target->result, execution->io_address, sizeof(target->result), true)) { // 结果提交失败仍保留目标结果。
+                    target->joiner_tid = 0; // 失败调用不再持认领，后续允许有效收取者重试。
+                    result = -14; // -EFAULT，目标仍为ZOMBIE。
+                } else { // 结果已经完整交出，任何人都不能再次取得。
+                    target->state = USER_REAP_PENDING; // 可能仍站在目标栈上，离开以后再销毁。
+                    result = 0; // 唯一收取成功。
+                }
             }
         } else if (execution->io == IO_FUTEX) { // 内存字变化不会自动结束等待，必须显式wake或截止。
             if (airi_timer_ticks() < execution->io_deadline) // 未到期只保留登记，不重新读取条件字。
@@ -994,33 +999,49 @@ failed: // 当前仍在创建者的内核栈上，可以立即收回尚未运行
     destroy_execution(execution); // 栈/FPU的成功部分可独立归还，不关闭进程共享资源。
     return -12; // -ENOMEM，调用者和其他已运行执行者保持。
 }
-static struct airi_trap_frame *join_worker(struct airi_trap_frame *frame) { // 本轮只有主执行者能收取同组工作结果。
-    if (running != &current->execution) // 不支持工作者之间的join图或自建管理树。
-        frame->rax = (uint64_t)-16ll; // -EBUSY。
-    else if (frame->rdi == running->tid) // 主执行者不能等待自己结束后再继续当前调用。
-        frame->rax = (uint64_t)-22ll; // -EINVAL。
-    else if (frame->rsi && !user_access(current, frame->rsi, sizeof(long), true)) // 完整结果输出在消费状态之前核对。
-        frame->rax = (uint64_t)-14ll; // -EFAULT，目标仍可join。
-    else { // 身份查找和等待登记在同一不可抢占内核调用中完成。
-        struct user_execution *target = find_worker(current, frame->rdi); // 外进程或旧TID均不授权。
-        if (!target) // 不返回别人的结果，也不重复收取。
-            frame->rax = (uint64_t)-3ll; // -ESRCH。
-        else if (target->state == USER_ZOMBIE) { // 结果已经形成，可以立即复制。
-            if (frame->rsi && !copy_user(current, &target->result, frame->rsi, sizeof(target->result), true)) // 已验证，仍明确核对复制合同。
-                airi_panic("validated join output changed"); // 当前没有并发页解除者。
-            target->state = USER_REAP_PENDING; // 不在此处猜目标栈是否还被外层调用链使用。
-            frame->rax = 0; // 本次结果只交出一次。
-        } else { // 工作函数还在运行或等待I/O。
-            running->join_tid = target->tid; // 以不可复用身份关联，不借用户槽指针。
-            running->io = IO_JOIN; // 原系统调用在完成后原地继续。
-            running->io_address = frame->rsi; // NULL表示只收拢，不读取工作结果。
-            running->state = USER_IO_WAIT; // 条件完整后才撤销运行资格。
-            ++io_block_count; // 统计真实阻塞，不用用户轮询模拟join。
-            airi_log("[THREAD_JOIN_WAIT] pid=%u tid=%u", current->pid, target->tid); // 普通内核调用路径可输出。
-            return schedule(REASON_IO); // 工作执行者继续，必要时进入PIT空闲等待。
+static bool join_cycle(struct user_execution *target) { // 新边running->target不能回到running，所有边都在同进程内。
+    for (unsigned count = 0; count < EXECUTION_COUNT; ++count) { // 固定十六执行槽给出遍历上限，不递归借内核栈。
+        if (target == running) return true; // 已有等待链回到调用者，加入新边会成环。
+        if (target->state != USER_IO_WAIT || target->io != IO_JOIN) return false; // 不在join上等别人，链在这里结束。
+        target = find_worker(current, target->join_tid); // 沿本执行者正在等待的目标身份前进。
+        if (!target) return false; // 已不可join的末端不能继续形成活等待链。
+    }
+    return true; // 超过有界槽数仍未结束，拒绝而不无限遍历损坏/循环链。
+}
+static struct airi_trap_frame *join_worker(struct airi_trap_frame *frame) { // 同组主/worker都能收取worker，主执行者本体暂不是目标。
+    if (frame->rdi == running->tid) // 自己不能等到自己结束再继续。
+        frame->rax = (uint64_t)-35ll; // -EDEADLK，原始接口也统一报告。
+    else if (frame->rdi == current->pid) // 主入口普通返回/exit仍结束整个组，尚无独立主退出协议。
+        frame->rax = (uint64_t)-95ll; // -ENOTSUP，不能承诺主线程可join。
+    else if (frame->rsi && !user_access(current, frame->rsi, sizeof(long), true)) // 先验证完整输出，再取得任何认领。
+        frame->rax = (uint64_t)-14ll; // -EFAULT，不能偷走其他人的目标。
+    else { // 身份、链检查、认领和登记仍在单CPU不可抢占的同一次内核调用内。
+        struct user_execution *target = find_worker(current, frame->rdi); // 外组、旧身份与待销毁者均不授权。
+        if (!target) frame->rax = (uint64_t)-3ll; // -ESRCH，目标不存在或已经交出。
+        else if (join_cycle(target)) { // 在写入新等待边以前拒绝闭环。
+            frame->rax = (uint64_t)-35ll; // 不认领，不改变现有等待链。
+            airi_log("[THREAD_JOIN_CYCLE] pid=%u joiner=%u target=%u", current->pid, running->tid, target->tid); // 真实被拒绝的最后一条边。
+        } else if (target->joiner_tid && target->joiner_tid != running->tid) { // 同一结果不能被多人并发收取。
+            frame->rax = (uint64_t)-22ll; // -EINVAL，原认领者保留资格。
+            airi_log("[THREAD_JOIN_BUSY] pid=%u target=%u joiner=%u owner=%u", current->pid, target->tid, running->tid, target->joiner_tid); // 用真实内核身份观察冲突。
+        } else { // 从这里开始，直到结果交出或错误撤销，认领只归当前执行者。
+            target->joiner_tid = running->tid; // 先认领再公开等待，其他执行者不能插入另一个合法等待者。
+            if (target->state == USER_ZOMBIE) { // 已结束也遵守同一认领与结果提交规则。
+                if (frame->rsi && !copy_user(current, &target->result, frame->rsi, sizeof(target->result), true)) airi_panic("validated join output changed"); // 同一不可抢占调用内映射不应变化。
+                target->state = USER_REAP_PENDING; // 只登记回收，保持离开目标栈以后才销毁。
+                frame->rax = 0; // 结果只交出一次。
+            } else { // 未完成时保存当前调用的继续条件。
+                running->join_tid = target->tid; // 出边记在等待者自己，入边认领记在target。
+                running->io = IO_JOIN; // 同一个41号调用以后原地返回。
+                running->io_address = frame->rsi; // NULL表示只收拢，不读结果。
+                running->state = USER_IO_WAIT; // 完整登记以后才撤销运行资格。
+                ++io_block_count; // 只统计实际阻塞。
+                airi_log("[THREAD_JOIN_WAIT] pid=%u tid=%u joiner=%u", current->pid, target->tid, running->tid); // 保留旧prefix，追加真实等待者。
+                return schedule(REASON_IO); // 目标和其他执行者继续，所有等待仍可进入服务栈。
+            }
         }
     }
-    return airi_user_resume(frame); // 立即错误或已完成结果继续原调用方。
+    return airi_user_resume(frame); // 立即错误或已结束结果继续当前用户调用。
 }
 static struct airi_trap_frame *return_worker(struct airi_trap_frame *frame) { // 用户桥接器在工作函数return以后进入。
     if (running == &current->execution) { // 主执行者结束整个进程需使用既有exit接口。
@@ -1333,7 +1354,7 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         f->rax = (uint64_t)create_worker(f->rdi, f->rsi, f->rdx); // 函数入口和用户参数完整复制成寄存器值。
     else if (f->rax == 40) // 用户工作函数返回，只结束本执行者。
         return return_worker(f); // 不关闭进程共享FD或异步owner。
-    else if (f->rax == 41) // 主执行者收取一次同组工作结果。
+    else if (f->rax == 41) // 同组执行者唯一收取worker，认领和环检测由内核完成。
         return join_worker(f); // 未完成时真正阻塞于原frame。
     else if (f->rax == 42) { // 原始查询保留为参考与版本后备，不读取用户TCB授权。
         f->rax = running->tid; // 内核身份始终来自真实正在运行的执行者。

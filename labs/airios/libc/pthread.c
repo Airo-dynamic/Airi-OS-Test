@@ -34,10 +34,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*
     errno = saved; // 创建过程的内部操作不污染调用者错误状态。
     return 0; // 表示执行者已建立，不保证函数尚未开始或已经结束。
 }
-int pthread_join(pthread_t thread, void **result) { // 当前不支持worker之间的join图。
+int pthread_join(pthread_t thread, void **result) { // 同组执行者可join worker，由内核认领并拒绝循环等待。
     if (!thread || thread > UINT32_MAX) return ESRCH; // 不截断过宽身份命中别人。
-    if (pthread_equal(thread, pthread_self())) return EDEADLK; // 自己不能等到自己结束再继续，先于主执行者限制报告。
-    if (pthread_self() != (pthread_t)airi_getpid()) return ENOTSUP; // 不伪装完整POSIX的对等线程join能力。
+    if (pthread_equal(thread, pthread_self())) return EDEADLK; // 自己不能等到自己结束再继续，先于主目标限制报告。
+    if (thread == (pthread_t)airi_getpid()) return ENOTSUP; // 主执行者尚无独立退出结果，不伪装可join主目标。
     long value; // 内核只写这个已经存在的私人long槽。
     long error = airi_thread_join((long)thread, result ? &value : 0); // NULL仍执行真实join并回收，不创建虚假结果。
     if (error) return (int)-error; // 失败保持调用者输出，原始接口不改errno。

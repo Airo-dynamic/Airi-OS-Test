@@ -7,7 +7,7 @@ typedef struct { uint64_t reserved; } pthread_attr_t; // 仅保留类型位置�
 extern "C" { // 不链接宿主pthread。
 #endif // C直接声明。
 int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument); // 同进程执行者可创建，成功0并写身份，失败正错误且不改errno。
-int pthread_join(pthread_t thread, void **result); // 当前仅主执行者收取，NULL丢弃结果；成功才写私人输出。
+int pthread_join(pthread_t thread, void **result); // 同组worker结果唯一收取，NULL丢弃；主执行者暂不可作目标，成功才写私人输出。
 pthread_t pthread_self(void); // 当前有效运行头提供身份，不能跨进程当授权句柄。
 int pthread_equal(pthread_t left, pthread_t right); // 相同非零，不同0，不将可移植比较写成数值猜测。
 #ifdef __cplusplus // 结束C链接声明。

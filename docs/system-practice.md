@@ -54,3 +54,5 @@ K56减少运行库反复取得TID的陷入，并检验fork复制普通TLS时不�
 [K62](../dev-log/core/62-pthread-entry.md)验证同一用户参数经过真实线程返回给join，34位执行者的包在回调前归还，容量失败不泄漏，malloc失败也不改调用者errno。主/worker资源能力仍有明确边界。
 
 [K63](../dev-log/core/63-nested-workers.md)让worker真实创建leaf，creator已join且旧槽运行过replacement以后leaf仍能恢复。普通函数返回与进程组exit分开，参数不得借用已结束创建者的局部栈。
+
+[K64](../dev-log/core/64-peer-join.md)让worker真实创建并join child；另一组A/B证明主争抢B不偷结果，B反向等待A报35，原A等待继续成功，资源收拢后fork仍能推进。

@@ -55,7 +55,7 @@ gui 只增加自己的显示适配、frontend、图形观察程序、资产和�
 
 ## 课程、分支与导出
 
-main 基础18节点之后已追加K14–K63、L02–L08和T04，当前76节点。00–02 保持实现字节及学习连续性，03–10 继续启动和输入，K11–K13 完成串口日常入口，L01 是必修 Linux 对照。作者工具 T01–T04 沿 main 继续，不要求图形课程完成。
+main 基础18节点之后已追加K14–K64、L02–L08和T04，当前77节点。00–02 保持实现字节及学习连续性，03–10 继续启动和输入，K11–K13 完成串口日常入口，L01 是必修 Linux 对照。作者工具 T01–T04 沿 main 继续，不要求图形课程完成。
 
 gui 从 main 的 00 根提交分叉，以 15 个节点 G11–G24、G26 只增加图形自己的路径，可无冲突合入任一现有 main 阶段。分支起点决定哪些路径可以独立维护，课程的 requires 则说明重建和运行需要哪些知识与实现；图形的 K11/K13 运行前置不改变分支起点。
 
@@ -158,3 +158,5 @@ K61四槽用户值队列由guard保护head/count/closed与槽，available/space�
 K62用户pthread源码子集提供create/join/self/equal，正确void*函数经long适配器调用，不强转回调类型。启动包失败归创建者free，成功归worker复制/free；join用私人long槽再提交void*。正错误不改errno，malloc失败恢复原值。当前NULL属性、主管理、普通函数返回；未实现的对等管理ENOTSUP，其他API不声明。
 
 K63同进程任一running可创建worker，新增映射归current->memory，独立栈/现场归目标execution，TLS从进程ELF模板建立、FPU继承实际创建者。THREAD_CREATE增加creator观察；主管理join暂保留。创建者普通返回后，其槽/TP可复用，仍活着的leaf不受影响；exit/故障仍结束组。
+
+K64 worker可收取同组worker结果，join_tid为等待出边，目标joiner_tid为唯一认领；验证输出后检查16步有界链，冲突-22、闭环/自等-35、主目标-95。等待目标结束时只提交认领者原41号，成功标记REAP_PENDING，复制失败清认领并保留ZOMBIE。execution464/process904字节，仍离开目标栈后回收。

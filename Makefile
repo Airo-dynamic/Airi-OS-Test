@@ -611,3 +611,12 @@ $(OUT)/user/pthread.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-alg
 $(OUT)/labs/airios/images.o: $(OUT)/user/pthread.elf
 # 路径仅由incbin读取，不运行主机线程示例。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_PTHREAD_ELF='"$(OUT)/user/pthread.elf"'
+
+# peer join观察链接同一pthread/分配器，不提供宿主替身。
+$(OUT)/user/join.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/mutex-lib.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/event-lib.o $(OUT)/user/pthread-lib.o $(OUT)/user/join-probe.o labs/airios/program.ld
+# 用户适配和内核41号共同构成实际收取路径。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录借完成的静态映像。
+$(OUT)/labs/airios/images.o: $(OUT)/user/join.elf
+# 只用于只读incbin范围。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_JOIN_ELF='"$(OUT)/user/join.elf"'

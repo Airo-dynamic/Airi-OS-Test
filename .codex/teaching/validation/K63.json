@@ -235,5 +235,15 @@
       "artifacts/k63/replay-build.log",
       "artifacts/k63/replay-shell.log"
     ]
+  },
+  "release": {
+    "source_commit": "dc3e281",
+    "snapshots": 76,
+    "export": "/tmp/airios-k63-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k63/snapshots.log",
+      "artifacts/k63/export.log"
+    ]
   }
 }

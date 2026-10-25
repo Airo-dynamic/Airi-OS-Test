@@ -58,3 +58,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K62 类型与错误适配](../dev-log/core/62-pthread-entry.md)亲手连接void*工作函数、64位返回载体、启动包寿命和正错误；实际覆盖errno隔离、创建后容量失败及创建前分配失败，不以pthread名称冒充完整兼容。
 
 [K63 创建关系与资源寿命](../dev-log/core/63-nested-workers.md)亲手区分current资源归属与running创建者，实际跨creator收拢/旧槽复用保持leaf独立TLS/TCB，按内核creator关系分析交错日志。
+
+[K64 等待边与认领](../dev-log/core/64-peer-join.md)亲手区分A等B与B结果归A，唯一认领不能替代无环检查；坏输出在认领前拒绝，实测B闭环失败以后正常返回、A完成原等待。

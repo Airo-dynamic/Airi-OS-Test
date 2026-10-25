@@ -1,5 +1,11 @@
 # 当前路线的验证
 
+## K64：对等join认领与有界闭环拒绝（2026-10-25）
+
+同组worker可join worker，目标joiner_tid只认领一人，join_tid保存等待出边；输出先验证，16步链检查在新边登记以前拒绝闭环。正常parent自己收取child，主收取parent；A真实等B后，主争抢B返回22，高地址返回14不破坏A认领，B反向join A返回35且输出/errno保持，随后B正常结束让A原41号完成。
+
+四worker结果各只交一次，启动包归零，后续fork/wait继续；完整test退出0。179份纯主线独立重建证据见[K64记录](../.codex/teaching/validation/K64.json)；77节点、186份实现与链接通过，843块旁注无低于99%项，机制/实际对象关系/连续正文另核对。DWARF确认execution464/process904字节，主目标仍95，原始self join从本节点统一35，旧历史不回写。无主独立退出、取消/SMP或新Linux/GUI实测。
+
 ## K63：同进程嵌套创建与创建者槽复用（2026-10-25）
 
 任一执行者可调用39号创建同组worker，pthread入口同步放宽，join仍主管理。实际creator写TLS100/errno101后创建leaf，leaf从模板42/errno0开始并改321/201。主先join creator，再用replacement复用它的slot/TP，replacement结束后才开leaf门；leaf保持自己的活TID/TCB/TLS并返回原main参数。

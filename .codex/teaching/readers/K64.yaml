@@ -1,0 +1,32 @@
+checkpoint: K64
+baseline: baseline.yaml
+start: K63
+current_operation: 同组worker认领join目标，在登记前拒绝争抢与循环，目标返回后完成原调用
+already_explained:
+- concept: 创建与进程资源归属
+  at: ../../../dev-log/core/63-nested-workers.md#nested-resource-owner
+  establishes: worker可创建，current共享资源、running独立现场，creator普通结束不带走leaf
+- concept: 结果与类型适配
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-join-result
+  establishes: 内核写私人long后成功提交void*，正错误保持errno，主目标尚有生命周期限制
+- concept: 离开目标栈后回收
+  at: ../../../dev-log/core/52-shared-executions.md#thread-join-lifetime
+  establishes: ZOMBIE保留结果，REAP_PENDING在安全栈上销毁，不能释放脚下的内核栈
+first_use:
+- concept: 等待出边与目标认领两个方向
+  at: ../../../dev-log/core/64-peer-join.md#join-two-directions
+  establishes: A.join_tid=B而B.joiner_tid=A，唯一认领不等于无环，检查沿join_tid前进
+- concept: 单次内核调用检查并认领
+  at: ../../../dev-log/core/64-peer-join.md#join-claim-and-cycle
+  establishes: 输出验证先于认领，有界16步链检查、冲突22/环35、主目标95；固定UP不能推成SMP
+- concept: 目标结束时提交与失败撤销
+  at: ../../../dev-log/core/64-peer-join.md#join-resume-and-release
+  establishes: 仅认领者原41号完成，失败复制撤销认领但保留ZOMBIE，成功登记延后回收
+- concept: 同一组对象的闭环观察
+  at: ../../../dev-log/core/64-peer-join.md#join-cycle-observation
+  establishes: A真实等待B，主争抢拒绝，B反向拒绝后正常结束，A得到B，主得到A；坏输出不偷认领
+borrowed:
+- component: 既有用户输出验证、线程运行库、版本门与延后回收
+  contract: worker目标、有效私人输出、固定单CPU；无主独立退出/detach/cancel与新Linux/GUI实测
+feedback: []
+not_inferred: 图关系和运行不推断掌握，未宣称SMP或完整POSIX

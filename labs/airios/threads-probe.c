@@ -99,7 +99,7 @@ int main(void) { // 主执行者负责创建和收拢，不在库中伪造pthrea
     if (airi_thread_id() != expected_pid || !fresh()) // 主TID初始等于PID，新ELF TLS为模板值。
         return 70; // 不能由旧进程槽猜执行者身份。
     local = 99; errno = EBUSY; // 后续新工作者不能继承这两个运行值。
-    if (airi_thread_create(NULL, NULL) != -14 || airi_thread_join(expected_pid, NULL) != -22 || airi_thread_join(-1, NULL) != -3) // 非RX入口、自等待和无目标分别拒绝。
+    if (airi_thread_create(NULL, NULL) != -14 || airi_thread_join(expected_pid, NULL) != -35 || airi_thread_join(-1, NULL) != -3) // 非RX入口、自等待和无目标分别拒绝。
         return 71; // 参数错误不创建资源。
     void *pages[80]; size_t lengths[80], used = 0; // 保存实际成功的原始页申请，用于恢复预算。
     for (size_t step = 64 * 4096; step; step = step == 64 * 4096 ? 4096 : 0) // 先大批再补单页，填满当前用户数据页预算。

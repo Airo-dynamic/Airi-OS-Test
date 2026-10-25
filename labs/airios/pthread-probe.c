@@ -34,10 +34,10 @@ static void *echo(void *argument) { // 真正的POSIX形状函数，不强转函
     require(errno == 0 && local_marker == 42 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
     token->identity = pthread_self(); // 只写自己那一份输出，主尚未读取。
     errno = 101 + (int)token->index; local_marker = 100 + token->index; // 每位执行者保存不同运行值。
-    if (!token->index) { // 第一位创建子执行者，并保留尚未支持的对等join观察。
+    if (!token->index) { // 第一位创建子执行者，并观察暂不可join的主执行者目标。
         void *output = (void *)(uintptr_t)99; // 尚未支持的对等join仍保留失败输出哨兵。
         require(pthread_create(&descendant, 0, leaf, token) == 0, "pthread nested create succeeds"); // 包由这个creator准备，资源归同一process。
-        require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread peer join unsupported"); // 保留当前主管理限制。
+        require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread primary target unsupported"); // 只是主目标暂不支持，普通worker之间已可收取。
         require(pthread_join(pthread_self(), 0) == EDEADLK, "pthread worker self join"); // 自己等待自己明确报告。
     }
     airi_yield(); // 在真正共享执行者之间交替，errno仍属于自己。

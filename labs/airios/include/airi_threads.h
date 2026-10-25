@@ -6,7 +6,7 @@ typedef long (*airi_thread_function)(void *argument); // 工作函数返回完�
 extern "C" { // 不要求宿主线程库。
 #endif // C直接声明。
 long airi_thread_create(airi_thread_function function, void *argument); // 同进程任一执行者可创建，正TID或原始负错误，不修改errno。
-long airi_thread_join(long tid, long *result); // 仅主执行者收取同组一次结果，NULL可丢弃，0成功或负错误。
+long airi_thread_join(long tid, long *result); // 同组执行者可唯一收取worker，NULL可丢弃；自等/环-35，重复认领-22，主目标-95。
 long airi_thread_id(void); // 有效静态TLS头直接提供当前TID，旧版本退回42号；同进程PID仍共享。
 uint64_t airi_thread_syscalls(void); // 当前执行者累计用户请求数，含本次查询，fork/worker重新开始，exec保留。
 long airi_futex_wait(uint32_t *word, uint32_t expected, unsigned ticks); // 私有键、四字节对齐，有限PIT预算；0通知、-11值不符、-110到期。

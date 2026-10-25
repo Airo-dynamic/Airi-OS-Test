@@ -202,3 +202,8 @@ airi_queue_elf_end: /* 右端不含字节。 */
 airi_pthread_elf_start: /* 从ELF头开始装载。 */
 .incbin AIRI_PTHREAD_ELF /* 自有适配器与真实用户观察。 */
 airi_pthread_elf_end: /* 范围右端不包含字节。 */
+.balign 16 /* 对等收取与闭环拒绝的实际用户映像。 */
+.global airi_join_elf_start, airi_join_elf_end /* 目录借用完整ELF边界。 */
+airi_join_elf_start: /* 包含文件头和所有用户段。 */
+.incbin AIRI_JOIN_ELF /* 不借宿主线程演示。 */
+airi_join_elf_end: /* 右端不包含字节。 */
