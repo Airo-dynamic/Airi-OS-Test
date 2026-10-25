@@ -1,4 +1,6 @@
 #include <pthread.h> // 默认ERRORCHECK映射、属性与初始化状态。
+#include <airi_pthread_internal.h> // 条件等待将使用的内部存活引用，不作为应用接口。
+#include <airi_threads.h> // 取得当前运行头的真实身份。
 #include <errno.h> // pthread直接返回正错误号。
 static int aligned(const void *pointer, unsigned alignment) { // 只检查显式形状，不能验证任意映射或对象寿命。
     return pointer && !((uintptr_t)pointer % alignment); // 参数保持有效仍由调用者保证。
@@ -35,12 +37,13 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attrib
     if (!aligned(mutex, _Alignof(pthread_mutex_t)) || (attributes && !attribute_valid(attributes))) return EINVAL; // 不读mutex旧状态，不以未初始化字节猜是否活锁。
     if (attributes && attributes->type != PTHREAD_MUTEX_ERRORCHECK) return ENOTSUP; // 不接入手改的其他策略。
     mutex->core = (airi_mutex)AIRI_MUTEX_INITIALIZER; // 当前独占构造，不与正在使用的锁并发。
+    __atomic_store_n(&mutex->wait_users, 0, __ATOMIC_RELAXED); // 独占构造，尚无释放后重取的使用者。
     __atomic_store_n(&mutex->state, AIRI_PTHREAD_MUTEX_READY, __ATOMIC_RELEASE); // 形成可用标记，属性指针不保存到对象。
     return 0; // 成功为空闲互斥。
 }
 int pthread_mutex_destroy(pthread_mutex_t *mutex) { // 调用者已经停止所有将来的锁访问，检查不能替代这个寿命约定。
     if (!initialized(mutex)) return EINVAL; // 当前诊断已销毁状态。
-    if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->core.contenders, __ATOMIC_SEQ_CST)) return EBUSY; // 活所有权或慢路径都不能撤销标记。
+    if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->core.contenders, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->wait_users, __ATOMIC_SEQ_CST)) return EBUSY; // 包括暂时不持锁、以后仍须重取的等待者。
     __atomic_store_n(&mutex->state, 0, __ATOMIC_RELEASE); // 仅静止对象销毁，底层两字段已为0。
     return 0; // 可在之后无并发地重新init。
 }
@@ -60,4 +63,20 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) { // 释放仍依赖底层TID�
     if (!initialized(mutex)) return EINVAL; // 不绕过销毁标记。
     long result = airi_mutex_unlock(&mutex->core); // 普通写发布及参与者通知沿已有协议。
     return result < 0 ? (int)-result : 0; // 外人或空锁为EPERM，已经释放的通知错误仍如实报告。
+}
+int __airi_pthread_mutex_wait_ref(pthread_mutex_t *mutex) { // 仅由内部等待协议在仍持有应用锁时登记。
+    if (!initialized(mutex)) return EINVAL; // 不引用已销毁对象。
+    if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) != airi_thread_id()) return EPERM; // 未持锁时不允许凭空保留。
+    uint32_t count = __atomic_load_n(&mutex->wait_users, __ATOMIC_RELAXED); // 修改均由同一core所有者串行，销毁检查仍原子读。
+    if (count == UINT32_MAX) return EAGAIN; // 拒绝回绕，失败不改变引用。
+    __atomic_store_n(&mutex->wait_users, count + 1, __ATOMIC_SEQ_CST); // 必须先登记再释放core。
+    return 0; // 不改变锁的所有权或errno。
+}
+int __airi_pthread_mutex_wait_unref(pthread_mutex_t *mutex) { // 同一次内部操作重新取得应用锁以后归还。
+    if (!initialized(mutex)) return EINVAL; // 配对期间对象必须仍有效。
+    if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) != airi_thread_id()) return EPERM; // 不能先减引用再去重新争取锁。
+    uint32_t count = __atomic_load_n(&mutex->wait_users, __ATOMIC_RELAXED); // 同一core排除其他引用修改者。
+    if (!count) return EINVAL; // 配对错误不能下溢为巨大引用数。
+    __atomic_store_n(&mutex->wait_users, count - 1, __ATOMIC_SEQ_CST); // 当前已重获core，后续普通unlock完成访问。
+    return 0; // 引用不是通知信用，也不授予访问普通数据的权利。
 }

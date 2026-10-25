@@ -91,6 +91,7 @@ extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX�
 extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
 extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
 extern const uint8_t airi_futex64_elf_start[], airi_futex64_elf_end[]; // 同地址宽度隔离和完整64位比较。
+extern const uint8_t airi_mutex_lifetime_elf_start[], airi_mutex_lifetime_elf_end[]; // 暂释互斥期间的存活引用。
 extern const uint8_t airi_events64_elf_start[], airi_events64_elf_end[]; // 完整数值快照与独立推进/通知。
 extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
@@ -134,6 +135,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
     {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
     {"futex64", airi_futex64_elf_start, airi_futex64_elf_end}, // 宽键与原四字节键共存。
+    {"mutex-lifetime", airi_mutex_lifetime_elf_start, airi_mutex_lifetime_elf_end}, // 对象仍被操作引用时不能销毁。
     {"events64", airi_events64_elf_start, airi_events64_elf_end}, // 高位数据、输出错误和宽通知观察。
     {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
     {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。

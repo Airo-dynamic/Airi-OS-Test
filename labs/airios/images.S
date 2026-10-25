@@ -222,3 +222,8 @@ airi_futex64_elf_end: /* 右端不含字节。 */
 airi_events64_elf_start: /* 从静态ELF头开始。 */
 .incbin AIRI_EVENTS64_ELF /* 不以宿主计算结果替代guest。 */
 airi_events64_elf_end: /* 右端不含字节。 */
+.balign 16 /* 互斥对象引用的实际用户程序。 */
+.global airi_mutex_lifetime_elf_start, airi_mutex_lifetime_elf_end /* 只读ELF范围。 */
+airi_mutex_lifetime_elf_start: /* 文件头起点。 */
+.incbin AIRI_MUTEX_LIFETIME_ELF /* 构建的同一静态产物。 */
+airi_mutex_lifetime_elf_end: /* 右端不含。 */

@@ -1,0 +1,26 @@
+checkpoint: K68
+baseline: baseline.yaml
+start: K67
+current_operation: worker持锁登记、释放后仍保留对象、重新取得再归还，主验证可用但不可销毁
+already_explained:
+- concept: 互斥初始化与销毁
+  at: ../../../dev-log/core/65-pthread-mutex.md#pmutex-object-lifetime
+  establishes: state诊断不替代外部寿命控制，owner与contenders为忙，不能并发销毁
+- concept: 标准形状线程创建和收拢
+  at: ../../../dev-log/core/62-pthread-entry.md
+  establishes: pthread回调运行在真实worker，join成功才交付私人输出且错误直接返回正数
+first_use:
+- concept: 释放期间仍未结束的使用
+  at: ../../../dev-log/core/68-mutex-lifetime.md#mutex-lifetime-model
+  establishes: owner0不等于无人还要重取，wait_users保留对象但不授予数据访问
+- concept: 配对与先后次序
+  at: ../../../dev-log/core/68-mutex-lifetime.md#mutex-lifetime-implementation
+  establishes: ref先于unlock，unref后于重新lock，两者由同一core串行，非所有者拒绝，零计数不下溢
+- concept: 真实两个执行者观察
+  at: ../../../dev-log/core/68-mutex-lifetime.md#mutex-lifetime-main
+  establishes: worker释放后主可trylock但两次destroy忙，resume后原worker重取归还，join后才静止销毁
+borrowed:
+- component: 内部引用入口及原子阶段夹具
+  contract: 内部配对由调用方保证，不提供逐引用授权，阶段字不是条件变量实现
+feedback: []
+not_inferred: 不由运行推断掌握，不宣称条件变量通知、并发销毁、SMP或新Linux实测

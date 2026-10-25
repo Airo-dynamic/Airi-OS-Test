@@ -62,3 +62,5 @@ K56减少运行库反复取得TID的陷入，并检验fork复制普通TLS时不�
 [K66](../dev-log/core/66-futex64.md)将1改为仅高32位变化的0x1122334400000001，旧1宽等待立即不符；同址32/64各一等待者，两种通知顺序均隔离。它为宽变化序号提供机制，不是Linux ABI或旧event已升级的证明。
 
 [K67](../dev-log/core/67-wide-events.md)把版本数据、调用状态和实际通知人数分开观察；0在snapshot、wait、advance、notify各有合同。等待者仍重查，通知不形成以后可领取的信用。
+
+[K68](../dev-log/core/68-mutex-lifetime.md)为条件等待准备内部存活引用，不用夹具resume冒充pthread_cond_wait。对象继续存在与访问普通数据的权限分别由引用、core所有权保障，引用须先登记后释放、先重取后归还。

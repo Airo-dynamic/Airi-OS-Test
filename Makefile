@@ -659,3 +659,18 @@ $(OUT)/user/events64.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/t
 $(OUT)/labs/airios/images.o: $(OUT)/user/events64.elf
 # 路径仅供incbin消费。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_EVENTS64_ELF='"$(OUT)/user/events64.elf"'
+
+# 释放锁期间仍须保留对象的真实用户观察。
+$(OUT)/user/mutex-lifetime.o: labs/airios/mutex-lifetime.c
+# 目标目录与其他用户对象一致。
+	@mkdir -p $(dir $@)
+# 同一freestanding ABI，不导入宿主线程库。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 引用属于现有互斥实现，复用真正pthread创建与回收。
+$(OUT)/user/mutex-lifetime.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/mutex-lib.o $(OUT)/user/pthread-lib.o $(OUT)/user/pthread-mutex-lib.o $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/mutex-lifetime.o labs/airios/program.ld
+# 只选择实际guest对象。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 完整ELF进入初始目录。
+$(OUT)/labs/airios/images.o: $(OUT)/user/mutex-lifetime.elf
+# 与汇编incbin保持同一个产物路径。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MUTEX_LIFETIME_ELF='"$(OUT)/user/mutex-lifetime.elf"'

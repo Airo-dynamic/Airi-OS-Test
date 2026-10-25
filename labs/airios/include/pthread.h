@@ -10,8 +10,8 @@ typedef struct { uint64_t reserved; } pthread_attr_t; // 仅保留类型位置�
 #define PTHREAD_MUTEX_RECURSIVE 2 // 尚无重入计数，不接受此类型。
 #define AIRI_PTHREAD_MUTEX_READY 1u // 仅是用户库初始化标记，不是内核权限或映射有效证明。
 typedef struct { int type; unsigned ready; } pthread_mutexattr_t; // 调用者初始化/设置/销毁期间须独占这个属性对象。
-typedef struct { airi_mutex core; uint32_t state; } pthread_mutex_t; // core保护普通数据，state只诊断初始化生命周期。
-#define PTHREAD_MUTEX_INITIALIZER {AIRI_MUTEX_INITIALIZER, AIRI_PTHREAD_MUTEX_READY} // 在任何并发访问以前建立可用的默认互斥。
+typedef struct { airi_mutex core; uint32_t state, wait_users; } pthread_mutex_t; // core保护普通数据，wait_users保留已释放但还需重取的内部使用者。
+#define PTHREAD_MUTEX_INITIALIZER {AIRI_MUTEX_INITIALIZER, AIRI_PTHREAD_MUTEX_READY, 0} // 在任何并发访问以前建立可用的默认互斥。
 #ifdef __cplusplus // C++调用同一C实现。
 extern "C" { // 不链接宿主pthread。
 #endif // C直接声明。

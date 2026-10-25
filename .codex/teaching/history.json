@@ -404,6 +404,11 @@
       "id": "K67",
       "title": "K67 · 完整宽快照、错误状态与独立通知",
       "document": "dev-log/core/67-wide-events.md"
+    },
+    {
+      "id": "K68",
+      "title": "K68 · 释放互斥以后，仍未结束的对象使用",
+      "document": "dev-log/core/68-mutex-lifetime.md"
     }
   ]
 }

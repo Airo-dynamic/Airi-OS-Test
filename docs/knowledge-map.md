@@ -66,3 +66,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K66 宽度与私有键](../dev-log/core/66-futex64.md)实现完整高位比较、八字节对齐/跨度及同VA宽窄键隔离，两个通知先后顺序都只完成自己的执行者；用户原子发布不等于内核复制已支持SMP。
 
 [K67 完整值与状态](../dev-log/core/67-wide-events.md)解释为什么全部64位数据与负错误不能共享一个返回字，实际验证高位/全1快照、输出失败保持、无变化通知和仅推进不唤醒。
+
+[K68 对象寿命与所有权](../dev-log/core/68-mutex-lifetime.md)区分当前没人持锁与没有未完成使用。worker暂释后owner0/ref1，主可trylock但不能destroy，原worker重取归还并收拢后才静止销毁。
