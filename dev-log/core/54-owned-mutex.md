@@ -385,6 +385,29 @@ extern const uint8_t airi_posix_elf_start[], airi_posix_elf_end[]; // 显式链�
 
 mutex.elf 没有未解析符号，不借宿主 pthread 或 libatomic。另以 freestanding C++17 编译器检查了两个公共头的声明与聚合初始化；这只证明头可以被 C++ 源码包含，尚未证明 Server-Lib 或 C++ runtime 已能运行。
 
+
+
+这项头检查可以用以下完整输入复现。临时文件在 build 下，不进入内核镜像；-fsyntax-only 只解析类型、声明与调用，不链接函数或运行 C++ 程序。tool 仍选择当前工程已验证的目标编译器。
+
+先运行 `mkdir -p build`，新建临时文件 build/mutex-header.cpp，内容如下；它不进入源码清单或镜像：
+
+```cpp
+#include <airi_mutex.h> // 检查聚合类型和C链接函数声明
+#include <airi_threads.h> // 同一翻译单元也能包含共享执行接口
+static airi_mutex value = AIRI_MUTEX_INITIALIZER; // 只在创建工作者以前初始化
+long observe() { return airi_mutex_trylock(&value); } // 仅检查调用类型，不要求此处链接运行库
+```
+
+执行头检查：
+
+```sh
+PYTHONPATH=scripts python3 - <<'PYCODE'  # 复用工具选择规则生成一次编译参数列表
+import subprocess  # 启动目标编译器并检查退出码
+from tools import tool  # 选择当前LLVM目标工具，不直接借宿主C++运行库
+subprocess.run([tool('clang', 'llvm'), '-target', 'x86_64-unknown-none-elf', '-std=c++17', '-ffreestanding', '-fsyntax-only', '-Ilabs/airios/include', 'build/mutex-header.cpp'], check=True)  # 头兼容错误使本次命令失败
+PYCODE
+```
+
 [编译器原子内建文档](https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html)定义比较交换和内存序参数；本章实现及工作负载由本项目编写。[POSIX timed mutex](https://man7.org/linux/man-pages/man3/pthread_mutex_timedlock.3p.html)对时间参数、错误返回与 robust 有更完整约定，不能把当前负错误和 PIT 预算当成 pthread ABI。Linux 对照仍使用 p5-threads 中真正的 pthread mutex/condition queue；K53 的本轮 SSH255 没有进入执行，当前沿用未验证状态。
 
 下一步才能用这把锁保护共享分配器元数据；现有 K48 malloc 仍是单线程实现，不能因为同一镜像里出现了 mutex.elf 就自动当成线程安全。短期优化还包括减少无争用身份查询与无等待通知，均需单独观察调用路径及 fork/exec 后的身份更新。

@@ -1,7 +1,7 @@
 {
   "checkpoint": "K54",
   "document": "dev-log/core/54-owned-mutex.md",
-  "document_sha256": "d65a022cefd8883d4b2753e382f09e3e3a7a820fc08fd30b6d3720061defb2d3",
+  "document_sha256": "26f33173a0358e8a017c36da48d1823f3442e50f672eb0213258b8b9aa7ecce3",
   "reader": ".codex/teaching/readers/K54.yaml",
   "reader_sha256": "109e7bf2c3618cc596eea044e1bb2681fc1ed66951407c2e1ff146047cc8418f",
   "source": {
@@ -185,7 +185,8 @@
   "cxx_header": {
     "mode": "freestanding C++17 syntax only",
     "exit": 0,
-    "log": "artifacts/k54/cxx-header.log"
+    "log": "artifacts/k54/cxx-header.log",
+    "reproduction": "Complete temporary fixture and command included; executed in artifacts/k54/cxx-header-reproduction.log"
   },
   "not_verified": [
     "Robust recovery,recursion,fairness,PI,cancellation",
@@ -201,7 +202,7 @@
   "docs": {
     "checkpoints": 67,
     "owned_files": 172,
-    "comment_blocks": 664,
+    "comment_blocks": 665,
     "below_99_percent": 0,
     "review": "Continuous ownership, expected-value handoff, unchanged deadline and nonrobust death read against full implementation; literal and argument order checked"
   },
