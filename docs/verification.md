@@ -1,5 +1,11 @@
 # 当前路线的验证
 
+## K63：同进程嵌套创建与创建者槽复用（2026-10-25）
+
+任一执行者可调用39号创建同组worker，pthread入口同步放宽，join仍主管理。实际creator写TLS100/errno101后创建leaf，leaf从模板42/errno0开始并改321/201。主先join creator，再用replacement复用它的slot/TP，replacement结束后才开leaf门；leaf保持自己的活TID/TCB/TLS并返回原main参数。
+
+完整默认test退出0；36次worker创建/返回，新增creator日志按真实关系核对，不依赖全局创建先后。178份纯主线独立重建结果见[K63记录](../.codex/teaching/validation/K63.json)；76节点、185份实现与链接通过，822块旁注无低于99%项，源码、实际值与连续正文另核对。只放宽普通创建，不把return等同于进程exit，未宣称peer join、完整POSIX或新Linux/GUI实测。
+
 ## K62：类型正确的pthread线程入口子集（2026-10-25）
 
 create/join/self/equal通过自有共享执行者运行，void*函数由正确long适配器调用，启动包在失败时由创建者归还、成功时由worker复制/free后调用业务。私人long槽承接内核join，再成功提交void*；正错误保持errno，属性及worker对等管理ENOTSUP。

@@ -379,6 +379,11 @@
       "id": "K62",
       "title": "K62 · 正确的线程函数、指针结果与错误返回",
       "document": "dev-log/core/62-pthread-entry.md"
+    },
+    {
+      "id": "K63",
+      "title": "K63 · 工作者也能创建，创建者结束不带走子执行者",
+      "document": "dev-log/core/63-nested-workers.md"
     }
   ]
 }

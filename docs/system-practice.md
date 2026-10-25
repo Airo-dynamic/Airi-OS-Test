@@ -52,3 +52,5 @@ K56减少运行库反复取得TID的陷入，并检验fork复制普通TLS时不�
 [K61](../dev-log/core/61-bounded-queue.md)实际两生产者/两消费者处理48项，以位图排除重复并核对和值1176、平方和38024。四槽限制排队不限制所有在途计算，关闭先拒绝新增再排空，线程结果体现工作完成。
 
 [K62](../dev-log/core/62-pthread-entry.md)验证同一用户参数经过真实线程返回给join，34位执行者的包在回调前归还，容量失败不泄漏，malloc失败也不改调用者errno。主/worker资源能力仍有明确边界。
+
+[K63](../dev-log/core/63-nested-workers.md)让worker真实创建leaf，creator已join且旧槽运行过replacement以后leaf仍能恢复。普通函数返回与进程组exit分开，参数不得借用已结束创建者的局部栈。

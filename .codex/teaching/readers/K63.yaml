@@ -1,0 +1,29 @@
+checkpoint: K63
+baseline: baseline.yaml
+start: K62
+current_operation: worker创建同进程leaf，主先收拢creator并重用其槽，再恢复仍存活的leaf
+already_explained:
+- concept: 进程资源与执行现场
+  at: ../../../dev-log/core/52-shared-executions.md#thread-resource-owner
+  establishes: current持共享映射/FD，running各自持现场、栈、TLS，槽可复用不表示身份可复用
+- concept: 正确类型启动包交接
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-create-ownership
+  establishes: 创建失败包归调用者，成功归worker，用户参数本体仍借用，函数可早于create返回执行
+- concept: 版本化身份发布
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-tcb-publication
+  establishes: 模板初值与运行身份分开，复用槽可运行前写新TCB
+first_use:
+- concept: 任一创建者与process资源归属
+  at: ../../../dev-log/core/63-nested-workers.md#nested-resource-owner
+  establishes: current不变而running是实际creator，FPU复制running、TLS来自ELF模板；失败在创建者栈回滚目标
+- concept: 创建者结束不结束leaf
+  at: ../../../dev-log/core/63-nested-workers.md#nested-lifetime-observation
+  establishes: 先join creator后复用原槽/TP，leaf保留321/201及自己TCB，参数由main持有而非creator工作栈
+- concept: 交错日志的创建关系
+  at: ../../../dev-log/core/63-nested-workers.md#nested-host-relationship
+  establishes: 按creator分组，不假设全局前两条，元组切片比较slot/TP，返回顺序加真实等待确认活寿命
+borrowed:
+- component: 既有共享malloc、静态TLS、独立内核栈和私有等待
+  contract: 八工作槽、固定单CPU；本节只放宽create，join仍主管理，其他POSIX缺项保持
+feedback: []
+not_inferred: 复用和运行不推断掌握；无新Linux/GUI或SMP结论

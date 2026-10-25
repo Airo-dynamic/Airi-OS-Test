@@ -5,9 +5,9 @@ static _Thread_local unsigned char runtime_anchor __attribute__((used)); // 选�
 extern void airi_thread_entry(void); // 汇编桥接器被静态链接到当前用户可执行段。
 static long thread_call(long number, uint64_t first, uint64_t second, uint64_t third) { // 与既有int80前三参数约定相同。
     __asm__ volatile("int $0x80" : "+a"(number) : "D"(first), "S"(second), "d"(third) : "memory", "cc"); // 内存clobber让调用边界不隐瞒共享读写。
-    return number; // 负错误保持，不映射成尚未实现的pthread返回规则。
+    return number; // 保持原始负错误，正错误翻译由上层pthread适配器负责。
 }
-long airi_thread_create(airi_thread_function function, void *argument) { // 主执行者不复制自己的用户栈或TLS运行值。
+long airi_thread_create(airi_thread_function function, void *argument) { // 创建者不复制自己的用户栈或TLS运行值，新worker从映像模板建立。
     return thread_call(39, (uintptr_t)airi_thread_entry, (uintptr_t)function, (uintptr_t)argument); // 两个代码地址均由内核检查为用户RX。
 }
 long airi_thread_join(long tid, long *result) { // 内核在输出前核对完整long跨度。

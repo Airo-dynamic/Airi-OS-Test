@@ -938,9 +938,7 @@ static void worker_zero(uint64_t address, unsigned pages) { // 所有页已完�
         airi_memset(airi_memory_direct(physical), 0, 4096); // 每页起点已4096对齐，清完整缓存内容。
     }
 }
-static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) { // 首版仅主执行者管理额外执行链。
-    if (running != &current->execution) // 工作者不能递归创建，生命周期由主执行者统一收拢。
-        return -16; // -EBUSY。
+static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) { // 同进程任一执行者可创建，新增资源仍由process统一持有。
     if (!worker_code(entry) || !worker_code(function)) // 先验证两个真实代码地址，再分配任何内存。
         return -14; // -EFAULT，数据页或内核地址不能成为返回入口。
     if (next_pid == UINT32_MAX) // 与进程身份共享单调空间，不回绕重用旧TID。
@@ -971,7 +969,7 @@ static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) 
         execution->fs_base = tls + current->tls.pointer_offset; // TP仍按既有local-exec负偏移布局。
 
     }
-    execution->initial = (struct airi_trap_frame){0}; // 首次工作入口没有继承主执行者的GPR。
+    execution->initial = (struct airi_trap_frame){0}; // 首次工作入口没有复制创建者GPR或用户调用栈。
     execution->initial.rip = entry; // 用户库汇编桥接器负责调用真正工作函数和提交返回值。
     execution->initial.rdi = function; // 桥接器的第一个寄存器参数是函数地址。
     execution->initial.rsi = argument; // 第二个参数是不由内核解引用的用户数值。
@@ -984,9 +982,9 @@ static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) 
     if (current->tls.memory_bytes) write_tcb(current, execution->fs_base, execution->tid); // 新槽和复用槽都在可运行前取得自己的身份。
     place_frame(execution); // 现场进入本执行者自己的内核栈。
     execution->state = USER_RUNNABLE; // 最后发布运行资格，IRQ此前只能看见空槽。
-    airi_log("[THREAD_CREATE] pid=%u tid=%u slot=%u tp=0x%llx", current->pid, execution->tid, index, (unsigned long long)execution->fs_base); // 记录真实共享身份与本地寻址起点。
-    return execution->tid; // 返回TID，仍不是pthread_t或Linux clone ABI。
-failed: // 当前仍在主执行者栈上，可以立即收回尚未运行的工作者资源。
+    airi_log("[THREAD_CREATE] pid=%u tid=%u slot=%u tp=0x%llx creator=%u", current->pid, execution->tid, index, (unsigned long long)execution->fs_base, running->tid); // 创建者身份只作观察，不把新执行者资源绑定到创建者寿命。
+    return execution->tid; // 返回原始TID，不是pthread_create的0/正错误合同，也不是Linux clone ABI。
+failed: // 当前仍在创建者的内核栈上，可以立即收回尚未运行的目标资源。
     while (current->memory.count > before) { // 只处理本次新增项，不能释放旧缓存页面。
         const struct user_page *page = owned_at(&current->memory, --current->memory.count); // 先退到最后一项有效所有权。
         if (!airi_vm_unmap(&current->memory.space, page->address) || !airi_memory_return_page(page->physical)) // 活动根先断映射，再归还数据页。
@@ -994,7 +992,7 @@ failed: // 当前仍在主执行者栈上，可以立即收回尚未运行的工
     }
     trim_records(&current->memory); // 新增但未使用的尾部记录页一并收回。
     destroy_execution(execution); // 栈/FPU的成功部分可独立归还，不关闭进程共享资源。
-    return -12; // -ENOMEM，主执行者和其他已运行工作者保持。
+    return -12; // -ENOMEM，调用者和其他已运行执行者保持。
 }
 static struct airi_trap_frame *join_worker(struct airi_trap_frame *frame) { // 本轮只有主执行者能收取同组工作结果。
     if (running != &current->execution) // 不支持工作者之间的join图或自建管理树。

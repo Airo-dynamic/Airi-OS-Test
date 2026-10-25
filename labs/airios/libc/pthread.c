@@ -21,7 +21,6 @@ int pthread_equal(pthread_t left, pthread_t right) { // 本实现身份载体是
 int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument) { // 默认可join线程的最小源码路径。
     if (!thread || (uintptr_t)thread % _Alignof(pthread_t) || !function) return EINVAL; // 显式坏输出/函数在分配前拒绝，其他无效用户地址仍可故障。
     if (attributes) return ENOTSUP; // 不把未实现的栈、调度或detach属性当作生效。
-    if (pthread_self() != (pthread_t)airi_getpid()) return ENOTSUP; // 当前生命周期仍由主执行者管理，worker递归创建明确拒绝。
     int saved = errno; // malloc可能设置ENOMEM，但pthread返回规则不允许改调用者errno。
     struct start_packet *packet = malloc(sizeof(*packet)); // 启动包跨创建者栈寿命，不借一个很快失效的局部对象。
     if (!packet) { errno = saved; return EAGAIN; } // 资源不足通过正返回值报告。

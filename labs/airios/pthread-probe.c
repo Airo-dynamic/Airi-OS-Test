@@ -10,22 +10,38 @@ static struct token tokens[8]; // main写index以后才创建，identity只在jo
 static pthread_t primary; // 创建任何worker以前写入，之后只读。
 static airi_event gate = AIRI_EVENT_INITIALIZER; // 八容量worker等待主统一发布。
 static _Atomic unsigned ready; // 回调开始时启动包已经被适配器释放。
+static _Thread_local unsigned local_marker = 42; // 嵌套创建仍从模板开始，不复制创建者运行值。
+static pthread_t descendant, descendant_self; // 第一位creator写descendant，root在join creator以后读；leaf写自身参考。
+static airi_event descendant_gate = AIRI_EVENT_INITIALIZER; // 保持子执行者活到创建者槽被重用以后。
+static _Atomic unsigned descendant_ready; // 发布leaf已经设置自己的TLS和身份。
 static void require(int condition, const char *message) { // 失败结束本真实进程组。
     if (!condition) { airi_puts(message); airi_puts("\n"); airi_exit(88); } // 不继续输出成功标记。
 }
+static void *leaf(void *argument) { // 创建者是worker而不是主执行者。
+    require(errno == 0 && local_marker == 42, "nested worker fresh TLS"); // 不继承creator的101和100。
+    descendant_self = pthread_self(); errno = 201; local_marker = 321; // 本次执行者独有的运行值。
+    atomic_store_explicit(&descendant_ready, 1, memory_order_release); // root可确认初始化已实际发生。
+    uint64_t start = airi_ticks(); // 等待仍有固定预算。
+    while (airi_event_sequence(&descendant_gate) == 0) { // creator先结束，其槽随后另作他用。
+        uint64_t elapsed = airi_ticks() - start; // 共享时钟经过时间，不续借预算。
+        require(elapsed < 200 && airi_event_wait(&descendant_gate, 0, (unsigned)(200 - elapsed)) == 0, "nested worker gate"); // 原执行现场保留。
+    }
+    require(errno == 201 && local_marker == 321 && pthread_equal(pthread_self(), descendant_self), "nested worker survives creator reuse"); // 创建者槽复用不污染仍存活的子TLS/TCB。
+    return argument; // 原main持有的token仍有效，不借creator已经结束的栈。
+}
 static void *echo(void *argument) { // 真正的POSIX形状函数，不强转函数指针。
     struct token *token = argument; // 用户参数保持到主join以后。
-    require(errno == 0 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
+    require(errno == 0 && local_marker == 42 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
     token->identity = pthread_self(); // 只写自己那一份输出，主尚未读取。
-    errno = 101 + (int)token->index; // 每位执行者保存不同错误哨兵。
-    if (!token->index) { // 第一位观察未支持的worker管理能力。
-        pthread_t untouched = 777; void *output = (void *)(uintptr_t)99; // 失败输出哨兵。
-        require(pthread_create(&untouched, 0, echo, token) == ENOTSUP && untouched == 777, "pthread nested create unsupported"); // 不能悄悄创建后返回失败。
+    errno = 101 + (int)token->index; local_marker = 100 + token->index; // 每位执行者保存不同运行值。
+    if (!token->index) { // 第一位创建子执行者，并保留尚未支持的对等join观察。
+        void *output = (void *)(uintptr_t)99; // 尚未支持的对等join仍保留失败输出哨兵。
+        require(pthread_create(&descendant, 0, leaf, token) == 0, "pthread nested create succeeds"); // 包由这个creator准备，资源归同一process。
         require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread peer join unsupported"); // 保留当前主管理限制。
         require(pthread_join(pthread_self(), 0) == EDEADLK, "pthread worker self join"); // 自己等待自己明确报告。
     }
     airi_yield(); // 在真正共享执行者之间交替，errno仍属于自己。
-    require(errno == 101 + (int)token->index, "pthread worker errno private"); // pthread调用和别人的TLS不污染它。
+    require(errno == 101 + (int)token->index && local_marker == 100 + token->index, "pthread worker errno private"); // pthread调用和别人的TLS不污染它。
     return token; // 目标返回值不是启动包，而是仍存活的用户对象。
 }
 static void *held(void *argument) { // 容量worker从回调开始就不再占启动包。
@@ -37,7 +53,7 @@ static void *held(void *argument) { // 容量worker从回调开始就不再占�
     }
     return argument; // 八个结果分别指回自己的token。
 }
-int main(void) { // 所有创建/收取都从主执行者开始。
+int main(void) { // 主安排观察并统一收取，实际创建也可发生在worker内。
     primary = pthread_self(); errno = 71; // 不把pthread_t的具体整数当可移植接口使用。
     pthread_t unchanged = 777; pthread_attr_t attributes = {0}; // 非NULL属性当前不支持，即使保留字为0。
     require(pthread_equal(primary, pthread_self()), "pthread equality"); // 只比较有效身份，不靠猜测下一个TID。
@@ -46,11 +62,19 @@ int main(void) { // 所有创建/收取都从主执行者开始。
     void *output = (void *)(uintptr_t)99; // join失败保持私人输出。
     require(pthread_join(primary, &output) == EDEADLK && pthread_join(0, &output) == ESRCH && pthread_join((pthread_t)UINT32_MAX + 1, &output) == ESRCH, "pthread invalid joins"); // 不窄化过宽值。
     require(output == (void *)(uintptr_t)99 && errno == 71, "pthread join failure preserves state"); // 正错误不写errno。
+    airi_puts("[PTHREAD_NESTED_BEGIN]\n"); // 宿主记录创建者、子执行者和原槽复用顺序。
     pthread_t threads[8]; // 只在create成功以后使用每个槽。
     for (unsigned i = 0; i < 2; ++i) { tokens[i].index = i; require(pthread_create(&threads[i], 0, echo, &tokens[i]) == 0 && errno == 71, "pthread initial create"); } // 新worker可以在下一次创建以前已经返回。
     require(!pthread_equal(threads[0], threads[1]), "pthread distinct live identities"); // 两个已创建尚未join的身份都仍有效。
-    require(pthread_join(threads[0], &output) == 0 && output == &tokens[0] && pthread_equal(tokens[0].identity, threads[0]), "pthread typed result"); // 指针完整往返，身份属于真实worker。
-    require(pthread_join(threads[1], 0) == 0 && pthread_equal(tokens[1].identity, threads[1]), "pthread discard result"); // NULL不省略收取。
+    require(pthread_join(threads[0], &output) == 0 && output == &tokens[0], "pthread typed result"); // creator已结束，之后不再用它的死身份调用equal。
+    uint64_t nested_start = airi_ticks(); // 有限等待leaf已进入自己的运行环境。
+    while (!atomic_load_explicit(&descendant_ready, memory_order_acquire)) { require(airi_ticks() - nested_start < 100, "nested worker ready"); airi_yield(); } // 不从创建成功推断已经运行。
+    require(airi_sleep(3) == 0, "nested worker actual wait"); // leaf仍在gate上，creator槽可先重用。
+    pthread_t replacement; tokens[2].index = 2; // 另一份长期参数，不与仍活着的leaf或echo1重叠写。
+    require(pthread_create(&replacement, 0, echo, &tokens[2]) == 0 && pthread_join(replacement, &output) == 0 && output == &tokens[2], "creator slot replacement"); // 最早空槽应复用creator，而非破坏leaf。
+    require(airi_event_publish(&descendant_gate) >= 0 && pthread_join(descendant, &output) == 0 && output == &tokens[0], "nested result after creator join"); // 真正子执行者从原调用继续并正常结束。
+    airi_puts("[PTHREAD_NESTED_OK] creator=joined slot=reused child=alive tls=fresh result=pointer\n"); // 宿主再用实际slot/TP/creator记录独立核对。
+    require(pthread_join(threads[1], 0) == 0, "pthread discard result"); // NULL不省略收取。
     output = (void *)(uintptr_t)99; require(pthread_join(threads[0], &output) == ESRCH && output == (void *)(uintptr_t)99 && errno == 71, "pthread already joined extension"); // 本实现不复用TID，旧身份明确拒绝；不可移植代码不依赖此扩展。
     for (unsigned i = 0; i < 8; ++i) require(pthread_create(&threads[i], 0, held, &tokens[i]) == 0 && errno == 71, "pthread capacity fill"); // 八个真实工作槽全部占用。
     uint64_t start = airi_ticks(); // 只等回调实际开始，不从创建成功推断包已释放。
@@ -74,6 +98,6 @@ int main(void) { // 所有创建/收取都从主执行者开始。
     free(reserve); // 所有借用都结束以后归还唯一观察大对象。
     after = airi_malloc_info(); // 页面可缓存，启动对象不能残留。
     require(after.live_objects == 0 && after.live_bytes == 0 && after.arena_bytes == 262144 && errno == 71, "pthread final allocator and errno"); // 不把缓存页面误判成包泄漏。
-    airi_puts("[PTHREAD_USER_OK] functions=typed result=pointer errno=preserved workers=34 capacity=8 failed_packet=freed alloc_failure=preserved reuse=24 attributes=unsupported\n"); // 正常、失败与资源边界实际完成后才输出。
+    airi_puts("[PTHREAD_USER_OK] functions=typed result=pointer errno=preserved workers=36 capacity=8 failed_packet=freed alloc_failure=preserved reuse=24 attributes=unsupported\n"); // 正常、失败与资源边界实际完成后才输出。
     return 0; // shell收取真实程序结果。
 }
