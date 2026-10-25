@@ -142,3 +142,5 @@ K53以进程对象和用户VA作为私有futex键，43号比较四字节条件�
 K54增加可由C/C++头包含的四字节私有互斥：强CAS以TID记录所有权，acquire/release交接普通数据，失败用K53等待并按唯一PIT截止重试。非持有者不能解锁，自重入-35；非robust持有者返回后字不自动清理。每次调用仍查询内核TID，unlock总通知一人，不记为零系统调用快速路径。K48分配器仍单线程。
 
 K55以私有heap_mutex保护用户分配器唯一arena、块链和三项统计。公开入口只加锁一次，calloc/realloc调用内部_unlocked操作，free不会因一次等待到期而丢弃。普通malloc.o与同源码定义AIRI_MALLOC_OBSERVE_YIELD的观察对象分别链接；后者只用于真实并发竞争验证。对象数据和指针交接仍由应用协议管理，页面缓存仍到exit/exec归还。
+
+K56将TP后既有16字节约定为self:uint64、tid:uint32、version:uint32。候选身份0不公开，root/fork/exec/worker在可运行前写真实TID；主块地址由校验后布局推导，不追随任意用户FS。线程库用used TLS anchor保留PT_TLS，有效头直接读TID，旧版本后备42号并记录真实查询。原无TLS但选用该库的程序会新增运行映射；头尺寸保持不等于总页数不变。当前unlock仍通知内核。

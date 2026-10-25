@@ -113,3 +113,5 @@ P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)
 [K54 用户互斥](dev-log/core/54-owned-mutex.md)以原子TID所有权、固定截止及futex重试保护普通数据，验证带锁yield、错误所有者和非robust死亡边界。
 
 [K55 共享分配器](dev-log/core/55-shared-malloc.md)将公开调用与内部操作分开，保护唯一arena与一致快照，验证四执行者分配和跨执行者归还。
+
+[K56 运行头身份](dev-log/core/56-runtime-identity.md)由内核在启动、原始fork、exec及工作槽复用时发布版本化TCB，普通TID读取留在用户态，后备查询有独立陷入证据。

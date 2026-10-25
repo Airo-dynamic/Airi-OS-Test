@@ -58,3 +58,5 @@ K52的共享进程资源、线程返回与进程退出、浮点环境继承参�
 K53的比较并等待、实际唤醒数与返回后重查条件参考 [Linux FUTEX_WAIT](https://man7.org/linux/man-pages/man2/FUTEX_WAIT.2const.html) 和 [FUTEX_WAKE](https://man7.org/linux/man-pages/man2/FUTEX_WAKE.2const.html)。内核等待、单CPU边界及用户观察由本项目编写，未复制Linux实现，不提供Linux futex ABI。T04的编辑器来自本项目MBP未提交教程工具更新，另追加检查点保留旧源码状态。
 
 K54的比较交换参数和内存序参考 [GCC原子内建](https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html)，时间与所有者死亡的对应边界参考 [POSIX mutex timedlock](https://man7.org/linux/man-pages/man3/pthread_mutex_timedlock.3p.html)。自有锁、TID所有权及PIT预算不是pthread ABI；没有引入外部原子或线程运行库。
+
+K56的TLS anchor保留依据 [Clang used属性](https://clang.llvm.org/docs/AttributeReference.html#used)，区分编译器保留和ELF链接回收；当前不启用--gc-sections。身份语义对照 [Linux gettid](https://man7.org/linux/man-pages/man2/gettid.2.html) 与 [pthread_self](https://man7.org/linux/man-pages/man3/pthread_self.3.html)，未复用glibc TCB或宣称pthread ABI。

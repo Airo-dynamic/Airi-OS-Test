@@ -344,6 +344,11 @@
       "id": "K55",
       "title": "K55 · 共享分配器，分别持有对象",
       "document": "dev-log/core/55-shared-malloc.md"
+    },
+    {
+      "id": "K56",
+      "title": "K56 · 从当前线程控制块取得身份",
+      "document": "dev-log/core/56-runtime-identity.md"
     }
   ]
 }

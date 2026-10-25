@@ -130,6 +130,19 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 assert '[FUTEX_WAIT]' in heap_threads # 观察编译明确在内部持锁yield，必须实际进入竞争等待。
                 heap_owner=re.search(r'\[EXEC_COMMIT\] pid=(\d+) program=heap-threads ',heap_threads) # 固定本条命令的真实进程身份。
                 assert heap_owner and len(re.findall(r'\[THREAD_CREATE\] pid='+heap_owner.group(1)+r' tid=',heap_threads))==4 and len(re.findall(r'\[THREAD_RETURN\] pid='+heap_owner.group(1)+r' tid=',heap_threads))==4 # join可以立即成功，不能强求特定阻塞时序。
+                offset=len(text); wire.sendall(b'identity\n'); text=wait('[SHELL_COMMAND_DONE] name=identity code=0',offset) # 运行头必须在raw fork、exec和工作者复用时更新。
+                identity_output=text[offset:] # 只核对这一条命令的真实查询。
+                assert '[IDENTITY_USER_OK] tcb=version1 fast=local fork=raw exec=fresh workers=3 reused=fresh fallback=queried' in identity_output and '[IDENTITY_EXEC_OK] tls=42 tcb=current version=1' in identity_output # 数据字段与原始查询均由guest比较。
+                identity_owner=re.search(r'\[EXEC_COMMIT\] pid=(\d+) program=identity ',identity_output) # 主执行者身份是本次命令真实PID。
+                assert identity_owner # 不能拿其他程序的查询日志校准。
+                queries=re.findall(r'\[THREAD_ID_QUERY\] pid=(\d+) tid=(\d+)',identity_output) # 原始42号入口记录实际陷入，不依赖用户计数。
+                assert len(queries)==7 and queries.count((identity_owner.group(1),identity_owner.group(1)))==2 # 主参考加版本后备两次、孩子前后两次、三位worker各一次。
+                identity_workers=re.findall(r'\[THREAD_CREATE\] pid='+identity_owner.group(1)+r' tid=(\d+) ',identity_output) # 三次创建中最后一次复用已join槽。
+                assert len(identity_workers)==3 and len(set(identity_workers))==3 # 身份不复用，槽可以复用。
+                for tid in identity_workers: # 每位跨PIT的计算执行者都只做一次参考42号查询。
+                    assert queries.count((identity_owner.group(1),tid))==1 # 大量快速读取和互斥调用不增加查询陷入。
+                    returned=re.search(r'\[THREAD_RETURN\] pid='+identity_owner.group(1)+r' tid='+tid+r' user_ticks=(\d+)',identity_output) # 独立用户tick来自真实IRQ。
+                    assert returned and int(returned.group(1))>=2 # 不把主动yield当抢占隔离证据。
                 for repetition in range(2): # 同一shell连续完成两次线程命令，上一组退出回收后应能重新创建。
                     offset=len(text); wire.sendall(b'threads\n'); text=wait('[SHELL_COMMAND_DONE] name=threads code=0',offset) # 真正同地址空间执行，不能由fork复制或宿主线程模拟。
                     thread_output=text[offset:] # 所有身份与标记均限定在这条命令之后。
@@ -158,7 +171,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'echo after-shell\n'); text=wait('[CONSOLE_UPDATE] view=0 commands=2 page=0',offset) # 回到内核后输入仍完整。
                 assert 'after-shell' in text[offset:] # 不只是退出而丢了后续UART。
                 result={'passed':True,'ring3_shell':True,'ram_file_and_device_readback':True,'other_user_during_cq_wait':True,'qmp_iops':1,'error_exec_survived':True,'returned_to_monitor':True,'orphan_rounds':24,'memory_reuse_rounds':128,'capacity_rounds':4,'capacity_pages':1024,'simd_preempt_fork_exec':True,'fs_base_preempt_fork_exec':True,'compiler_static_tls':True,'posix_errno_io_subset':True,'positioned_vectors':True} # 只发布已观察事实。
-                result.update(shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
+                result.update(runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
                 result_path.write_text(json.dumps(result,indent=2)+'\n'); print('PASS user shell: alloc/file/async wait/other task/CQ/readback, failed exec, return to monitor') # 阶段演示实际完成。
                 return result # 总入口可收集。
             finally: # 包括断言、超时和QEMU错误。

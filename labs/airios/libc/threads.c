@@ -1,5 +1,7 @@
+#include <airi/runtime_abi.h> // 同内核约定的16字节运行头，不复制内部控制块。
 #include <airi_threads.h> // 不借pthread或Linux clone包装。
 #include <stdint.h> // 指针以目标64位数值进入内核。
+static _Thread_local unsigned char runtime_anchor __attribute__((used)); // 选用该库的ELF必须保留PT_TLS，即使没有别的本地变量。
 extern void airi_thread_entry(void); // 汇编桥接器被静态链接到当前用户可执行段。
 static long thread_call(long number, uint64_t first, uint64_t second, uint64_t third) { // 与既有int80前三参数约定相同。
     __asm__ volatile("int $0x80" : "+a"(number) : "D"(first), "S"(second), "d"(third) : "memory", "cc"); // 内存clobber让调用边界不隐瞒共享读写。
@@ -11,8 +13,12 @@ long airi_thread_create(airi_thread_function function, void *argument) { // 主�
 long airi_thread_join(long tid, long *result) { // 内核在输出前核对完整long跨度。
     return thread_call(41, (uint64_t)tid, (uintptr_t)result, 0); // 未完成时调用链真正阻塞，不由库忙轮询。
 }
-long airi_thread_id(void) { // 只返回当前执行身份，不产生资源所有权。
-    return thread_call(42, 0, 0, 0); // PID仍使用原始airi_getpid查询。
+long airi_thread_id(void) { // 当前x86-64适配直接读取内核建立的TCB，不缓存fork会复制的旧TID。
+    const struct airi_runtime_tcb *control; // 此指针只在当前有效FS布局下借用，不跨执行者保存。
+    __asm__ volatile("movq %%fs:0,%0" : "=r"(control) :: "memory"); // 读取self用户VA，继续由当前用户页表翻译。
+    if (control->version != AIRI_RUNTIME_VERSION || !control->tid) // 旧版保留头可退回内核查询，不把0当真实身份。
+        return thread_call(42, 0, 0, 0); // 后备仍返回内核真实值，不更新或信任用户头进行授权。
+    return control->tid; // 有效头只做用户态读，fork/exec/worker更新由内核负责。
 }
 long airi_futex_wait(uint32_t *word, uint32_t expected, unsigned ticks) { // 不改errno，返回自有内核原始结果。
     return thread_call(43, (uintptr_t)word, expected, ticks); // 条件字由调用者以原子操作读写，内核只负责比较和阻塞。

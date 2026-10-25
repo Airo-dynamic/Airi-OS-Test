@@ -1,3 +1,4 @@
+#include <airi/runtime_abi.h> // 共享数值TCB布局，身份由内核在生命周期交接时更新。
 #include <airi/time_abi.h> // 单调时间只输出固定数值，用户指针由当前根验证。
 #include <airi/vector_abi.h> // 向量描述在一次内核调用内完整复制，文件操作前检查本次前缀。
 #include <airi/tls.h> // 每次真实用户陷入取回FS，内核处理期间清零。
@@ -82,6 +83,7 @@ extern const uint8_t airi_hello_elf_start[], airi_hello_elf_end[]; // 既有独�
 extern const uint8_t airi_process_elf_start[], airi_process_elf_end[]; // 新的fork/wait和抢占工作负载。
 extern const uint8_t airi_vector_elf_start[], airi_vector_elf_end[]; // 显式偏移向量正常与坏范围观察。
 extern const uint8_t airi_malloc_elf_start[], airi_malloc_elf_end[]; // 用户对象分配与页面缓存的独立ELF。
+extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
 extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
 extern const uint8_t airi_futex_elf_start[], airi_futex_elf_end[]; // 私有内存等待与通知的真实用户程序。
@@ -116,6 +118,8 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"vector", airi_vector_elf_start, airi_vector_elf_end}, // 聚合、分散、短前缀与错误原子性。
     {"heap", airi_malloc_elf_start, airi_malloc_elf_end}, // 单线程用户对象与错误路径。
     {"heap-reset", airi_malloc_elf_start, airi_malloc_elf_end}, // 同一ELF新BSS和按需arena。
+    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
+    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
     {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
     {"mutex", airi_mutex_elf_start, airi_mutex_elf_end}, // 临界区、错误所有者、截止与非robust寿命。
     {"futex", airi_futex_elf_start, airi_futex_elf_end}, // 相等比较与登记、超时及进程私有键。
@@ -247,6 +251,16 @@ static bool copy_user(struct user_process *p, void *buffer, uint64_t address, si
         done += part; // 推进下一段。
     }
     return true; // 同步结束，不借出buffer指针。
+}
+_Static_assert(sizeof(struct airi_runtime_tcb) == 16, "runtime header must fit existing TCB reservation"); // 保持ELF TLS页预算与负偏移布局。
+static void write_tcb(struct user_process *p, uint64_t address, unsigned tid) { // 只接装载器计算出的已拥有TCB位置，不相信用户保存的FS或self值。
+    struct airi_runtime_tcb control = {address, tid, AIRI_RUNTIME_VERSION}; // self是用户VA，身份是当前内核分配的数值。
+    if (!copy_user(p, &control, address, sizeof(control), true)) // 通过目标进程页表写自己的映射，允许目标根尚未活动。
+        airi_panic("cannot publish prepared runtime TCB"); // 已准备映射不变量错误不能发布半个身份。
+}
+static void write_primary_tcb(struct user_process *p) { // fork/exec只允许已收拢worker的主执行者。
+    if (p->tls.memory_bytes) // 没有PT_TLS的旧程序仍FS=0，不读写不存在的TCB。
+        write_tcb(p, USER_TLS + p->tls.pointer_offset, p->execution.tid); // 固定运行块位置来自校验后布局，不跟随任意用户FS修改。
 }
 static long file_transfer(struct user_process *p, uint64_t fd, uint64_t address, size_t bytes, bool write, bool positioned, uint64_t offset) { // 允许在另一根的阻塞进程上重试，同步副本属于当前内核栈。
     char buffer[256]; // 一次有界副本，不跨调度保留。
@@ -539,9 +553,7 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
         if (view.tls.file_bytes && !copy_user(p, (void *)(view.image + view.tls.offset), data, (size_t)view.tls.file_bytes, true)) // 按目标页查物理别名，初值可能跨页。
             goto failed; // 只复制filesz，memsz剩余保持owned_page的零填充。
         p->execution.fs_base = USER_TLS + view.tls.pointer_offset; // TP位于TLS数据之后，不指向模板p_vaddr。
-        uint64_t control[2] = {p->execution.fs_base, 0}; // FS:0为self，第二字保留给后续自有运行库。
-        if (!copy_user(p, control, p->execution.fs_base, sizeof(control), true)) // TCB属于当前新用户根，不能直接写未活动用户VA。
-            goto failed; // 未完整建立TP不发布可运行状态。
+        write_tcb(p, p->execution.fs_base, 0); // 私有候选尚无身份；发布之前再写真实TID，不让用户观察0。
         airi_log("[ELF_TLS] bytes=%llu initialized=%llu alignment=%llu pages=%u data=0x%llx tp=0x%llx", (unsigned long long)view.tls.memory_bytes, (unsigned long long)view.tls.file_bytes, (unsigned long long)view.tls.alignment, view.tls.pages, (unsigned long long)data, (unsigned long long)p->execution.fs_base); // 模板与运行位置分别可观察。
     }
     p->tls = view.tls; // 保存已校验模板布局，不能从后来修改过的主TLS复制初值。
@@ -715,6 +727,7 @@ static long fork_current(struct airi_trap_frame *parent_frame) { // 首版逐页
     child->execution.tid = child->pid; // 初始执行者的TID与PID数值相同。
     child->tls = parent->tls; // fork复制用户TLS当前值，后续新工作者仍从原ELF模板建立。
     child->tls_image = parent->tls_image; // 只读输入字节由内核目录长期持有。
+    write_primary_tcb(child); // 用户TLS值继续复制，TCB身份必须改为孩子，直接raw fork也成立。
     child->parent = parent->pid; // 关系用身份而不是可能复用的槽指针表示。
     if (airi_async_open(child->pid)) // fork创建空上下文，用户内存里的父handle整数并不授权子访问。
         goto failed; // 其余子资源统一回滚，父不变。
@@ -868,6 +881,7 @@ static long exec_current(struct airi_trap_frame *f) { // 成功不返回旧用�
     running->fpu_physical = next.execution.fpu_physical; // 替换为准备好的默认x87/SSE状态。
     next.execution.fpu_physical = 0; // 候选从此不能再归还这页。
     running->fs_base = next.execution.fs_base; // 新映像的静态TLS指针，或无TLS时的0。
+    write_primary_tcb(current); // 新TLS初值已经接入，继续使用原进程主TID，而不是候选的0。
     running->initial = next.execution.initial; // 保存新入口数值，不保存指向候选栈局部对象的指针。
     running->frame = f; // 原内核陷入栈及TSS继续属于同一执行者。
     *f = running->initial; // 全部可失败准备完成之后才覆盖旧RIP/RSP和寄存器。
@@ -946,9 +960,7 @@ static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) 
         if (current->tls.file_bytes && !copy_user(current, (void *)(current->tls_image + current->tls.offset), tls + current->tls.data_offset, (size_t)current->tls.file_bytes, true)) // 布局已在装载时校验。
             airi_panic("cannot initialize prepared worker TLS"); // 映射不应在不可抢占准备中改变。
         execution->fs_base = tls + current->tls.pointer_offset; // TP仍按既有local-exec负偏移布局。
-        uint64_t control[2] = {execution->fs_base, 0}; // 当前工作者自己的self指针与保留槽。
-        if (!copy_user(current, control, execution->fs_base, sizeof(control), true)) // 只向已准备的TCB范围写入。
-            airi_panic("cannot initialize worker TCB"); // 不发布半初始化FS。
+
     }
     execution->initial = (struct airi_trap_frame){0}; // 首次工作入口没有继承主执行者的GPR。
     execution->initial.rip = entry; // 用户库汇编桥接器负责调用真正工作函数和提交返回值。
@@ -960,6 +972,7 @@ static long create_worker(uint64_t entry, uint64_t function, uint64_t argument) 
     execution->initial.rflags = 0x202; // 用户中断开启，无I/O特权。
     execution->process = current; // 共享既有内存、FD和异步owner，不打开第二份资源表。
     execution->tid = next_pid++; // 全部准备完成以后才发布新的执行身份。
+    if (current->tls.memory_bytes) write_tcb(current, execution->fs_base, execution->tid); // 新槽和复用槽都在可运行前取得自己的身份。
     place_frame(execution); // 现场进入本执行者自己的内核栈。
     execution->state = USER_RUNNABLE; // 最后发布运行资格，IRQ此前只能看见空槽。
     airi_log("[THREAD_CREATE] pid=%u tid=%u slot=%u tp=0x%llx", current->pid, execution->tid, index, (unsigned long long)execution->fs_base); // 记录真实共享身份与本地寻址起点。
@@ -1314,8 +1327,10 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         return return_worker(f); // 不关闭进程共享FD或异步owner。
     else if (f->rax == 41) // 主执行者收取一次同组工作结果。
         return join_worker(f); // 未完成时真正阻塞于原frame。
-    else if (f->rax == 42) // 执行身份与共享PID分别查询。
-        f->rax = running->tid; // 同组工作者的TID各自不同。
+    else if (f->rax == 42) { // 原始查询保留为参考与版本后备，不读取用户TCB授权。
+        f->rax = running->tid; // 内核身份始终来自真实正在运行的执行者。
+        airi_log("[THREAD_ID_QUERY] pid=%u tid=%u", current->pid, running->tid); // 普通系统调用中记录真实陷入，不能用用户缓存计数冒充。
+    }
     else if (f->rax == 43) { // 自有私有futex等待，超时单位为名义PIT tick，不是Linux ABI。
         uint32_t value; // 本次比较取得四字节数值副本，不跨阻塞保留HHDM指针。
         uint64_t now = airi_timer_ticks(); // 截止只计算一次，不因轮询延长。
@@ -1373,6 +1388,7 @@ static int launch(const uint8_t *image, size_t bytes, const char *name, bool elf
     root->pid = next_pid++; // 完整准备后才取得运行身份。
     root->execution.process = root; // 会话主执行者显式借所属进程。
     root->execution.tid = root->pid; // 主TID初始与PID相同，额外执行者另取身份。
+    write_primary_tcb(root); // 初次发布时补上真实TID，flat/noTLS映像不写任何运行块。
     int async_error = airi_async_open(root->pid); // 完整映像准备后才登记新进程资源上下文。
     if (async_error) { // 未向用户发布，此时根与栈不活动。
         cleanup(root); // 回滚页面、FD与内核栈，尚未拥有异步owner。

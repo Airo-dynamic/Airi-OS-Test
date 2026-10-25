@@ -542,3 +542,12 @@ $(OUT)/user/heap-threads.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/hea
 $(OUT)/labs/airios/images.o: $(OUT)/user/heap-threads.elf
 # 路径宏只交给只读incbin包装。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_HEAP_THREADS_ELF='"$(OUT)/user/heap-threads.elf"'
+
+# 身份观察链接自有线程与锁库，PT_TLS由本地运行库anchor显式保留。
+$(OUT)/user/identity.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/mutex-lib.o $(OUT)/user/identity.o labs/airios/program.ld
+# 同一ELF供普通名称和exec重置名称，运行头仍由内核逐次发布。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 打包等待实际链接完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/identity.elf
+# 本配置文件路径交给只读incbin。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_IDENTITY_ELF='"$(OUT)/user/identity.elf"'

@@ -1,0 +1,32 @@
+checkpoint: K56
+baseline: baseline.yaml
+start: K55
+current_operation: 内核在启动与身份交接时发布TCB，用户直接读取并用真实42号作独立校准
+already_explained:
+- concept: 静态TLS和TP的运行副本
+  at: ../../../dev-log/core/43-static-tls.md#ctls-load
+  establishes: 模板初值和零尾部形成独立运行块，FS指向数据后的TCB，首字self
+- concept: 进程资源和执行现场
+  at: ../../../dev-log/core/52-shared-executions.md#thread-resource-owner
+  establishes: worker共享页表而分别有TID和TLS，槽复用不意味着身份复用
+- concept: 互斥仍需身份查询
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-deadline-loop
+  establishes: 每次从42号取当前TID，不缓存fork复制的旧身份；unlock仍通知
+first_use:
+- concept: 版本化16字节运行头
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-tcb-layout
+  establishes: self用户VA、32位TID和版本固定偏移，头不是内核权限令牌或LinuxTCB
+- concept: 普通TLS复制与身份改写分开
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-tcb-publication
+  establishes: 候选0不公开，root/fork/exec/worker在可运行前写真实身份，使用已验证布局不追随任意FS
+- concept: TLS保留与用户态身份读取
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-fast-query
+  establishes: used保留anchor形成PT_TLS，FS读头后直接返回，有效版本才走快路径；ELF节回收另需保护
+- concept: 原始查询作独立证据
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-identity-observation
+  establishes: 每位观察者仅一次42号参考，主版本后备另一次，实际内核日志核对七次而非用户自报
+borrowed:
+- component: 当前LLVM used属性、既有静态TLS和42号接口
+  contract: 当前不启用ELF节垃圾回收，线程库选择必须保留TLS，原始身份/授权仍由内核决定
+feedback: []
+not_inferred: 自动重建与查询数量不推断掌握，不设置练习或评分

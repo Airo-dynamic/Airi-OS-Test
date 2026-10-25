@@ -226,5 +226,12 @@
     "export_exit": 0,
     "export_path": "/tmp/airios-k55-release-20261025",
     "export_log": "artifacts/k55/export.log"
+  },
+  "mbp_sync": {
+    "head": "3cad040534285f39c75d664eb38523b153c7a307",
+    "source": "/Users/bilibili/Desktop/AiriOS-dev-sync-20261024/updates/K55-20261025/source",
+    "owned_files_verified": 173,
+    "protected_worktrees_unchanged": true,
+    "receipt": "artifacts/k55/mbp-sync-receipt.json"
   }
 }

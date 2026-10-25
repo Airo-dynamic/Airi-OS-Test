@@ -176,3 +176,9 @@ airi_mutex_elf_end: /* 文件排他右端。 */
 airi_heap_threads_elf_start: /* 本配置完整静态程序文件。 */
 .incbin AIRI_HEAP_THREADS_ELF /* 明确选择带持锁yield的观察版本。 */
 airi_heap_threads_elf_end: /* 输入的排他右端。 */
+
+.balign 8 /* TCB身份和生命周期观察的真实用户ELF。 */
+.global airi_identity_elf_start, airi_identity_elf_end /* 文件范围由初始程序目录借用。 */
+airi_identity_elf_start: /* 同一文件支持普通入口与exec重建观察。 */
+.incbin AIRI_IDENTITY_ELF /* 当前配置的静态程序，不是宿主模拟查询。 */
+airi_identity_elf_end: /* 输入的排他右端。 */
