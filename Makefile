@@ -466,7 +466,7 @@ $(OUT)/user/malloc.o: labs/airios/libc/malloc.c Makefile
 # 所有状态位于当前用户ELF的BSS，编译器不访问内核memory.c。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # 分配器观察是独立main，不把标准malloc塞进USER_COMMON。
-$(OUT)/user/malloc-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/malloc-probe.o labs/airios/program.ld
+$(OUT)/user/malloc-probe.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/malloc-probe.o $(OUT)/user/mutex-lib.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o labs/airios/program.ld
 # 原始库、POSIX错误槽、纯算法与用户对象包装都在这个静态ELF内。
 	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
 # 包装等待真实用户分配程序。
@@ -527,3 +527,18 @@ $(OUT)/user/mutex.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thre
 $(OUT)/labs/airios/images.o: $(OUT)/user/mutex.elf
 # 路径仅供incbin打包实际字节。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MUTEX_ELF='"$(OUT)/user/mutex.elf"'
+
+# 与普通malloc.o使用同一实现，仅这份观察对象在持内部锁时主动yield。
+$(OUT)/user/malloc-observe.o: labs/airios/libc/malloc.c Makefile
+# 观察专用对象不覆盖普通分配器。
+	@mkdir -p $(dir $@)
+# 宏只启用已经写在源码内的主动换执行者位置，不借宿主线程模拟。
+	$(CC) $(USER_FLAGS) -DAIRI_MALLOC_OBSERVE_YIELD -Ilabs/airios/include -c $< -o $@
+# 并发程序需要errno TLS、纯块链、同步包装和共享执行库。
+$(OUT)/user/heap-threads.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc-observe.o $(OUT)/user/mutex-lib.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/malloc-threads.o labs/airios/program.ld
+# 一份静态ELF只链接一个malloc版本，不混入宿主分配器。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录只消费真正生成的新观察ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/heap-threads.elf
+# 路径宏只交给只读incbin包装。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_HEAP_THREADS_ELF='"$(OUT)/user/heap-threads.elf"'

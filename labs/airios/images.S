@@ -170,3 +170,9 @@ airi_futex_elf_end: /* 输入文件的排他右端。 */
 airi_mutex_elf_start: /* 独立C用户映像的文件首。 */
 .incbin AIRI_MUTEX_ELF /* 本配置链接好的锁与工作者程序。 */
 airi_mutex_elf_end: /* 文件排他右端。 */
+
+.balign 8 /* 四个执行者共享分配器的真实用户ELF。 */
+.global airi_heap_threads_elf_start, airi_heap_threads_elf_end /* 初始目录不保存宿主进程指针。 */
+airi_heap_threads_elf_start: /* 本配置完整静态程序文件。 */
+.incbin AIRI_HEAP_THREADS_ELF /* 明确选择带持锁yield的观察版本。 */
+airi_heap_threads_elf_end: /* 输入的排他右端。 */

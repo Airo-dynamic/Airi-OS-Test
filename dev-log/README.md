@@ -96,3 +96,5 @@ P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路
 [K53 私有内存等待](core/53-private-futex.md)加入条件比较与登记、显式有界唤醒、PIT超时与进程/VA私有键，并把真实程序目录分段输出。
 
 [K54 用户互斥](core/54-owned-mutex.md)以原子TID所有权、固定截止及futex重试保护普通数据，验证带锁yield、错误所有者和非robust死亡边界。
+
+[K55 共享分配器](core/55-shared-malloc.md)将公开调用与内部操作分开，保护唯一arena与一致快照，验证四执行者分配和跨执行者归还。

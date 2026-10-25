@@ -1,0 +1,32 @@
+checkpoint: K55
+baseline: baseline.yaml
+start: K54
+current_operation: 四执行者共用唯一arena，外层只加锁一次，跨执行者交还对象并读取一致快照
+already_explained:
+- concept: 用户对象与页面缓存
+  at: ../../../dev-log/core/48-user-malloc.md#user-arena
+  establishes: 请求头和块链归用户arena，free归还对象，exit/exec才回收缓存页
+- concept: 原子所有权和业务数据交接
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-acquire-release
+  establishes: 同一锁的release/acquire保护普通数据，通知不授所有权
+- concept: 非robust锁和寿命
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-owner-lifetime
+  establishes: join不替用户恢复遗留的业务锁，当前没有取消或独立线程退出恢复
+first_use:
+- concept: 公开入口和内部不重复加锁
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-lock-composition
+  establishes: calloc/realloc组合内部操作，外层只加锁一次，所有正常/容量失败路径都释放
+- concept: 私有元数据锁与有限等待重试
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-private-guard
+  establishes: 到期不能丢弃free，内部不跨业务回调，其他同步不变量错误结束进程组
+- concept: 跨执行者移交活对象
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-transfer-object
+  establishes: 单次release/acquire地址发布转移访问和释放权，分配器锁不替应用协议
+- concept: 显式观察编译与真实并发
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-shared-build
+  establishes: 同源码选择持锁yield对象，普通版本无该插入，join无需固定阻塞轨迹
+borrowed:
+- component: 纯块链与K54互斥
+  contract: 用户库持有独立共享实例，内核堆不链接用户锁；观察使用自己的guest调度与errno TLS
+feedback: []
+not_inferred: 观察和重建不作为理解评分，不设练习或掌握门槛

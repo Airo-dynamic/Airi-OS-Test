@@ -140,3 +140,5 @@ K52保留八进程组，增加全局八worker，调度遍历十六execution。cu
 K53以进程对象和用户VA作为私有futex键，43号比较四字节条件后登记execution等待，44号最多通知十六人。原子性依据固定单CPU和不可抢占内核，不能泛化到SMP。完成出口统一交付原frame结果；poll只处理到期，wake不改字也不授锁，整组退出撤销等待资格后安全回收。新增程序使目录含NUL达261字节，内核/用户查询容量512，shell按原write上限分段并处理短返回。
 
 K54增加可由C/C++头包含的四字节私有互斥：强CAS以TID记录所有权，acquire/release交接普通数据，失败用K53等待并按唯一PIT截止重试。非持有者不能解锁，自重入-35；非robust持有者返回后字不自动清理。每次调用仍查询内核TID，unlock总通知一人，不记为零系统调用快速路径。K48分配器仍单线程。
+
+K55以私有heap_mutex保护用户分配器唯一arena、块链和三项统计。公开入口只加锁一次，calloc/realloc调用内部_unlocked操作，free不会因一次等待到期而丢弃。普通malloc.o与同源码定义AIRI_MALLOC_OBSERVE_YIELD的观察对象分别链接；后者只用于真实并发竞争验证。对象数据和指针交接仍由应用协议管理，页面缓存仍到exit/exec归还。

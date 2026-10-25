@@ -220,5 +220,13 @@
     "build_exit": 0,
     "shell_exit": 0,
     "log": "artifacts/k54/replay.log"
+  },
+  "release": {
+    "snapshots": 67,
+    "snapshots_exit": 0,
+    "snapshots_log": "artifacts/k54/snapshots.log",
+    "export_exit": 0,
+    "export_path": "/tmp/airios-k54-release-20261025",
+    "export_log": "artifacts/k54/export.log"
   }
 }

@@ -339,6 +339,11 @@
       "id": "K54",
       "title": "K54 · 取得所有权以后，才进入临界区",
       "document": "dev-log/core/54-owned-mutex.md"
+    },
+    {
+      "id": "K55",
+      "title": "K55 · 共享分配器，分别持有对象",
+      "document": "dev-log/core/55-shared-malloc.md"
     }
   ]
 }
