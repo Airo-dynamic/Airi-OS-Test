@@ -620,3 +620,18 @@ $(OUT)/user/join.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algori
 $(OUT)/labs/airios/images.o: $(OUT)/user/join.elf
 # 只用于只读incbin范围。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_JOIN_ELF='"$(OUT)/user/join.elf"'
+
+# 标准形状的互斥包装只在选用时链接，不替换底层有界AiriMutex。
+$(OUT)/user/pthread-mutex-lib.o: labs/airios/libc/pthread_mutex.c Makefile
+# 与完整观察main的对象独立命名。
+	@mkdir -p $(dir $@)
+# 仍使用自有pthread头及当前静态用户目标。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 线程启动包、普通锁与公开包装全部真实运行于guest。
+$(OUT)/user/pthread-mutex.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/mutex-lib.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/pthread-lib.o $(OUT)/user/pthread-mutex-lib.o $(OUT)/user/pthread-mutex-probe.o labs/airios/program.ld
+# 不链接宿主同步库或观察暂停版锁。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 只借链接完成的只读映像。
+$(OUT)/labs/airios/images.o: $(OUT)/user/pthread-mutex.elf
+# 本配置路径交给incbin。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_PTHREAD_MUTEX_ELF='"$(OUT)/user/pthread-mutex.elf"'

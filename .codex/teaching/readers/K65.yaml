@@ -1,0 +1,32 @@
+checkpoint: K65
+baseline: baseline.yaml
+start: K64
+current_operation: pthread互斥映射ERRORCHECK，静态/动态生命周期与无总超时lock复用底层有界等待
+already_explained:
+- concept: 所有权与参与者通知
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-participant-lifetime
+  establishes: 首次CAS可直接取得，慢路径成功/超时撤销，unlock无参与者不通知
+- concept: pthread正错误与errno
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-contract
+  establishes: 成功0、失败正错误，不通过errno返回内部状态
+- concept: 同一窗口的请求计数
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
+  establishes: 两次45号差值扣结束一次，打印放测量后
+first_use:
+- concept: DEFAULT类型映射
+  at: ../../../dev-log/core/65-pthread-mutex.md#pmutex-default-policy
+  establishes: 本项目DEFAULT映ERRORCHECK，NORMAL/RECURSIVE不假支持，属性与创建线程属性不同
+- concept: 初始化标记与对象寿命
+  at: ../../../dev-log/core/65-pthread-mutex.md#pmutex-object-lifetime
+  establishes: init不读未初始化旧标记，destroy前必须无使用者，零字段不证明可并发销毁，属性指针不保存
+- concept: 内部有界等待不变公开超时
+  at: ../../../dev-log/core/65-pthread-mutex.md#pmutex-unbounded-lock
+  establishes: lock无总期限，只对内部ETIMEDOUT重试，其他正错误保持，非robust死亡不自动恢复
+- concept: 实际跨底层期限观察
+  at: ../../../dev-log/core/65-pthread-mutex.md#pmutex-internal-timeout
+  establishes: 主持有205tick，worker内部200到期后仍完成64次更新，日志与guest普通数据共同核对
+borrowed:
+- component: POSIX程序员手册DEFAULT/初始化寿命，以及既有AiriMutex和pthread线程
+  contract: 只ERRORCHECK默认映射，私有非robust，无timedlock/共享/PI/递归；固定单CPU
+feedback: []
+not_inferred: 重建、错误与计数符合不推断掌握；无新Linux/GUI运行

@@ -207,3 +207,8 @@ airi_pthread_elf_end: /* 范围右端不包含字节。 */
 airi_join_elf_start: /* 包含文件头和所有用户段。 */
 .incbin AIRI_JOIN_ELF /* 不借宿主线程演示。 */
 airi_join_elf_end: /* 右端不包含字节。 */
+.balign 16 /* 公开互斥源码接口的真实观察ELF。 */
+.global airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end /* 初始目录借用完整边界。 */
+airi_pthread_mutex_elf_start: /* 从ELF文件头开始。 */
+.incbin AIRI_PTHREAD_MUTEX_ELF /* 自有线程、锁与包装，不执行主机例子。 */
+airi_pthread_mutex_elf_end: /* 范围右端不含字节。 */

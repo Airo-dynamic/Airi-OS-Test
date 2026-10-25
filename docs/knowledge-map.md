@@ -60,3 +60,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K63 创建关系与资源寿命](../dev-log/core/63-nested-workers.md)亲手区分current资源归属与running创建者，实际跨creator收拢/旧槽复用保持leaf独立TLS/TCB，按内核creator关系分析交错日志。
 
 [K64 等待边与认领](../dev-log/core/64-peer-join.md)亲手区分A等B与B结果归A，唯一认领不能替代无环检查；坏输出在认领前拒绝，实测B闭环失败以后正常返回、A完成原等待。
+
+[K65 默认策略与寿命](../dev-log/core/65-pthread-mutex.md)实现pthread属性和静态/动态互斥，区分底层有限超时与公开无总超时等待，明确销毁检测不能替代排除使用者。

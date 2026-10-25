@@ -1,5 +1,11 @@
 # 当前路线的验证
 
+## K65：pthread互斥默认策略、寿命与内部重试（2026-10-25）
+
+DEFAULT映ERRORCHECK，NORMAL/RECURSIVE设置ENOTSUP并保持旧类型，未知99为EINVAL。动态对象不保留属性指针，属性销毁后仍可用；自锁EDEADLK、try忙EBUSY、外人释放EPERM，忙销毁保持状态，静止销毁/重初始化及已销毁诊断实测。标记不提供并发销毁许可。
+
+主持锁205tick，两worker内部200tick实际到期后重试，公开lock仍0，64次持锁yield普通数据完整，errno保持。八对公共无竞争操作差值1，仅含结束查询。完整test退出0；181份纯主线独立重建证据见[K65记录](../.codex/teaching/validation/K65.json)。78节点、188份实现及链接通过，860块旁注无低于99%项，源码/实际合同/连续正文另核对。无robust/递归/共享/PI/timedlock或新Linux/GUI实测。
+
 ## K64：对等join认领与有界闭环拒绝（2026-10-25）
 
 同组worker可join worker，目标joiner_tid只认领一人，join_tid保存等待出边；输出先验证，16步链检查在新边登记以前拒绝闭环。正常parent自己收取child，主收取parent；A真实等B后，主争抢B返回22，高地址返回14不破坏A认领，B反向join A返回35且输出/errno保持，随后B正常结束让A原41号完成。

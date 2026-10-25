@@ -240,5 +240,15 @@
       "artifacts/k64/replay-build.log",
       "artifacts/k64/replay-shell.log"
     ]
+  },
+  "release": {
+    "source_commit": "b4947ed",
+    "snapshots": 77,
+    "export": "/tmp/airios-k64-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k64/snapshots.log",
+      "artifacts/k64/export.log"
+    ]
   }
 }

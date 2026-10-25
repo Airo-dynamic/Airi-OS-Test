@@ -89,6 +89,7 @@ extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户�
 extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
 extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
 extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
+extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
 extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
 extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
@@ -129,6 +130,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
     {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
     {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
+    {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
     {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
     {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
     {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。

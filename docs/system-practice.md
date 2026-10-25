@@ -56,3 +56,5 @@ K56减少运行库反复取得TID的陷入，并检验fork复制普通TLS时不�
 [K63](../dev-log/core/63-nested-workers.md)让worker真实创建leaf，creator已join且旧槽运行过replacement以后leaf仍能恢复。普通函数返回与进程组exit分开，参数不得借用已结束创建者的局部栈。
 
 [K64](../dev-log/core/64-peer-join.md)让worker真实创建并join child；另一组A/B证明主争抢B不偷结果，B反向等待A报35，原A等待继续成功，资源收拢后fork仍能推进。
+
+[K65](../dev-log/core/65-pthread-mutex.md)真实持锁205tick触发底层200tick到期，公开两worker仍取得锁并完成64次普通数据更新；无竞争八对公共操作仍无额外系统调用。
