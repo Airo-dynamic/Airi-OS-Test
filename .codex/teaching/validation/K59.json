@@ -225,5 +225,15 @@
     "four_actual_paths": true,
     "continuous_prose": true,
     "corrections": "Moved WAIT-preparation observation before reading now so pause consumes original deadline; fixed existing reader anchor and heredoc opening comment. Positional coverage not reader mastery."
+  },
+  "release": {
+    "source_commit": "36251c5",
+    "snapshots": 72,
+    "export": "/tmp/airios-k59-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k59/snapshots.log",
+      "artifacts/k59/export.log"
+    ]
   }
 }
