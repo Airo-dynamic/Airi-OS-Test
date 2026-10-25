@@ -90,3 +90,5 @@ P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路
 [K51 TLS零尾部](core/51-tls-zero-tail.md)以较短普通BSS复现真实LLD布局，修正过严的TLS总长检查，同时保持完整文件初值、孤立模板与页预算校验。
 
 [K52 同进程工作执行者](core/52-shared-executions.md)共享用户内存、FD与异步buffer，独立保存栈、TLS和CPU环境，提供阻塞join并验证容量、复用和整个进程的退出故障。
+
+[T04 精确编辑](tools/04-exact-edits.md)增加 before/after 局部替换，核对唯一旧窗口，并保护整章失败前的源码状态。

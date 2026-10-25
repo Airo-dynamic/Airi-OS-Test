@@ -324,6 +324,11 @@
       "id": "K52",
       "title": "K52 · 同进程共享执行者与阻塞join",
       "document": "dev-log/core/52-shared-executions.md"
+    },
+    {
+      "id": "T04",
+      "title": "T04 · 只替换已确认的源码窗口",
+      "document": "dev-log/tools/04-exact-edits.md"
     }
   ]
 }

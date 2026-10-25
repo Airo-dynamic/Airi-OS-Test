@@ -1,4 +1,4 @@
-"""Reconstruct independent teaching routes from complete write/append blocks."""  # 从教程编辑动作重建，不复制终点实现。
+"""Reconstruct teaching routes from explicit write, append and exact replacement edits."""  # 从教程编辑动作重建，不复制终点实现。
 import argparse  # 解析目标目录、路线与执行选项。
 import hashlib   # 核对每个检查点的累计源码字节。
 import json      # 读取依赖图并保存实际运行记录。
@@ -7,7 +7,8 @@ import re  # 提取完整源码块及运行块。
 import subprocess  # 隔离执行教程命令并保留退出状态。
 from tools import ROOT  # 根目录由本脚本位置决定。
 
-BLOCK = re.compile(r'<!-- (write|append): ([^\n]+) -->\n```[^\n]*\n(.*?)\n```', re.S)  # 每项依次捕获动作、路径和完整源码。
+BLOCK = re.compile(r'<!-- (write|append|replace): ([^\n]+) -->\n')  # 只识别独占一行的编辑起始标记。
+FENCE = re.compile(r'^```[^\n]*\n(.*?)^```[ \t]*(?:\n|$)', re.S | re.M)  # 完整围栏包括代码的末尾换行。
 RUN = re.compile(r'<!-- run -->\n```sh\n(.*?)\n```', re.S)  # 只执行显式标注的命令，忽略展示输出。
 
 
@@ -49,14 +50,66 @@ def ordered(names, data=None):  # 沿显式前置关系取得一次组合所需�
     return result  # 返回确定次序的章节记录。
 
 
-def apply(document, state):  # 把一章的完整编辑动作作用于累计源码。
-    for mode, name, code in BLOCK.findall(document):  # 一项对应一个源码围栏。
-        path = Path(name)  # 使用路径段判断越界，不把输入当 shell 命令。
-        if path.is_absolute() or '..' in path.parts or not path.parts or str(path) != name:  # 禁止写出重建目录。
-            raise RuntimeError(f'Unsafe teaching path: {name}')  # 保留具体非法路径。
-        if mode == 'append' and name not in state:  # 追加必须已经有正文创建的文件。
-            raise RuntimeError(f'Append before creation: {name}')  # 不用空文件掩盖缺少的步骤。
-        state[name] = (state[name] if mode == 'append' else '') + code + '\n'  # 完整替换或继续追加，保留末尾换行。
+def source_block(document, position):  # 从指定位置取得一份明确的源码围栏。
+    while document.startswith('\n', position):  # 标记与围栏之间允许空行，不吞掉代码内空行。
+        position += 1  # 只前进到本次内容的起点。
+    match = FENCE.match(document, position)  # 不能越过普通正文去猜下一块源码。
+    if not match:  # 缺围栏或未关闭都属于不完整编辑。
+        raise RuntimeError('Teaching edit needs a closed source fence')  # 不静默跳过损坏动作。
+    return match[1], match.end()  # 非空源码保留末尾换行，空的新文本可用于删除旧窗口。
+
+
+def edits(document):  # 逐行走过正文，只在普通文本位置识别编辑标记。
+    position = 0  # 下一次检查的行起点。
+    while position < len(document):  # 文件中的编辑次序就是实际执行次序。
+        marker = BLOCK.match(document, position)  # 模式不跨行，不能把路径后面的正文当参数。
+        if marker:  # 找到write、append或replace。
+            mode, name = marker.groups()  # 同一标记提供动作与目标相对路径。
+            position = marker.end()  # 接下来必须是对应的内容。
+            before = None  # write/append没有旧文本条件。
+            if mode == 'replace':  # 替换需要两份有标签的源码，不能用行号或模糊匹配。
+                if not document.startswith('<!-- before -->\n', position):  # 旧文本标签紧跟编辑标记。
+                    raise RuntimeError('Replacement needs <!-- before -->')  # 拒绝漏写或调换标签。
+                before, position = source_block(document, position + len('<!-- before -->\n'))  # 读取旧文本本身。
+                while document.startswith('\n', position):  # 两块之间允许空行。
+                    position += 1  # 不改变旧文本内的空白。
+                if not document.startswith('<!-- after -->\n', position):  # 新文本必须有明确标签。
+                    raise RuntimeError('Replacement needs <!-- after -->')  # 不把下一章动作当新文本。
+                position += len('<!-- after -->\n')  # source_block将从新围栏开始读取。
+                if not before.strip():  # 空白不能提供可靠的局部定位。
+                    raise RuntimeError('Replacement before text must contain source')  # 增加真实上下文再编辑。
+            code, position = source_block(document, position)  # 按项目原生换行约定保留内容。
+            yield mode, name, before, code  # 调用方稍后检查路径与已有状态。
+            continue  # 这次源码内的标记不再被当成正文动作。
+        fence = FENCE.match(document, position)  # 普通演算或命令围栏也要整体跳过。
+        if fence:  # 展示代码里可以出现字面量编辑标记。
+            position = fence.end()  # 不执行展示中的嵌套内容。
+            continue  # 继续检查围栏后面的正文。
+        line_end = document.find('\n', position)  # 没有标记时只跳过当前一行。
+        line = document[position:line_end if line_end >= 0 else len(document)]  # 最后一行可能没有换行。
+        if re.match(r'<!-- (?:write|append|replace|before|after)\b', line):  # 看似编辑却未满足格式不能忽略。
+            raise RuntimeError(f'Malformed teaching edit: {line}')  # 保留损坏行便于定位。
+        position = line_end + 1 if line_end >= 0 else len(document)  # 前进到下一行或结束。
+
+
+def apply(document, state):  # 整章检查完成后才把新状态交回调用者。
+    pending = state.copy()  # 字符串不可变，浅复制足以隔离失败编辑。
+    for mode, name, before, code in edits(document):  # 从正文顺序取得确定动作。
+        path = Path(name)  # 路径不交给Shell解释。
+        if path.is_absolute() or '..' in path.parts or not path.parts or str(path) != name:  # 保护重建目录。
+            raise RuntimeError(f'Unsafe teaching path: {name}')  # 沿用原有路径约束。
+        if mode != 'write' and name not in pending:  # 追加和替换都必须已有明确起点。
+            raise RuntimeError(f'{mode.title()} before creation: {name}')  # 不读取终点文件补洞。
+        if mode == 'replace':  # 旧文本包含围栏保留的换行，按字节形状核对。
+            first = pending[name].find(before)  # 精确查找，不去空白、不猜相似函数。
+            if first < 0 or pending[name].find(before, first + 1) >= 0:  # 第二次从下一字符查找，也拒绝重叠匹配。
+                reason = 'missing' if first < 0 else 'ambiguous'  # 区分旧版本不符和缺少唯一定位。
+                raise RuntimeError(f'Replacement requires one match in {name}: {reason}')  # 不选择第一个凑合继续。
+            pending[name] = pending[name].replace(before, code, 1)  # 只改变唯一的已声明窗口。
+        else:  # write完整赋值，append在已有文件后继续。
+            pending[name] = (pending[name] if mode == 'append' else '') + (code or '\n')  # 保留旧write/append空围栏写入一个换行的约定。
+    state.clear()  # 只有全部动作有效才替换外部累计状态。
+    state.update(pending)  # 失败时原state保持，成功仍复用调用者字典。
 
 
 def digest(text):  # 文本先按 UTF-8 形成确定字节。
@@ -117,7 +170,7 @@ def replay(destination, through, execute=False, alongside=None, source=None):  #
     for chapter in chapters:      # 按依赖顺序逐章写入完整状态。
         text = (source / chapter['document']).read_text()  # 读取该检查点正文。
         before = state.copy()  # 字符串不可变，浅复制足以保留前态。
-        apply(text, state)     # 执行正文中的 write/append 动作。
+        apply(text, state)     # 执行正文中的写入、追加或精确替换。
         for name, code in state.items():  # 只更新本章改变的文件。
             if before.get(name) == code:  # 支线不会重写未改变的基础文件。
                 continue  # 保持该文件原字节和时间戳。

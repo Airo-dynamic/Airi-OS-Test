@@ -6407,6 +6407,73 @@
         "./airios build  # 交叉链接自有用户线程库、桥接器、观察程序及串口内核。\n./airios test  # 验证全部既有路径和共享执行者的正常、容量、生命周期与故障行为。"
       ],
       "reader": ".codex/teaching/readers/K52.yaml"
+    },
+    {
+      "id": "T04",
+      "track": "tools",
+      "title": "T04 · 只替换已确认的源码窗口",
+      "document": "dev-log/tools/04-exact-edits.md",
+      "requires": [
+        "T03"
+      ],
+      "files": {
+        "scripts/probe.py": "5334810f1b19026923b99cc43e78635d5f254fbed8c3d0bcd12a4d962f1cdc95",
+        "scripts/tools.py": "925832d46a39fc82f51c8162b31735b388b8a43d5453843c606fc072096f9b08",
+        "config/deps.lock.json": "37aa44e842bec5d63766b4d621d68fdbbb339740a38fcee539bb90e83cadc1f0",
+        "scripts/deps.py": "3737462ab552b2d6acb673e7ca5a9527dfccfd8926dce8b815a89b110585225a",
+        "include/airi/base.h": "8244a108504fe1fd8a8a3e10a6a0c59776667b8539ba95f414ea79447f246b14",
+        "kernel/lib/base.c": "e70c0c5697063ffd0def7e7d3db7348d88d7a2abd3a235f3abbd8b4167e72d8a",
+        "labs/tutorial/bytes.c": "d58657bf62205c3f888bef533f68c67a89d66029e54b9376270fd71c045c0e0d",
+        "labs/tutorial/format.c": "999ca74a4e9819b4e92522ced64d2ef1e0a8e0ebb741dded01a70536b41f774c",
+        "labs/host/base/memmove_trace.c": "a69e029c5e0d31f3cc7ba08b562962a98fa73840bf7c0c1ad556b0df550374f9",
+        "include/airi/boot.h": "4522e5b6d6825190d22c375bac9a36744033ea8c9208da0bcdb195b9acf312af",
+        "kernel/boot/info.c": "089c4ae44fee68d8cf1136b721df400c9499b4af606ceeb8ae7781b881714b6b",
+        "labs/host/boot/boot_info_probe.c": "50dd84dbf252d45cf72c817e8174c379a311827ceb9549e1b6d53de22f649bc0",
+        "include/airi/kernel.h": "b01e418efcf8fef2cbe56373b0cfecf4716775c5c9c5ed538ad54c2859fe95d5",
+        "kernel/arch/x86_64/serial.c": "a43d16ed4f22e9e57daeece54056ba0b4f93e665fa9855aceaa083fc4f787d9c",
+        "kernel/arch/x86_64/entry.S": "6d1ba38c032fc3d3ee459326bcb6139d5b5ff49b014cf4fbd48b87f6ab181e68",
+        "kernel/lib/runtime.c": "401da96e9dcc1c4f6c41bc7dda7c27f0fd3bb0e4547577cb77b0f517d43fa15b",
+        "kernel/boot/limine.c": "b925c98c70129ae182668633bbe02e30172010f80c8946cf35696adc5f7342dc",
+        "kernel/linker.ld": "2eb6a8a52336cd2fa1386e1b48edd24b614391e09dd9fe6a873ebca7becf942a",
+        "Makefile": "d4cb5b97864246e79f53773ca296cf3b067b8c8c77351358d91bf4303f987491",
+        "config/boot/limine.conf": "f76f884b3186345f956444ca8580580fc02e3b6d9e900d818d5dc9c833521c53",
+        "scripts/image.py": "e846df8bc62c10d605d0d3eaf6fa4c8254adc9975653c1988a37551ff7fb9740",
+        "scripts/first_boot.py": "5f31db61c852369c796ba6c473bf8643d40d5763b57595402e7a3460cb3edc4d",
+        "kernel/main.c": "28dd105de4af4353b1f39c837acd6f1ab2c0ac3ae93f383b3f51404826becf4d",
+        "include/airi/console.h": "f9a4205f11c5e7c5e4b4684c5b8dcd0deb58b2a0142346aa79d601e9ff0a5d61",
+        "kernel/console/console.c": "3f882717a6a222131bbc487b85e7542279aa2819131c0cc72af333b8feaf3d5c",
+        "labs/tutorial/console.c": "b301648ec6241c748a1c4d85359f09db0bd961dada07d5ac2976c8393658d1bb",
+        "kernel/arch/x86_64/input.c": "2701747c4a9b0d1ed1377ea8f6c78154492db8e8009c53250cc4b6d44493d9cf",
+        "scripts/first_input.py": "d80e37de72e4c1ff6988553affc90da251d3ee6ab3bb67e5df8a64a7af66cf5f",
+        "include/airi/arch.h": "98670e1aae599ebdd57841499f0f4bb8d092e6f0b19078386297bd64b28cebab",
+        "kernel/arch/x86_64/cpu.c": "b2defe5d80d4c597822896043b1ddc7196e067d23ba472e0be67e440da33e697",
+        "kernel/console/serial_display.c": "f4cce6a3cd9fe2101244d2a4b11b6eb93fb7f564986fd03286fa38670e06a969",
+        "tests/unit/base_test.c": "fbc2ae3a87c589edd107b398b8226c4bd896f8d9cd02a5a493d9f6198aacfea7",
+        "scripts/boot.py": "c6fa10b751ab71687c4ed4a57fe37efd1991a5485d7449572a768829053c5499",
+        "scripts/console_test.py": "b8cc49ec1b688ea4f52f48198f4935ea650ec183eb88c222388bd11cb11e9d36",
+        "scripts/manage.py": "f4f91d6124385cde70d641728098cb9bb1f64a1ac4b2f5953ff079cc4da5f972",
+        "airios": "6d848b424305470b294c5bb076a09da680c1394dea940b55a53bb15374545ed3",
+        ".clangd": "dd741e497550378c028794c4fa91e78cf196891d7346ab972596017543d0ba52",
+        ".clang-format": "c74fa78c8857b0a795d142d506aec321d267dadedb1cd3d6210564666524833a",
+        ".gitignore": "67c4287f858c6e01c8301957e52ab0c9a1b262a9130683335b23797be0943259",
+        "boot/AiriBoot/Makefile": "499c660004bd67b4aba5a4915be1dedcda22d2bd2b2e62a9d14a762e21347186",
+        "labs/linux/p1/ordinary.c": "89dc7f4ce41251601ddb5560dca7cbf0e60b7f2b90f8dca64bb556646b7f0c65",
+        "labs/linux/p1/raw_start.S": "aa974fdf4108bf90ae588b7c7828d0d60cdd246980f048fcf847112955edd597",
+        "labs/linux/p1/run.sh": "670f983d7ef621ab9cc7fad007155be164918829f90df9960c8686e05fbfadfc",
+        "scripts/linux_lab.py": "0d007de476de2421f6accd75a03226d8de24af9ac951b609861792e409fcd59e",
+        "scripts/kernel_debug.py": "8b23f366b97291feb0997f361d2fe83bc390028e9b7f3f82cda9d9da923e8e49",
+        "scripts/course.py": "89eeff21d03c67266f1b355e08110e722657ed98c7027ebed21789b501b4f128",
+        "scripts/snapshots.py": "dfdaf1d352d662735c73b025eed5e929a6cab1834f34684d11df4dd2f2c4b288",
+        "scripts/docs_check.py": "11f5bad1d056ec1ae70a04a52d48a786effbf9ebe7af1ee3739fd4d462648f65",
+        "scripts/learning.py": "9210f91fc86d89bb2e794945e179ff6522c09e89c29bbd3c3fe6d0f98bd2f6b7",
+        "scripts/route_test.py": "19437c8335a85662ee20e19f594d229fd1c06eeb6ed97c7b32cad928963e53a2",
+        "scripts/tutorial_coverage.py": "e6cf688e4deeef7cb542fc02f39e33ed3d08da0e625b5ead0b49abde72aa409e",
+        "tests/course_edits_test.py": "63a69dec75a7f7c3101151d25e46e18280f6fd80e286775e222fe80f188c0ec8"
+      },
+      "commands": [
+        "python3 tests/course_edits_test.py  # 在当前工程运行九个正常和拒绝场景，不启动内核或远程主机"
+      ],
+      "reader": ".codex/teaching/readers/T04.yaml"
     }
   ],
   "owned": [
@@ -6576,10 +6643,11 @@
     "labs/airios/include/airi_threads.h",
     "labs/airios/libc/threads.c",
     "labs/airios/thread-entry.S",
-    "labs/airios/threads-probe.c"
+    "labs/airios/threads-probe.c",
+    "tests/course_edits_test.py"
   ],
   "endpoints": [
-    "T03",
+    "T04",
     "K52"
   ]
 }
