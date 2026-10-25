@@ -257,5 +257,15 @@
     "date": "2026-10-25",
     "next": "Compose full condition wait from K67 wide event and K68 lifetime refs; not implemented",
     "sync": "Git origin/main and stage tag only; no SSH payload"
+  },
+  "release": {
+    "source_commit": "611c609",
+    "snapshots": 81,
+    "export": "/tmp/airios-k68-export-20261025",
+    "passed": true,
+    "logs": [
+      "artifacts/k68/snapshots.log",
+      "artifacts/k68/export.log"
+    ]
   }
 }
