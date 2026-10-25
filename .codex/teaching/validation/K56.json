@@ -218,5 +218,15 @@
     "https://clang.llvm.org/docs/AttributeReference.html#used",
     "https://man7.org/linux/man-pages/man2/gettid.2.html",
     "https://man7.org/linux/man-pages/man3/pthread_self.3.html"
-  ]
+  ],
+  "release": {
+    "snapshots": 69,
+    "export": "/tmp/airios-k56-export-20261025",
+    "source_commit": "c82b09f3ed0f3644176c1fd78d8bb36f198a4f90",
+    "logs": [
+      "artifacts/k56/snapshots.log",
+      "artifacts/k56/export.log"
+    ],
+    "passed": true
+  }
 }

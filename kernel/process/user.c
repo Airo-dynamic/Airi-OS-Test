@@ -43,6 +43,7 @@ struct user_execution { // 一条用户执行链的CPU现场、内核陷入栈�
     uint64_t fpu_physical; // 独立内核状态页，保存本执行者的x87/SSE寄存器。
     struct airi_kernel_region stack; // 真正进入内核以后使用的栈，离开它才能销毁。
     unsigned user_ticks; // 本执行者实际收到的用户时钟事件。
+    uint64_t syscall_count; // 本执行者实际进入用户128号门的请求数，含查询自身，到上限饱和。
     uint64_t fault_error; // 最近一次结束本执行者的用户故障错误位。
     enum user_state state; // 主/工作执行者分别保存调度资格，不由共享PID推导。
     int64_t wait_target; // 等待的孩子PID条件，不是地址空间所有权。
@@ -1077,6 +1078,7 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
         airi_log("[USER_FAULT] pid=%u vector=%llu error=0x%llx rip=0x%llx cr2=0x%llx", current->pid, (unsigned long long)f->vector, (unsigned long long)f->error, (unsigned long long)f->rip, (unsigned long long)(f->vector == 14 ? airi_trap_fault_address() : 0)); // PF才读取本次CR2。
         return exit_current(-(128 + (int)f->vector)); // 自有故障编码，不宣称Linux信号ABI。
     }
+    if (running->syscall_count != UINT64_MAX) ++running->syscall_count; // 只有真正用户系统调用到这里，IRQ、故障和内核启动门不计入。
     if (f->rax == 1 || f->rax == 10 || f->rax == 15 || f->rax == 16) { // 同步文件与流的完整副本边界。
         bool write = f->rax == 1 || f->rax == 16; // 输出到流或文件。
         bool positioned = f->rax == 15 || f->rax == 16; // 显式偏移不支持阻塞流。
@@ -1358,6 +1360,10 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     }
     else if (f->rax == 44) // 显式通知至多给定数量，不保存信号量计数。
         f->rax = (uint64_t)futex_wake(f->rdi, f->rsi); // 不修改用户字，返回真正唤醒的数量。
+    else if (f->rax == 45) { // 每执行者观察计数，不把其他工作者的请求混入同一次测量。
+        f->rax = running->syscall_count; // 包括本次查询入口，测量差值需扣掉结束查询的一次。
+        airi_log("[THREAD_SYSCALLS] pid=%u tid=%u count=%llu", current->pid, running->tid, (unsigned long long)running->syscall_count); // 真实内核计数，不是用户推测。
+    }
     else // 尚未提供的接口都明确拒绝。
         f->rax = (uint64_t)-38ll; // -ENOSYS。
     poll_waiters(); // 文件/流修改完成后立即重查其他等待者，不等用户轮询。

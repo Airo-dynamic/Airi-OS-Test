@@ -1,0 +1,29 @@
+checkpoint: K57
+baseline: baseline.yaml
+start: K56
+current_operation: 在真实用户请求入口计数，以相同八对局部锁操作测量通知基线
+already_explained:
+- concept: current资源与running执行链
+  at: ../../../dev-log/core/52-shared-executions.md#thread-resource-owner
+  establishes: 同进程可有多个TID，CPU现场与等待归执行者，内存与FD归进程
+- concept: 身份快路径和真实查询
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-fast-query
+  establishes: 有效TCB读取不陷入，42号仍有独立内核日志，unlock仍通知
+first_use:
+- concept: 每执行者的实际请求计数
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-owner
+  establishes: 在128号分派前加一，排除IRQ和故障；fork与worker新建零，exec保留；上限饱和
+- concept: 观察自身进入测量
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
+  establishes: 开始查询被before抵消，结束查询需扣一，八次通知差值9；打印在测量之后
+- concept: 交错日志按身份聚合
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-host-grouping
+  establishes: 元组键映射到有序整数列表，18条查询按五条执行链核对，exec不换键
+- concept: 实际路径与计数关系
+  at: ../../../dev-log/core/57-syscall-count.md#syscalls-results
+  establishes: 父2/4/13、孩子1/3/12/16/18/27，跟随同一真实调用和查询开销
+borrowed:
+- component: 既有128号陷入、45号整数包装与identity镜像入口
+  contract: 计数是AiriOS观察ABI，不是Linux接口或耗时指标；饱和后不用于差值
+feedback: []
+not_inferred: 重建、运行与次数符合不推断读者已掌握

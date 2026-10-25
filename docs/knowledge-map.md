@@ -9,7 +9,7 @@
 | 任务与进程 | [K18–K23](../dev-log/core/18-timer.md)：PIT/PIC、独立栈、ring3、int80、ELF、fork/exec/wait | [L03](../dev-log/linux/03-process.md)COW、PID、FD继承，待实测 | 单CPU、单线程、静态ELF、复制fork；无信号；K41增加x87/SSE2现场 |
 | 文件与流 | [K24](../dev-log/core/24-files.md)、[K28–K29](../dev-log/core/28-pipes.md)：FD/OFD、共享偏移、RAM文件、管道与等待 | [L04](../dev-log/linux/04-storage.md)向量短I/O、EINTR、缓存与直接I/O，待实测 | 平坦8文件、24打开对象、4条64字节管道；非完整POSIX |
 | 设备与恢复 | [K25–K27](../dev-log/core/25-block-device.md)：VirtIO DMA、FLUSH、有界超时、CRC提交日志与恢复 | [L04](../dev-log/linux/04-storage.md)预分配、文件/目录同步、替换，待实测 | legacy PCI、单在途；K40增加IRQ提示、used收集与PIT后备；模型故障和QEMU进程重启不等于物理掉电 |
-| 等待与通知 | [K29](../dev-log/core/29-wait-queues.md)：保存请求、阻塞、唤醒、有限条件等待 | [L05](../dev-log/linux/05-threads.md)条件变量/futex/原子、[L06](../dev-log/linux/06-epoll.md)LT/ET/TCP背压，待实测 | guest不实现futex、pthread、socket；单CPU内核不可抢占 |
+| 等待与通知 | [K29](../dev-log/core/29-wait-queues.md)：保存请求、阻塞、唤醒、有限条件等待 | [L05](../dev-log/linux/05-threads.md)条件变量/futex/原子、[L06](../dev-log/linux/06-epoll.md)LT/ET/TCP背压，待实测 | K53已实现私有futex，K54–K56增加互斥、共享malloc及TCB身份；尚无pthread/socket，单CPU内核不可抢占 |
 | 提交与完成 | [K30–K32](../dev-log/core/30-block-begin-poll.md)：begin/poll、SQ/CQ、cookie、handle、epoch、退出晚完成 | [L07](../dev-log/linux/07-uring.md)liburing、部分提交、短读、错误CQ，待实测 | 注册buffer是内核副本，非Linux ABI或零拷贝固定页 |
 | 完整工作流 | [K33](../dev-log/core/33-shell-pipeline.md)：真实用户shell、页/FD/块请求、等待切换、继续和回收 | [L08](../dev-log/linux/08-comparison.md)相同TCP回显的三种等待路径，待实测 | UART独占，无参数/重定向/作业控制；不发布吞吐排名 |
 
@@ -44,3 +44,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K55](../dev-log/core/55-shared-malloc.md)亲手区分共享分配元数据和应用对象所有权：外层一次锁、内部复合操作、错误出口释放、一致但不持续冻结的快照；四执行者96轮及四次跨执行者归还，普通和观察编译的证据分开。
 
 [K56](../dev-log/core/56-runtime-identity.md)亲手区分普通TLS运行数据与内核发布的线程身份，固定16字节版本头、原始fork和exec更新、槽复用、用户加载与特权陷入；以七次真实参考/后备查询和目标反汇编核对快路径，不推断整个互斥已无系统调用。
+
+[K57 每执行者请求观察](../dev-log/core/57-syscall-count.md)亲手实现实际入口计数，明确查询自身的开销与fork/exec生命周期；不把次数当耗时，不用其他执行者的请求污染局部测量。

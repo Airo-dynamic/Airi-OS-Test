@@ -349,6 +349,11 @@
       "id": "K56",
       "title": "K56 · 从当前线程控制块取得身份",
       "document": "dev-log/core/56-runtime-identity.md"
+    },
+    {
+      "id": "K57",
+      "title": "K57 · 数清同一执行者真正发出的系统调用",
+      "document": "dev-log/core/57-syscall-count.md"
     }
   ]
 }

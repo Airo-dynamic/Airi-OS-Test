@@ -26,3 +26,6 @@ long airi_futex_wait(uint32_t *word, uint32_t expected, unsigned ticks) { // 不
 long airi_futex_wake(uint32_t *word, unsigned count) { // 用户先发布新条件，再通知已登记者。
     return thread_call(44, (uintptr_t)word, count, 0); // 返回数可能为0，不代表内存条件没有改变。
 }
+uint64_t airi_thread_syscalls(void) { // 此观察本身是一次真实45号系统调用。
+    return (uint64_t)thread_call(45, 0, 0, 0); // 保留完整64位无符号计数，上限饱和不回绕。
+}
