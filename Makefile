@@ -512,3 +512,18 @@ $(OUT)/user/futex.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thre
 $(OUT)/labs/airios/images.o: $(OUT)/user/futex.elf
 # incbin只读取本配置文件，不读取宿主程序。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_FUTEX_ELF='"$(OUT)/user/futex.elf"'
+
+# 锁实现使用四字节原子内建与自有线程/等待接口。
+$(OUT)/user/mutex-lib.o: labs/airios/libc/mutex.c Makefile
+# 不与观察程序mutex-probe.o共用对象名。
+	@mkdir -p $(dir $@)
+# 编译器必须在当前目标直接生成原子指令。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 该用户程序显式选择锁库，不改变其他早期ELF。
+$(OUT)/user/mutex.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/mutex-lib.o $(OUT)/user/mutex-probe.o labs/airios/program.ld
+# 静态链接不借宿主pthread或libatomic。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录等待本配置镜像真正完成。
+$(OUT)/labs/airios/images.o: $(OUT)/user/mutex.elf
+# 路径仅供incbin打包实际字节。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_MUTEX_ELF='"$(OUT)/user/mutex.elf"'

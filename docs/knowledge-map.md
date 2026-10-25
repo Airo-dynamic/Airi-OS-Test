@@ -38,3 +38,5 @@ P8已提供[K41](../dev-log/core/41-user-fpu-state.md)用户x87/SSE2状态：每
 [K52](../dev-log/core/52-shared-executions.md)亲手实现真正同进程共享执行：TID与PID、TLS初值和FPU环境继承、独立陷入栈、join与延后回收、C11发布、容量/页不足恢复和整组退出。已实测注册buffer共享，未计为多消费者SQ/CQ压力；互斥/futex及POSIX运行库继续后续。
 
 [K53](../dev-log/core/53-private-futex.md)亲手实现比较到等待的不可分割边界、私有进程/VA键、显式通知与截止、无等待信用和整组退出清理；C11发布与裸通知职责分开。互斥、条件变量、线程安全分配仍待后续。
+
+[K54](../dev-log/core/54-owned-mutex.md)亲手组合用户锁：CAS失败观察值交给WAIT，通知后重新争取，release/acquire保护两项普通状态，重试不延长截止；核对非持有者、自重入与非robust死亡，以及原子指令和C++头兼容的证据范围。

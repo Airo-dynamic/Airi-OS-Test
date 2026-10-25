@@ -235,5 +235,13 @@
     "build_exit": 0,
     "shell_exit": 0,
     "log": "artifacts/k53/core-only-replay.log"
+  },
+  "release": {
+    "snapshots": 66,
+    "snapshots_exit": 0,
+    "snapshots_log": "artifacts/k53/snapshots.log",
+    "export_exit": 0,
+    "export_path": "/tmp/airios-k53-release-20261025",
+    "export_log": "artifacts/k53/export.log"
   }
 }

@@ -94,3 +94,5 @@ P7 从 [K34 孤儿托管](core/34-orphan-reaper.md) 继续。后续按[部署路
 [T04 精确编辑](tools/04-exact-edits.md)增加 before/after 局部替换，核对唯一旧窗口，并保护整章失败前的源码状态。
 
 [K53 私有内存等待](core/53-private-futex.md)加入条件比较与登记、显式有界唤醒、PIT超时与进程/VA私有键，并把真实程序目录分段输出。
+
+[K54 用户互斥](core/54-owned-mutex.md)以原子TID所有权、固定截止及futex重试保护普通数据，验证带锁yield、错误所有者和非robust死亡边界。

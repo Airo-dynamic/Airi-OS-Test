@@ -18,6 +18,7 @@
 #define ENOSPC 28 // 有界文件或目录空间不足。
 #define ESPIPE 29 // 字节流不能定位。
 #define EPIPE 32 // 没有读端；当前内核不附带SIGPIPE。
+#define EDEADLK 35 // 当前执行者不能重复取得自己的非递归锁。
 #define ENOSYS 38 // 当前未实现的操作。
 #define ETIMEDOUT 110 // 有界等待预算已经用完。
 #define EOVERFLOW 75 // 不能表示请求结果。

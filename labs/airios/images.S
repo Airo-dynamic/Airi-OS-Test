@@ -164,3 +164,9 @@ airi_ctls_tail_elf_end: /* 完整文件的排他右端。 */
 airi_futex_elf_start: /* 含自有线程库的用户程序。 */
 .incbin AIRI_FUTEX_ELF /* 当前配置交叉链接产物。 */
 airi_futex_elf_end: /* 输入文件的排他右端。 */
+
+.balign 8 /* 互斥观察在真实用户地址空间运行。 */
+.global airi_mutex_elf_start, airi_mutex_elf_end /* 初始程序目录使用完整只读文件范围。 */
+airi_mutex_elf_start: /* 独立C用户映像的文件首。 */
+.incbin AIRI_MUTEX_ELF /* 本配置链接好的锁与工作者程序。 */
+airi_mutex_elf_end: /* 文件排他右端。 */

@@ -1,0 +1,35 @@
+checkpoint: K54
+baseline: baseline.yaml
+start: K53
+current_operation: 从空闲字0原子取得TID所有权，失败用同一截止等待，release后通知并重新争取
+already_explained:
+- concept: 私有futex比较和登记
+  at: ../../../dev-log/core/53-private-futex.md#futex-lost-notification
+  establishes: 用户旧判断需要内核再次比较，单CPU不可抢占内核登记与其他用户动作不可穿插
+- concept: 裸通知不授所有权
+  at: ../../../dev-log/core/53-private-futex.md#futex-wait-record
+  establishes: wake交付0并恢复资格，不改用户字，超时交付-110
+- concept: 同一对象的release和acquire
+  at: ../../../dev-log/core/52-shared-executions.md#thread-user-publication
+  establishes: 对应发布和观察为普通数据建立可见关系，调度或volatile不能替代
+first_use:
+- concept: 原子比较交换及失败观察值
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-owner-cas
+  establishes: 0到TID只有一人成功，失败得到真实持有者供WAIT再比较
+- concept: 原子内建和锁保护普通对象
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-acquire-release
+  establishes: 编译器扩展生成目标原子操作，成功acquire/释放release交接counter与checksum
+- concept: 固定等待预算和重试
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-deadline-loop
+  establishes: 通知和-11都不授锁，重试不延长截止，自持有失败，释放已发生则不倒退
+- concept: 非robust所有者死亡
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-owner-lifetime
+  establishes: join回收执行资源但不改业务锁字，旧TID不会复用，独立孩子以退出结束不可恢复状态
+- concept: lock前缀与cmpxchg观察
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-results
+  establishes: 目标原子读改写由编译器生成，前缀和后续指令共同解码；头兼容检查不等于C++运行库完成
+borrowed:
+- component: 当前LLVM原子内建和K53内核等待
+  contract: 编译时验证原生四字节原子和布局，静态ELF不得有未解析libatomic或pthread；本阶段仍查询TID和通知内核
+feedback: []
+not_inferred: 行为和源码重建通过不推断用户掌握，不设置练习门槛
