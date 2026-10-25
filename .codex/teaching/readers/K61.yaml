@@ -1,0 +1,35 @@
+checkpoint: K61
+baseline: baseline.yaml
+start: K60
+current_operation: 在锁下维护四槽队列，取得通知快照后释放等待，实际验证背压、关闭排空与48项计算
+already_explained:
+- concept: 条件通知不是结果
+  at: ../../../dev-log/core/60-sequence-events.md#event-version-model
+  establishes: 旧版本识别变化，0只表示重查，通知不授锁或提供任务令牌
+- concept: 互斥发布普通数据
+  at: ../../../dev-log/core/54-owned-mutex.md#mutex-acquire-release
+  establishes: 成功持有owner才能访问普通状态，释放/取得交接临界区写入
+- concept: 同一预算与无变化返回
+  at: ../../../dev-log/core/60-sequence-events.md#event-worker-loop
+  establishes: 重查不能重新借完整预算，版本与业务数据分开
+first_use:
+- concept: 空满谓词与环位置
+  at: ../../../dev-log/core/61-bounded-queue.md#queue-condition-model
+  establishes: count和closed决定可否接受/取出，四槽只限制排队不限制全部在途计算
+- concept: 同锁检查和旧版本快照
+  at: ../../../dev-log/core/61-bounded-queue.md#queue-deadline-and-gap
+  establishes: 检查谓词时取得版本，释放后等待，醒来重新take；剩余预算只限制继续睡眠
+- concept: 持锁通知和失败提交点
+  at: ../../../dev-log/core/61-bounded-queue.md#queue-publish-under-guard
+  establishes: 版本失败在槽修改前报告，通知可先于状态写入，guard阻止读取半成品；部分关闭通知只要求重查
+- concept: 双侧关闭与排空
+  at: ../../../dev-log/core/61-bounded-queue.md#queue-close-both-sides
+  establishes: 满生产者-32、空消费者EOF0，已接受项继续排空，输出保持，close不销毁对象
+- concept: 接受与完成分开
+  at: ../../../dev-log/core/61-bounded-queue.md#queue-workload
+  establishes: 两producer完成48项接受才close，consumer在锁外计算，join后核对位图/和/平方和
+borrowed:
+- component: 既有所有权锁、变化通知、用户工作执行者与PIT
+  contract: 有效对象和私人不重叠输出，固定四槽、有限代次、单CPU；不是完整线程池或pthread
+feedback: []
+not_inferred: 运行和重建不推断掌握，无新Linux/GUI验证

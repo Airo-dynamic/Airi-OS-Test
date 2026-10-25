@@ -581,3 +581,18 @@ $(OUT)/user/events.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thr
 $(OUT)/labs/airios/images.o: $(OUT)/user/events.elf
 # 当前配置路径交给incbin，串口主线不读取图形。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_EVENTS_ELF='"$(OUT)/user/events.elf"'
+
+# 队列库只依赖自有用户锁和变化通知。
+$(OUT)/user/queue-lib.o: labs/airios/libc/queue.c Makefile
+# 与观察main的queue-probe.o分别命名。
+	@mkdir -p $(dir $@)
+# 仍为无宿主libc的静态用户目标。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 有界生产消费使用普通锁，不链接暂停观察版。
+$(OUT)/user/queue.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/mutex-lib.o $(OUT)/user/event-lib.o $(OUT)/user/queue-lib.o $(OUT)/user/queue-probe.o labs/airios/program.ld
+# 全部执行者运行在同一个实际用户ELF与共享页表中。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 目录只借完成链接的真实文件。
+$(OUT)/labs/airios/images.o: $(OUT)/user/queue.elf
+# 路径只交给镜像打包，不读取主机业务结果。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_QUEUE_ELF='"$(OUT)/user/queue.elf"'

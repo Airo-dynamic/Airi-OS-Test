@@ -192,3 +192,8 @@ airi_mutex_races_elf_end: /* 范围右端不含字节。 */
 airi_events_elf_start: /* 从文件头开始校验。 */
 .incbin AIRI_EVENTS_ELF /* 完整静态用户程序，不执行宿主程序。 */
 airi_events_elf_end: /* 范围右端不含字节。 */
+.balign 16 /* 有界生产消费的独立用户映像。 */
+.global airi_queue_elf_start, airi_queue_elf_end /* 初始目录只借只读ELF范围。 */
+airi_queue_elf_start: /* 从完整文件头开始。 */
+.incbin AIRI_QUEUE_ELF /* 真实链接的自有队列程序。 */
+airi_queue_elf_end: /* 右端不含字节。 */

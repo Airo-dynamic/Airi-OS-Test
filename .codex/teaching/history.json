@@ -369,6 +369,11 @@
       "id": "K60",
       "title": "K60 · 用变化序号连接观察与等待",
       "document": "dev-log/core/60-sequence-events.md"
+    },
+    {
+      "id": "K61",
+      "title": "K61 · 有界工作队列、背压与关闭排空",
+      "document": "dev-log/core/61-bounded-queue.md"
     }
   ]
 }

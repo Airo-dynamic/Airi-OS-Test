@@ -145,6 +145,18 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 assert [expected for pid,tid,address,expected in event_waits].count('1')==5 and event_waits[-1][3]=='2' # 最后新快照不会领取旧通知。
                 event_wakes=re.findall(r'\[FUTEX_WAKE\] pid=\d+ address=0x[0-9a-f]+ count=16 woken=(\d+)',events_output) # 饱和对象末次发布、先发布、无变化通知、最后广播。
                 assert event_wakes==['0','0','2','2'] # 拒绝回绕不发通知；两次真正广播分别唤醒两人。
+                offset=len(text); wire.sendall(b'queue\n'); text=wait('[SHELL_COMMAND_DONE] name=queue code=0',offset) # 真正四槽生产消费、背压与关闭排空。
+                queue_output=text[offset:] # 不能用宿主统计或旧命令满足。
+                assert '[QUEUE_USER_OK] capacity=4 jobs=48 exactly_once=1 sum=1176 squares=38024 backpressure=wait close=drain timeout=preserved' in queue_output # guest位图、结果与错误返回已逐一核对。
+                backpressure=queue_output.split('[QUEUE_BACKPRESSURE_BEGIN]',1)[1].split('[QUEUE_BACKPRESSURE_OK]',1)[0] # 满队列超时和第五项真实等待发生在这里。
+                assert len(re.findall(r'\[FUTEX_WAIT\] pid=',backpressure))>=2 and 'result=-110' in backpressure and re.search(r'\[FUTEX_WAKE\].*woken=1',backpressure) # 不用主动yield冒充背压。
+                closing=queue_output.split('[QUEUE_CLOSE_WAITERS_BEGIN]',1)[1].split('[QUEUE_CLOSE_WAITERS_OK]',1)[0] # 关闭必须唤醒两位空队列消费者。
+                assert len(re.findall(r'\[FUTEX_WAIT\] pid=',closing))>=2 and re.search(r'\[FUTEX_WAKE\].*count=16 woken=2',closing) # 结束状态由真实等待返回后重查。
+                producer_close=queue_output.split('[QUEUE_CLOSE_PRODUCER_BEGIN]',1)[1].split('[QUEUE_CLOSE_PRODUCER_OK]',1)[0] # 满队列关闭必须唤醒尚未接受的新项。
+                assert re.search(r'\[FUTEX_WAIT\] pid=',producer_close) and re.search(r'\[FUTEX_WAKE\].*count=16 woken=1',producer_close) # 与空队列关闭的消费者路径分别实测。
+                queue_owner=re.search(r'\[EXEC_COMMIT\] pid=(\d+) program=queue ',queue_output) # 只数本次队列进程的执行者。
+                assert queue_owner # 工作链共享同一PID。
+                assert len(re.findall(r'\[THREAD_CREATE\] pid='+queue_owner.group(1)+r' tid=',queue_output))==8 and len(re.findall(r'\[THREAD_RETURN\] pid='+queue_owner.group(1)+r' tid=',queue_output))==8 # 一背压、二关闭消费者、一关闭生产者及四负载均收拢。
                 offset=len(text); wire.sendall(b'heap-threads\n'); text=wait('[SHELL_COMMAND_DONE] name=heap-threads code=0',offset) # 四个真实执行者共享唯一arena，观察对象交接。
                 heap_threads=text[offset:] # 不用旧heap命令代替并发结果。
                 assert '[MALLOC_THREADS_OK] workers=4 rounds=96 arena=262144 cross_free=4 snapshots=consistent errno=private critical_yield=1' in heap_threads # 每个工作者和主快照均由guest核对。
@@ -209,7 +221,7 @@ def check_shell(): # 默认串口主线，不读取frontend或字体。
                 offset=len(text); wire.sendall(b'echo after-shell\n'); text=wait('[CONSOLE_UPDATE] view=0 commands=2 page=0',offset) # 回到内核后输入仍完整。
                 assert 'after-shell' in text[offset:] # 不只是退出而丢了后续UART。
                 result={'passed':True,'ring3_shell':True,'ram_file_and_device_readback':True,'other_user_during_cq_wait':True,'qmp_iops':1,'error_exec_survived':True,'returned_to_monitor':True,'orphan_rounds':24,'memory_reuse_rounds':128,'capacity_rounds':4,'capacity_pages':1024,'simd_preempt_fork_exec':True,'fs_base_preempt_fork_exec':True,'compiler_static_tls':True,'posix_errno_io_subset':True,'positioned_vectors':True} # 只发布已观察事实。
-                result.update(sequence_event=True,event_waits=6,event_broadcast_workers=2,event_false_wake_rechecked=True,mutex_race_stages=4,mutex_race_actual_waits=1,mutex_race_mismatches=1,per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
+                result.update(bounded_queue=True,queue_capacity=4,queue_jobs=48,queue_close_drains=True,sequence_event=True,event_waits=6,event_broadcast_workers=2,event_false_wake_rechecked=True,mutex_race_stages=4,mutex_race_actual_waits=1,mutex_race_mismatches=1,per_execution_syscall_count=True,uncontended_mutex_pairs=8,uncontended_mutex_syscalls=0,runtime_tcb_identity=True,identity_reference_queries=7,shared_malloc=True,malloc_workers=4,malloc_rounds=96,owned_mutex=True,mutex_critical_updates=64,private_futex=True,futex_registrations=8,user_heap=True,shared_executions=True,thread_commands=2,worker_capacity=8,worker_reuse_rounds=24) # 关键字把实际已验收字段加入结果字典，不替代上面的逐命令检查。
                 result_path.write_text(json.dumps(result,indent=2)+'\n'); print('PASS user shell: alloc/file/async wait/other task/CQ/readback, failed exec, return to monitor') # 阶段演示实际完成。
                 return result # 总入口可收集。
             finally: # 包括断言、超时和QEMU错误。

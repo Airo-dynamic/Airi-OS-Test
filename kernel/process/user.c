@@ -86,6 +86,7 @@ extern const uint8_t airi_vector_elf_start[], airi_vector_elf_end[]; // 显式�
 extern const uint8_t airi_malloc_elf_start[], airi_malloc_elf_end[]; // 用户对象分配与页面缓存的独立ELF。
 extern const uint8_t airi_mutex_races_elf_start[], airi_mutex_races_elf_end[]; // 与普通锁独立链接的真实交错观察ELF。
 extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
+extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
 extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
 extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
 extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
@@ -123,6 +124,7 @@ static const struct executable executables[] = { // 每份映像字节由内核�
     {"heap-reset", airi_malloc_elf_start, airi_malloc_elf_end}, // 同一ELF新BSS和按需arena。
     {"mutex-races", airi_mutex_races_elf_start, airi_mutex_races_elf_end}, // 暂停点只存在于此观察映像。
     {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
+    {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
     {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
     {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
     {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
