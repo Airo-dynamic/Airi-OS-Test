@@ -197,3 +197,8 @@ airi_events_elf_end: /* 范围右端不含字节。 */
 airi_queue_elf_start: /* 从完整文件头开始。 */
 .incbin AIRI_QUEUE_ELF /* 真实链接的自有队列程序。 */
 airi_queue_elf_end: /* 右端不含字节。 */
+.balign 16 /* 线程源码兼容入口的独立观察ELF。 */
+.global airi_pthread_elf_start, airi_pthread_elf_end /* 内核只借完整文件范围。 */
+airi_pthread_elf_start: /* 从ELF头开始装载。 */
+.incbin AIRI_PTHREAD_ELF /* 自有适配器与真实用户观察。 */
+airi_pthread_elf_end: /* 范围右端不包含字节。 */

@@ -374,6 +374,11 @@
       "id": "K61",
       "title": "K61 · 有界工作队列、背压与关闭排空",
       "document": "dev-log/core/61-bounded-queue.md"
+    },
+    {
+      "id": "K62",
+      "title": "K62 · 正确的线程函数、指针结果与错误返回",
+      "document": "dev-log/core/62-pthread-entry.md"
     }
   ]
 }

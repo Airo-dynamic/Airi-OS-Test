@@ -596,3 +596,18 @@ $(OUT)/user/queue.elf: $(USER_COMMON) $(OUT)/user/threads-lib.o $(OUT)/user/thre
 $(OUT)/labs/airios/images.o: $(OUT)/user/queue.elf
 # 路径只交给镜像打包，不读取主机业务结果。
 $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_QUEUE_ELF='"$(OUT)/user/queue.elf"'
+
+# POSIX形状的线程入口适配单独选择，不改变早期用户程序。
+$(OUT)/user/pthread-lib.o: labs/airios/libc/pthread.c Makefile
+# 与观察main的pthread-probe.o分别保存。
+	@mkdir -p $(dir $@)
+# 只使用自有头与相同目标，不链接宿主pthread。
+	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
+# 启动包使用已同步malloc，观察门额外选择event库。
+$(OUT)/user/pthread.elf: $(USER_COMMON) $(OUT)/user/posix.o $(OUT)/user/heap-algorithm.o $(OUT)/user/malloc.o $(OUT)/user/mutex-lib.o $(OUT)/user/threads-lib.o $(OUT)/user/thread-entry.o $(OUT)/user/event-lib.o $(OUT)/user/pthread-lib.o $(OUT)/user/pthread-probe.o labs/airios/program.ld
+# 全部函数与线程运行在真实guest用户地址空间。
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(filter %.o,$^) -o $@
+# 初始目录等待最终静态ELF。
+$(OUT)/labs/airios/images.o: $(OUT)/user/pthread.elf
+# 路径仅由incbin读取，不运行主机线程示例。
+$(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_PTHREAD_ELF='"$(OUT)/user/pthread.elf"'

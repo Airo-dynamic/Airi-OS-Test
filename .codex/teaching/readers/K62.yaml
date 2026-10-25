@@ -1,0 +1,35 @@
+checkpoint: K62
+baseline: baseline.yaml
+start: K61
+current_operation: 用正确函数类型的启动适配器连接pthread形状与真实线程，交接包、指针结果和正错误
+already_explained:
+- concept: 共享执行者与结果收拢
+  at: ../../../dev-log/core/52-shared-executions.md#thread-join-lifetime
+  establishes: 主管理worker，结果64位，join后安全栈回收；尚非对等线程管理
+- concept: 共享malloc与对象交接
+  at: ../../../dev-log/core/55-shared-malloc.md#malloc-transfer-object
+  establishes: 内部元数据由锁保护，应用仍决定对象最后使用与归还权
+- concept: TCB身份生命周期
+  at: ../../../dev-log/core/56-runtime-identity.md#runtime-fast-query
+  establishes: 有效用户头读取TID，fork/exec/worker发布由内核更新
+first_use:
+- concept: pthread正错误与errno不变
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-contract
+  establishes: 0成功并另写身份，失败正错误；内部malloc副作用必须恢复，明确当前非完整POSIX
+- concept: 类型正确的适配入口和包所有权
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-typed-packet
+  establishes: 不强转不兼容函数指针，long适配器按void*签名调用，先复制/free包再运行，用户参数仍借用
+- concept: 成功与失败分配交接
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-create-ownership
+  establishes: 创建失败包归主，成功后只归worker且可早于create返回释放，创建者不再读取
+- concept: 私人long槽与结果提交
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-join-result
+  establishes: 内核不直接写强转的void**，成功后恢复指针，NULL仍收拢；self join/当前限制明确
+- concept: 两个资源失败位置
+  at: ../../../dev-log/core/62-pthread-entry.md#pthread-capacity-and-allocation
+  establishes: 容量失败归还已分配包，满arena失败恢复malloc写入的errno，34次成功与失败分开
+borrowed:
+- component: Linux man-pages pthread_create/join/pthreads行为参考，已有TLS/malloc/原始线程
+  contract: 本项目仅声明实现的源码子集，不提供Linux ABI或完整POSIX；官方OpenGroup页面本轮403，使用Linux项目官方手册核对
+feedback: []
+not_inferred: 源码和运行不推断掌握；无新Linux/GUI运行，未宣称C++线程库已可用

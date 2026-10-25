@@ -90,3 +90,5 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K60 变化序号](../core/60-sequence-events.md)把旧快照、原始通知与真正变化分开，验证两位worker重查、广播、迟到新快照与拒绝回绕。
 
 [K61 有界工作队列](../core/61-bounded-queue.md)组合锁和变化通知，实际验证四槽背压、空满超时、双侧关闭排空及48项锁外计算。
+
+[K62 线程源码入口](../core/62-pthread-entry.md)以正确函数类型交接启动包和指针结果，保留errno并返回正错误，验证容量和分配失败的归还。

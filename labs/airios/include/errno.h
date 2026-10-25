@@ -2,6 +2,7 @@
 #define AIRI_ERRNO_H // 包含保护。
 #define EPERM 1 // 当前操作不允许。
 #define ENOENT 2 // 名称不存在。
+#define ESRCH 3 // 当前线程身份不存在或已经收取。
 #define EINTR 4 // 预留中断错误名；当前尚无信号，不会主动制造它。
 #define EIO 5 // 设备或I/O错误。
 #define ENOEXEC 8 // 映像格式不支持。
@@ -22,6 +23,7 @@
 #define ENOSYS 38 // 当前未实现的操作。
 #define ETIMEDOUT 110 // 有界等待预算已经用完。
 #define EOVERFLOW 75 // 不能表示请求结果。
+#define ENOTSUP 95 // 当前明确不支持的属性或线程管理方式。
 #ifdef __cplusplus // 同一头以后可被C++源码使用，函数仍用C链接名。
 extern "C" { // 防止把运行库入口编码成C++重载符号。
 #endif // C11跳过链接语言包装。
