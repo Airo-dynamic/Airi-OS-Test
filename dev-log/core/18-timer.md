@@ -1,19 +1,20 @@
 # K18 · 用真实时钟 IRQ 唤醒停下的 CPU
 
-从 K17 与 L02 继续。内核能够分配和映射内存，却还只能主动轮询。P3先建立周期性时钟：PIT定时器产生IRQ0，PIC中断控制器把它交给CPU，CPU查IDT32，入口保存现场，C计数并确认中断，最后iretq恢复。我们让正常代码执行hlt暂停，等至少五次真实IRQ后继续输出。
+内存已能分配和映射，命令输入却仍靠主动轮询。现在让 CPU 执行 hlt 暂停，由周期事件把它叫醒：PIT 产生 IRQ0，PIC 提供向量 32，CPU 查 IDT32，汇编保存现场，C 增计数并确认服务结束，iretq 再回到被打断的位置。正常代码累计至少五次 IRQ 后才报告。
 
-本节新建timer.h和timer.c，替换异常分派、汇编入口、Makefile、main.c和启动观察脚本。内存设施不变，图形仍可跳过。这里尚不切换任务，收到一次中断也不代表已实现调度。
+从 K17/L02 继续，新增 timer 接口和实现，接入异常分派、汇编、Make/main 与启动观察，内存保持。这里还不选另一个任务，时钟能进入不代表调度已完成。
 
 <a id="pit-pic-route"></a>
-## 从设备事件到 CPU 入口
 
-PIT是兼容PC的可编程计数器，输入时钟约1.193182MHz；设置整数分频11931，输出约100Hz，不是精确墙钟。PIC负责在允许的IRQ线上收集请求，再提供中断向量。IRQ0是设备连线编号，IDT32是CPU查入口时使用的向量，两者由PIC初始化中的基址0x20关联。0–31已经属于CPU异常，不能让设备继续使用旧PC默认的重叠向量。
+## 设备在计数，CPU 是否收到取决于整条通路
 
-允许中断需要三个环节都成立：设备确实产生事件、控制器不屏蔽该线、CPU的RFLAGS.IF为1。cli/sti只控制最后一环，不会让被PIC屏蔽的IRQ出现。进入0x8e中断门时CPU清IF，处理函数先增加计数，再向PIC发送EOI，声明本次服务结束；漏掉EOI通常只能收到第一次，后续请求仍被控制器认为未完成。
+PIT 输入约 1.193182 MHz，整数除数 11931 得约 100 Hz，不是精确墙钟。IRQ0 是设备连线编号，IDT32 是 CPU 的入口编号，PIC 以基址 0x20 建立对应；0–31 已归异常，不能重叠。
 
-固定q35的UEFI启动还可能保留启用的本地APIC，而其LINT0的ExtINT入口被屏蔽。此时PIC已经收到PIT请求，CPU仍收不到它。当前首版选择单CPU的兼容PIC路径：在cli期间清IA32_APIC_BASE的全局使能位，保留物理基址；不配置本地APIC MMIO、IOAPIC或SMP路由，遇到x2APIC明确拒绝。第二平台或多核需要另写对应时钟与中断驱动，不能照搬这一选择。
+一次事件需同时满足设备产生、控制器未屏蔽、CPU IF=1。cli/sti 只改最后一项；中断门 0x8e 进入时清 IF，处理函数加 ticks 后发送 EOI，让 PIC 知道该次服务结束。少 EOI 可能只收到第一次，不能靠延长等待解决。
 
-**新建 `include/airi/timer.h`。** tick是实际处理的事件计数，不直接当作时间戳。
+固定 q35 的 UEFI 还可能留下本地 APIC 已启用、LINT0 ExtINT 被屏蔽的状态，PIT/PIC 虽有请求，CPU 仍收不到。首版选择单核兼容 PIC，在 cli 期间仅清 IA32_APIC_BASE 全局使能并保留基址；x2APIC 明确拒绝。不配置 APIC MMIO、IOAPIC 或 SMP，其他平台需要自己的路由实现。
+
+**新建 `include/airi/timer.h`。** tick 是实际处理事件数，不直接当时间戳。
 
 <!-- write: include/airi/timer.h -->
 ```c
@@ -28,15 +29,18 @@ void airi_timer_demo(void); // 等待真实时钟中断，证明halt后能继续
 ```
 
 <a id="timer-config"></a>
-## 初始化必须发生在开放 IF 之前
 
-timer_init先关闭IF，选择PIC兼容交付，屏蔽两片PIC，再依次写ICW1–4。主PIC基址0x20、从PIC基址0x28；主片IRQ2是级联输入，故ICW3的位2为1，从片身份为2。最后模式1选择8086交付与软件EOI。端口0x20/0xa0承接控制字，0x21/0xa1承接后续初始化与掩码，端口地址属于PC平台驱动。
+## 配置和软件状态全部就绪，最后才允许交付
 
-PIT控制字0x34选通道0、低字节再高字节、模式2周期计数和二进制。通道0的数据端口为0x40，控制端口为0x43。先写完分频值并初始化ticks，再只开放IRQ0，最后sti。键盘继续轮询，其他IRQ都屏蔽，不声称已经实现通用设备中断路由。
+timer_init 先关 IF、选择兼容路径并屏蔽两片 PIC，再写 ICW1–4。主基址 0x20、从基址 0x28，主片 IRQ2 级联所以位 2 置一，从片身份为 2，最后选 8086/软件 EOI。0x20/0xa0 为控制，0x21/0xa1 为初始化与掩码，均属固定 PC 驱动。
 
-IRQ函数只改一个对齐64位volatile计数并发送EOI，不写串口、不分配内存。当前单核下读取不会撕裂，volatile使编译器每次重新读取；它不是多核同步方案。正常代码的hlt在IF=1时可被IRQ唤醒；若事件恰好在条件检查与hlt之间发生，还会在下一周期醒来，所以演示允许elapsed_ticks大于5。等待队列的防丢唤醒要到真正任务阻塞时再处理。
+PIT 控制端口 0x43 写 0x34，选择通道 0、低后高字节、模式 2、二进制，再经 0x40 写完整除数。ticks 清零后只开放 IRQ0，配置文字也在 sti 前输出；若后面没收到 IRQ，至少知道已完成哪部分。键盘继续轮询，其余线屏蔽。
 
-**新建 `kernel/arch/x86_64/timer.c`。** TIMER_CONFIG在开放IF之前输出，收不到IRQ时仍能定位已完成的配置。
+IRQ 只更新对齐的 64 位 volatile ticks 并 EOI，不写串口、不分配。单核读不撕裂，volatile 保留实际访问，不是多核同步。与 airi_halt 的 cli/hlt 不同，这里 IF=1 的 hlt 可以被时钟唤醒。
+
+若 tick 恰在检查条件与 hlt 之间到达，下一周期仍会唤醒，elapsed 可以大于 5。本演示依赖周期事件，不声称已解决真正任务等待的丢唤醒；那需要后续阻塞协议。
+
+**新建 `kernel/arch/x86_64/timer.c`：**
 
 <!-- write: kernel/arch/x86_64/timer.c -->
 ```c
@@ -100,11 +104,12 @@ void airi_timer_demo(void) { // 此时只演示中断唤醒，不存在任务调
 ```
 
 <a id="timer-entry"></a>
-## 复用已解释的现场，不把 IRQ 当故障
 
-汇编增加TRAP32，没有硬件错误码，继续补零并保存全部通用寄存器。IDT32单独引用这个入口，C分派在CPU异常报告之前识别向量32，交给时钟函数后直接返回。否则每个tick都会误走PANIC，或被记录为无意义异常。正常上下文的寄存器、原栈和RFLAGS都由既有iretq路径恢复。
+## 沿既有现场进入，但不要把时钟当错误
 
-**完整替换 `kernel/arch/x86_64/traps.S`。** 只增加时钟编号入口，其余保存/恢复布局保持。
+TRAP32 无硬件错误码，仍补零并保存通用寄存器，IDT32 指向它。C 分派要在普通异常报告之前识别 32，交给 timer_interrupt 后直接返回，否则每次 tick 都会误报甚至 PANIC。已有 iretq 路径恢复寄存器、原栈和 RFLAGS。
+
+**完整替换 `kernel/arch/x86_64/traps.S`。** 原保存布局不变，只增加设备向量入口。
 
 <!-- write: kernel/arch/x86_64/traps.S -->
 ```asm
@@ -254,7 +259,9 @@ airi_trap_entries: /* 连续 32 个 64 位入口地址。 */
 .section .note.GNU-stack,"",@progbits /* 声明不需要可执行栈。 */
 ```
 
-**完整替换 `kernel/arch/x86_64/trap.c`。** IDT32和设备分派有明确身份，其余CPU故障继续使用原语义。
+安装 IDT32 时给它明确入口，分派根据向量选择时钟；UD/GP/PF 仍执行自己的精确恢复或停止条件。设备成功处理与故障恢复不共用一套判定。
+
+**完整替换 `kernel/arch/x86_64/trap.c`：**
 
 <!-- write: kernel/arch/x86_64/trap.c -->
 ```c
@@ -379,7 +386,9 @@ void airi_trap_memory_probe(uint64_t address, enum airi_memory_fault kind) { // 
 }
 ```
 
-**完整替换 `Makefile`。** 默认加入timer.c，timer-masked只给作者的单独故障镜像定义宏。
+默认内核加入 timer.c；timer-masked 只在独立 profile 定义测试宏，不把故意屏蔽写入普通镜像。
+
+**完整替换 `Makefile`：**
 
 <!-- write: Makefile -->
 ```make
@@ -538,7 +547,9 @@ lab-boot-info:
 	./build/labs/boot-info
 ```
 
-**完整替换 `kernel/main.c`。** 内存完成之后才初始化设备时钟，后续命令循环运行期间IRQ持续计数。
+main 在异常和内存就绪后初始化时钟，先完成五次唤醒演示再进入命令循环。之后 IRQ 仍持续计数，但不会在中断里调用任务切换。
+
+**完整替换 `kernel/main.c`：**
 
 <!-- write: kernel/main.c -->
 ```c
@@ -627,7 +638,9 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 }
 ```
 
-**完整替换 `scripts/boot.py`。** 正常READY还必须伴随真实时钟演示完成。
+启动观察除 READY 外增加真实 TIMER_DEMO_OK，要求本次已经经历设备入口；只打印配置或 CPU 仍运行都不足以通过。其余截止和清理沿用原工具。
+
+**完整替换 `scripts/boot.py`：**
 
 <!-- write: scripts/boot.py -->
 ```python
@@ -735,6 +748,8 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
+运行正常回归，先检查设备配置，再检查累计事件后的完成记录。
+
 <!-- run -->
 ```sh
 ./airios build  # 构建普通时钟镜像。
@@ -744,12 +759,13 @@ check('normal')  # 真正收到IRQ0、hlt唤醒后才能READY。
 PYTIMER
 ```
 
-本轮正常输出 `[TIMER_CONFIG] lapic=disabled pic_mask=0xfe pit_divisor=11931`，随后 `[TIMER_DEMO_OK] ... elapsed_ticks=5`，再进入READY与串口命令。该结果意味着真实事件经过IDT32和iretq，不是执行固定次数的CPU空循环。
+既有正常记录先为 `[TIMER_CONFIG] lapic=disabled pic_mask=0xfe pit_divisor=11931`，再有 elapsed_ticks=5 的 TIMER_DEMO_OK，随后 READY 和命令循环。它证明实际事件经过 IDT32 返回，不是固定次数空循环。
 
 <a id="masked-timer"></a>
-## 完整演示“设备计数，但 IRQ 被屏蔽”
 
-下面的独立镜像把PIC掩码改成0xff，PIT仍然运行，IF也会打开，但CPU不应再被IRQ0唤醒。统一CLI的日常五配置集合不包含这个预期超时镜像；作者用已有build函数显式构建它。观察仍使用35秒截止时间，要求先到TIMER_CONFIG，才把后续未就绪超时解释为本次故障结果。
+## 同一设备仍运行，只切断 PIC 交付
+
+timer-masked 将掩码改 0xff，PIT 仍计数、IF 仍打开，但 IRQ0 不能交到 CPU。它是预期超时的独立镜像，不在日常五配置列表，下面用已有 build 显式构建。观察仍有 35 秒期限，并要求先看到 TIMER_CONFIG，才将后续无完成解释为这项故障。
 
 <!-- run -->
 ```sh
@@ -770,10 +786,10 @@ else:  # 没有抛错意味着被屏蔽的设备竟完成等待。
 PYMASK
 ```
 
-本轮该镜像确实输出pic_mask=0xff后超时，没有TIMER_DEMO_OK或READY，检查器按预期失败并清理QEMU。原日志保留，后续正常镜像不继承其宏。
+既有故障记录在 pic_mask=0xff 后超时，没有 TIMER_DEMO_OK/READY，检查器失败并回收 QEMU；普通构建不会继承该宏。
 
-若正常镜像没有IRQ，使用QMP human-monitor-command查看info registers、info pic、info irq和info lapic：RFLAGS.IF为1、HLT=1表示CPU在等；PIC的IRR位0为1且IMR为0xfe表示请求已到达且未屏蔽；本地APIC的LVT0若仍masked，就需要检查兼容路径是否真的关闭APIC。初始化首版曾实际遇到这组状态，修正交付路径后才得到五次tick；不能只扩大超时掩盖路由错误。
+正常版若无 IRQ，QMP human-monitor-command 可查 info registers/pic/irq/lapic：IF=1 且 HLT=1 表示等待，IRR 位 0=1、IMR=0xfe 表示请求到达未屏蔽；若本地 LVT0 仍 masked，就核对兼容路径。首版曾遇到这组状态，修正交付才得到 tick，不以扩大超时掩盖它。
 
-Linux程序通常调用clock_gettime、poll等接口，不直接配置PIT/PIC；Linux也可能使用其他硬件时钟与tickless机制。本节只亲手理解设备事件、控制器掩码、CPU入口、EOI与返回，不把当前100Hz兼容路径当成Linux现代时钟实现。下一节让两个内核任务拥有各自栈，主动交接CPU，随后再加入用户态抢占。
+Linux 程序调用 clock_gettime/poll，不直接配置 PIT/PIC，内核也可选其他时钟与 tickless。本章只建立事件、掩码、入口、EOI、返回的关系，不代表现代 Linux 时钟实现。下一章让两个保留各自栈的任务主动交接，之后才有用户态抢占。
 
-依据：[Intel 8254 数据手册](https://www.scs.stanford.edu/25sp-cs212/pintos/specs/8254.pdf)、[Intel I/O 平台手册的8259兼容中断控制器章节](https://cdrdv2-public.intel.com/332995/332995-skl-io-platform-datasheet-vol1_rev004.pdf)和[Intel系统编程手册](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)的APIC全局使能与中断门章节。
+依据 [8254 手册](https://www.scs.stanford.edu/25sp-cs212/pintos/specs/8254.pdf)、[8259 兼容控制器章节](https://cdrdv2-public.intel.com/332995/332995-skl-io-platform-datasheet-vol1_rev004.pdf)、[Intel 系统编程手册](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)。

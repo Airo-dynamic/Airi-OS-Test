@@ -27,3 +27,8 @@ not_assumed:
 limits:
 - 当前程序固定低256MiB、最多63段数据页和一页初始栈
 - Linux/GDB远端本轮未验证，运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/21-user-elf.md#elf-file-memory
+  establishes: 以 initialized、8192 字节 zeroed 和用户 main 串起文件描述、整份校验、用户库、初始栈及两次链接，明确 view 尚未分配页。

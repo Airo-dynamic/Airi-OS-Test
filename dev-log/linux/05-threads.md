@@ -5,20 +5,20 @@
 <a id="threads-queue-predicate"></a>
 ## 条件变量不保存任务，任务和关闭状态在队列里
 
-queue保存两个整数、head/count和closed，由同一mutex保护。生产者先锁住，满且未关闭时在while里等not_full；消费者先锁住，空且未关闭时在while里等not_empty。pthread_cond_wait把释放mutex和进入等待作为交接，返回时重新持锁；别人可能先消费了任务，也可能出现虚假唤醒，所以返回后仍重查谓词，不能改成只判断一次的if。
+消费者面对空队列，不能先解锁、再登记等待：生产者可能恰好在两者之间放入任务并通知，消费者随后睡下，再也没有人叫它。让检查、释放锁与等待正确交接，才是这里引入条件变量的原因。queue 保存两个整数、head/count 和 closed，由同一 mutex 保护。生产者先锁住，满且未关闭时在while里等not_full；消费者先锁住，空且未关闭时在while里等not_empty。pthread_cond_wait把释放mutex和进入等待作为交接，返回时重新持锁；别人可能先消费了任务，也可能出现虚假唤醒，所以返回后仍重查谓词，不能改成只判断一次的if。
 
-写入任务、增加count和通知发生在锁内；解锁后消费者取得同一锁，才读取并取走对应任务。signal不是一个可累计的“任务数量”，错过signal也不该丢掉已经变真的count条件。生产者结束时设closed并broadcast，消费者先排空已有任务，再在closed且empty时退出；不能一看到closed就丢弃尾部工作。
+被通知回来也不是取得了一张“任务归我”的凭证；任务仍在共享队列中，需要重新持锁确认。写入任务、增加 count 和通知发生在锁内；解锁后消费者取得同一锁，才读取并取走对应任务。signal不是一个可累计的“任务数量”，错过signal也不该丢掉已经变真的count条件。生产者结束时设closed并broadcast，消费者先排空已有任务，再在closed且empty时退出；不能一看到closed就丢弃尾部工作。
 
-两名消费者各写自己的worker结果，main在join后读取。completed是独立统计，两个线程用relaxed原子加一，防止增量相互覆盖；它不负责发布queue数组，也不能代替mutex或join来判断普通结果字段已经可安全读取。短暂模拟工作放在锁外，避免拿着队列锁睡眠。
+队列保护的是任务交接，统计与线程结束又有自己的同步关系。两名消费者各写自己的 worker 结果，main在join后读取。completed是独立统计，两个线程用relaxed原子加一，防止增量相互覆盖；它不负责发布queue数组，也不能代替mutex或join来判断普通结果字段已经可安全读取。短暂模拟工作放在锁外，避免拿着队列锁睡眠。
 
 pthread接口返回错误码本身，所以check_thread先把这个返回码交给perror，不借用陈旧errno。getpid相同、gettid不同的输出用来辨认内核调度线程；pthread_t是库的句柄，不等于这个整数TID。
 
 <a id="threads-futex-publication"></a>
 ## 数据先写，release发布，acquire后再读
 
-第二个实验只有一次发布：普通payload写42，随后把atomic_int flag从0以release存成1。等待者用acquire加载，确实看到1之后才读payload，这建立普通数据的可见关系。WAKE只负责让可能睡眠的内核线程重新获得运行机会，不替代C语言的release/acquire；volatile也不提供这种线程同步。
+条件变量由 pthread 帮忙完成等待交接。接下来把同一缺口缩到一个词：等待者看到 flag=0 后准备睡，发布者可能已经把它改为 1 并发过唤醒。futex 让内核把“值仍等于 0”与入睡放在一起判断。第二个实验只有一次发布：普通payload写42，随后把atomic_int flag从0以release存成1。等待者用acquire加载，确实看到1之后才读payload，这建立普通数据的可见关系。WAKE只负责让可能睡眠的内核线程重新获得运行机会，不替代C语言的release/acquire；volatile也不提供这种线程同步。
 
-futex_word要求四字节大小和对齐，并检查当前目标atomic_int为lock-free。C代码仍用原子接口访问，内核通过SYS_futex读取同一个词。FUTEX_WAIT_PRIVATE要求内核只在词仍为期望值0时原子入睡。若发布发生在用户load之后、实际等待之前，内核看见1会返回EAGAIN，等待者重查后继续，不会睡过已经过去的WAKE。若已经入睡，后续WAKE让它回来，但它仍需重查条件。
+但避免睡过通知，只保证线程会再获得执行机会；payload 是否可安全读取，仍由前面的 release/acquire 关系承担。futex_word 要求四字节大小和对齐，并检查当前目标atomic_int为lock-free。C代码仍用原子接口访问，内核通过SYS_futex读取同一个词。FUTEX_WAIT_PRIVATE要求内核只在词仍为期望值0时原子入睡。若发布发生在用户load之后、实际等待之前，内核看见1会返回EAGAIN，等待者重查后继续，不会睡过已经过去的WAKE。若已经入睡，后续WAKE让它回来，但它仍需重查条件。
 
 waiter_ready只安排演示开始时序，不保证线程已经睡着；二十毫秒延迟鼓励观察，不是正确性的前提。wait_calls记录实际发出WAIT调用次数，actually_woken记录WAKE真正唤醒数，后者可以为0，不能硬写成1。等待用CLOCK_MONOTONIC总截止两秒，每次EAGAIN或EINTR后只把剩余跨度交给相对WAIT，不不断重置预算。
 
@@ -181,7 +181,7 @@ int main(void) { // 所有线程只修改本独立进程内的演示状态。
 <a id="threads-run-trace"></a>
 ## 区分自己调用的futex与库内部的等待
 
-run.sh用-pthread同时编译和链接，再经strace -f记录所有线程的futex与clone。条件变量、join和stdio内部也可能使用futex，不能把每一条都归到我们手写的flag；FUTEX_OK会记录该原子词地址，结合调用栈和TID辨认。strace本身会改变调度与等待次数，不能拿这个输出当无观察开销的性能测试。
+队列和单词实验都可能出现 futex 系统调用，仅看到这个名字还不能知道是哪一次等待。run.sh 用 -pthread 同时编译和链接，再经strace -f记录所有线程的futex与clone。条件变量、join和stdio内部也可能使用futex，不能把每一条都归到我们手写的flag；FUTEX_OK会记录该原子词地址，结合调用栈和TID辨认。strace本身会改变调度与等待次数，不能拿这个输出当无观察开销的性能测试。
 
 整个程序由GNU timeout限制二十秒，错误或超时不发布passed。缺cc、strace或timeout会打印对应Debian/Ubuntu与Arch/CachyOS修复命令，只提示所需依赖，不自动在个人主机提权安装。环境文件记录真实内核、编译器、跟踪器及可查询的libc版本。
 
@@ -434,13 +434,14 @@ if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义�
         sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
 ```
 
+
 ```sh
 ./airios linux-lab --phase p5-threads # 在个人Linux主机编译、运行并取回线程与futex观察。
 ```
 
-2026-10-16本轮SSH实际返回255，Linux编译、线程执行、内核TID与strace均未验证。Mac只编译环境拒绝分支，运行返回77；Shell语法通过。连接失败见artifacts/linux-p5-threads/connection.log，remote.json明确verified=false。
+2026-10-16 的既有 SSH 连接实际返回 255，Linux编译、线程执行、内核TID与strace均未验证。Mac只编译环境拒绝分支，运行返回77；Shell语法通过。连接失败见artifacts/linux-p5-threads/connection.log，remote.json明确verified=false。
 
-连接可用时，QUEUE_OK应有tasks=20、sum=210，等待次数按真实调度记录；FUTEX_OK应读value=42，实际等待/唤醒数允许变化。可以在Linux GDB中break consume、run，再用info threads和thread apply all bt观察哪个线程在队列等待，哪个在主流程；本轮没有实际GDB停点证据。
+连接可用时，QUEUE_OK应有tasks=20、sum=210，等待次数按真实调度记录；FUTEX_OK应读value=42，实际等待/唤醒数允许变化。可以在Linux GDB中break consume、run，再用info threads和thread apply all bt观察哪个线程在队列等待，哪个在主流程；既有记录没有实际 GDB 停点证据。
 
 回到BOSS线程池时，先找队列容量、关闭谓词和通知点，再判断等的是pthread内核线程还是运行时任务。bthread由运行时把任务调度到承载线程，任务数量不等于这里的TID数量；具体阻塞边界要看使用的是哪种bthread接口。AiriOS当前没有实现futex、pthread或多核，本实验补足Linux路径，不能用其输出冒充自制内核能力。
 

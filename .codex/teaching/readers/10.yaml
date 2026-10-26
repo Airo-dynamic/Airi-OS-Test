@@ -44,3 +44,8 @@ source_reading:
   at: ../../../dev-log/core/10-input.md#code-kernel-arch-x86-64-input-c-3
   establishes: 轮询返回逻辑键整数，0 表示本轮无可提交字符；先检查端口状态再读取字节，键盘字节交解码函数转换，UART 的 NUL 同样不成为命令字符
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/10-input.md#scan-code
+  establishes: 键盘前缀与修饰状态跨解码调用保留，UART 则直接交字节；回车产生新行后才发送和发布计数。父进程一项一等，区分主机管道与设备容量。

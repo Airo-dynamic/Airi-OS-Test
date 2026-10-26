@@ -39,3 +39,8 @@ source_reading:
   at: ../../../dev-log/core/09-console.md#code-kernel-console-console-c-1
   establishes: 私有 emit(c, ...) 接收拥有输入和输出环的 console 对象，用有限格式化生成当前文字；环形下标用取余回绕，写入计数和可见行数分别控制覆盖与读取
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/09-console.md#console-state
+  establishes: 同一 mem 从三次字符输入到回车分派、历史副本和输出环，再由主机显示；逻辑号与槽位、草稿与历史、状态变化与命令执行分别解释。

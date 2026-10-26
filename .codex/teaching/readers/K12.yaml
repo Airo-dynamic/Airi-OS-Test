@@ -36,3 +36,8 @@ feedback:
   observation: 完整记录要求仅在boot.check成立，console等待原先只匹配子串。
   revision: console等待完整换行，去确定提示符和CRLF后精确比较命令字段；READY按独立标记加空格边界接受字段。
 not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/12-boot-tests.md#qmp-channel
+  establishes: 一次请求用发送前 offset 与新计数关联完成，QMP 控制和 UART 数据分别建模；正常/拒绝成功含义、JSON 分帧、端点与进程寿命完整保留。

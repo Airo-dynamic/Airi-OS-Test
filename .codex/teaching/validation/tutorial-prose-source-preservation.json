@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-24T18:24:53.283713+08:00",
+  "baseline": "4c7aafa",
+  "checkpoints_compared": 45,
+  "protected_00_02_identical": true,
+  "kernel_lab_public_api_and_build_source_identical": true,
+  "allowed_author_tool_hash_changes": [
+    {
+      "checkpoint": "T01",
+      "path": "scripts/course.py",
+      "before": "adfb6469d0b688b5acc883c7034decd592aa5d1b74905dd8c9d3a2fffb7a31b7",
+      "after": "89eeff21d03c67266f1b355e08110e722657ed98c7027ebed21789b501b4f128"
+    },
+    {
+      "checkpoint": "T02",
+      "path": "scripts/course.py",
+      "before": "adfb6469d0b688b5acc883c7034decd592aa5d1b74905dd8c9d3a2fffb7a31b7",
+      "after": "89eeff21d03c67266f1b355e08110e722657ed98c7027ebed21789b501b4f128"
+    },
+    {
+      "checkpoint": "T02",
+      "path": "scripts/snapshots.py",
+      "before": "dfdaf1d352d662735c73b025eed5e929a6cab1834f34684d11df4dd2f2c4b288",
+      "after": "06c227a4d303cad82ba710ae584031ad4229ec706b9863ae5f629ce8698af2d8"
+    },
+    {
+      "checkpoint": "T03",
+      "path": "scripts/course.py",
+      "before": "adfb6469d0b688b5acc883c7034decd592aa5d1b74905dd8c9d3a2fffb7a31b7",
+      "after": "89eeff21d03c67266f1b355e08110e722657ed98c7027ebed21789b501b4f128"
+    },
+    {
+      "checkpoint": "T03",
+      "path": "scripts/snapshots.py",
+      "before": "dfdaf1d352d662735c73b025eed5e929a6cab1834f34684d11df4dd2f2c4b288",
+      "after": "06c227a4d303cad82ba710ae584031ad4229ec706b9863ae5f629ce8698af2d8"
+    }
+  ],
+  "pilot_documents": {
+    "dev-log/00-first-tool.md": {
+      "original_anchors_retained": 5,
+      "commands_identical": true
+    },
+    "dev-log/core/05-boot-contract.md": {
+      "original_anchors_retained": 7,
+      "commands_identical": true
+    },
+    "dev-log/core/19-kernel-tasks.md": {
+      "original_anchors_retained": 4,
+      "commands_identical": true
+    },
+    "dev-log/core/31-async-queues.md": {
+      "original_anchors_retained": 5,
+      "commands_identical": true
+    },
+    "dev-log/linux/07-uring.md": {
+      "original_anchors_retained": 3,
+      "commands_identical": true
+    }
+  },
+  "limit": "Byte and anchor preservation does not prove teaching quality. No QEMU or remote lab rerun."
+}

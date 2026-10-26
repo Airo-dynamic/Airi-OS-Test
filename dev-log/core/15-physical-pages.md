@@ -1,19 +1,20 @@
 # K15 · 把可用 RAM 交给明确的页面所有者
 
-从 K14 继续。异常已经能定位到指令，接下来需要一块不会覆盖加载器、内核栈或显示设备的 RAM。启动图回答“哪些范围原本可用”，分配器还必须回答“这些可用范围中哪些页已经交给调用者”。本节新建物理页池，借出两页，在其中一页的真实直接映射上写入并读回，归还后重新分配，确认所有权与数量恢复。
+异常路径已能报告坏指令，现在要取得一块可写且不会覆盖内核、加载器或显示设备的 RAM。启动地图告诉我们范围最初的用途，却不会在借出一页后自动改写；分配器必须另记运行状态，防止把同一页同时交给两个调用者。
 
-保留 K14 的异常入口与启动适配。新建 pages.h、pages.c、memory.c 和一个主机边界观察，再替换 Makefile 与 main.c；中途先不编译。图形、动态内存分配和进程都不是本节前置。
+本章借出两页，在第一项的真实 HHDM 别名写入并读回，再归还、复用，最后核对数量恢复。保留启动与异常设施，新增 pages 接口、算法、内存入口和主机边界观察，再接 Make/main；全部写齐后构建，不先要求堆、进程或图形。
 
 <a id="page-ownership"></a>
-## 地图描述和分配状态是两件事
 
-我们固定每页 4096 字节。物理地址除以 4096 得到页帧号，页帧号乘 4096 回到页起点。一个 usable 区域不一定恰好对齐：起点要向上取整，右端要向下取整，只有完全落在区域里的页才能借出。例如 `[0x10003,0x14000)` 只包含 0x11000、0x12000、0x13000 三个完整页；不能从 0x10000 开始覆盖前面的保留字节。
+## 一页能不能分配，需要两种状态共同判断
 
-两张位图分别记录 managed 和 allocated。一位对应一页，页号除 8 定位字节、余 8 定位其中的位。managed=0 的页面从未属于这个页池；managed=1 且 allocated=0 才是空闲；两位都是 1 才是已借出。释放只清 allocated，不能把 reserved 或内核页改造成 usable。页零永久保留，让返回值 0 可以明确表示耗尽。
+固定页大小 4096。地址除以 4096 得页号，页号乘回得到起点。usable 范围可能没对齐，例如 `[0x10003,0x14000)` 只有 0x11000、0x12000、0x13000 三个完整页；起点向上、右端向下取整，不能覆盖 0x10000 后的保留部分。
 
-首版位图只覆盖低 1 GiB，约占 64 KiB 内核静态空间；当前固定机器只有 256 MiB。高于上限的 RAM 保留不用，并在日志输出容量限制。这样不需要先有堆来存页池元数据，也没有假装支持任意大机器。元数据属于内核映像，内核物理范围再次被排除；BOOT_RECLAIM、ACPI、帧缓冲等范围本轮一律不回收。
+地图归类以后，managed 位图标哪些页属于池，allocated 再标其中哪些已借出。每位一页，页号除 8 找字节、余 8 找位。managed=0 从未归池；1/0 可分配，1/1 已有所有者。归还只清 allocated，不把 reserved 变 usable，所以两张位图不能合并。页零始终保留，使返回 0 明确表示失败。
 
-**新建 `include/airi/pages.h`。** API 返回物理页起点，不返回可直接解引用的宿主或内核虚拟指针。
+首版只覆盖低 1 GiB，两张位图约占 64 KiB 静态内核空间；固定机器为 256 MiB，高地址暂不使用并记录限制，无需先建堆存元数据。位图本身属于内核映像，初始化再排除相交内核页；BOOT_RECLAIM、ACPI、帧缓冲本轮仍保留。
+
+**新建 `include/airi/pages.h`。** 返回物理页起点，尚不是可直接读取的 C 指针。
 
 <!-- write: include/airi/pages.h -->
 ```c
@@ -36,15 +37,18 @@ void airi_memory_init(const AiriBootInfo *info); // 在真实 guest 上建立页
 ```
 
 <a id="page-allocate"></a>
-## 借出之前先改变状态
 
-初始化先让所有位都为零，再从有效地图中仅标记完整 usable 页，最后排除页零与任何和内核相交的页面，建立 total/free。boot_validate 已经检查区域排序、重叠和加法溢出；分配器仍在计算前调用它，拒绝损坏输入。起点已经限制在 1 GiB 内，向上对齐加 4095 不会发生整数回绕。
+## 分配先占位，再把地址交给调用者
 
-分配从 hint 开始扫描，最多一圈。只有确定 managed 且未 allocated 才先标记借出、减少 free，最后返回地址；否则同一页面可能在交出后仍被当成空闲。归还先检查对齐、范围、managed 和 allocated，全部成立才改变统计，重复归还不会让 free 超过 total。
+初始化先验证地图，位图清零，只纳入完整 usable 页，再排除零页和相交内核页，形成 total/free。验证已经限制排序、重叠和加法；本实现还在计算前调用它，不借坏地图建池。向上对齐时起点已小于 1 GiB，加 4095 不会回绕。
 
-当前单 CPU 且内核不可抢占，位图操作没有锁。以后中断或并发调用分配器时必须重新保护这段状态，不能从“现在能运行”推断多核安全。接口也不能识别持有旧地址的过期调用者；所有者必须先结束映射和其他借用，再归还页面，归还后不能继续读写旧指针。
+从 hint 最多扫描一圈，找到 managed 且未 allocated，先置借出位、减 free，再返回地址。例如借第一项以后地图仍写 usable，但 allocated 已为 1，下一次就跳过它。若先返回而不记状态，这项区别便不存在。
 
-**新建 `kernel/mm/pages.c`。** `1u << (index % 8)` 把一个 1 移到所选位；`~mask` 反转位后用于只清这一位。
+归还反过来先核对对齐、上限、managed 和 allocated，全部成立才清位加 free，重复归还不增加数量。`1u << (index%8)` 选择位，取反后清位保留同字节其他页。
+
+当前单 CPU、不可抢占内核串行调用，没有锁；若以后 IRQ 或并发也调用，需重新保护状态。地址不带代数，不能识别旧持有者，所有者必须先结束其他借用/映射再归还，之后停止使用旧指针。
+
+**新建 `kernel/mm/pages.c`：**
 
 <!-- write: kernel/mm/pages.c -->
 ```c
@@ -117,13 +121,16 @@ bool airi_page_free(struct airi_page_pool *pool, uint64_t physical) { // 调用�
 ```
 
 <a id="page-direct-map"></a>
-## 物理页怎样成为 C 能访问的地址
 
-C 指针在当前开启分页的 CPU 上表示虚拟地址。比如分配器返回物理 0x1000，并不意味着可以直接解引用 `(uint64_t *)0x1000`。Limine 提供的 HHDM 让物理地址 p 在 `direct_map_offset+p` 处有一个内核虚拟别名，CPU 再通过当前页表把它翻译回 p。这个加法依赖启动合同已经存在的映射，不是指针转换自动创建映射。
+## 已拥有物理页，还要通过有效映射访问它
 
-memory.c 持有页池，保留第一次分配前的 free，借出两个不同页，向第一个页的别名写入标记并读回，再验证正常释放、重复释放拒绝、未对齐释放拒绝和低地址复用。`volatile` 使演示的读写确实发生，不是多线程同步原语。页面返回时内容不清零；当前调用者必须自行初始化，后续交给用户进程前还必须清除旧所有者数据。
+分配器只交出物理编号。假设 p=0x1000，当前 C 仍使用虚拟地址，不能直接把 p 当指针。Limine 已将它映到 direct_map_offset+p，CPU 再按现有页表访问同一页；加法利用已有映射，不创建映射。
 
-**新建 `kernel/mm/memory.c`。** 页面归还后日志只记录其数值，不再解引用 mapped。
+memory.c 静态持有池，先记 free，再借两个不同页。通过第一项的 HHDM 写标记、读回并核对 free 恰少 2，再检查正常归还、重复/未对齐拒绝和低地址复用。volatile 保留实际读写，不是多线程同步。归还不清内容，下一所有者要自行初始化，交用户前还必须清掉旧数据。
+
+演示结束后日志只保留地址数值，不继续读取已经归还的 mapped。
+
+**新建 `kernel/mm/memory.c`：**
 
 <!-- write: kernel/mm/memory.c -->
 ```c
@@ -155,11 +162,14 @@ void airi_memory_init(const AiriBootInfo *info) { // 在异常设施安装后调
 ```
 
 <a id="page-boundaries"></a>
-## 用小地图观察耗尽与非法归还
 
-真实 guest 验证 HHDM 和 RAM；主机观察则把地图缩到十个可借出页，可以完整借尽并检查所有地址，避免只验证一次成功。该程序直接调用同一 pages.c，却绝不把返回的物理地址当成 Mac 指针。它还故意把内核写在 usable 区里，确认额外保留生效；最后让地图重叠，确认初始化拒绝它。
+## 把小池借尽，才能看见耗尽后的状态
 
-**新建 `tests/unit/pages_test.c`。** 宿主 assert 与 sanitizer 只用于作者的边界验证，不进入 guest 或成为学习者习题。
+guest 写读验证真实 RAM 与 HHDM；主机用同一 pages.c，却只把物理地址当实验编号，不解引用它们。小夹具总共十页，逐项借尽可以核对唯一性，第十一次得 0，再依次归还验证总量恢复。
+
+夹具还把内核故意放在 usable 内，检查额外排除；不对齐区域检验向内取整，最后改成重叠地图应拒绝初始化。assert/sanitizer 都在主机执行，不进入 guest，也不成为读者习题。
+
+**新建 `tests/unit/pages_test.c`：**
 
 <!-- write: tests/unit/pages_test.c -->
 ```c
@@ -197,7 +207,9 @@ int main(void) { // 主机只验证地址与所有权算法，不把物理地址
 }
 ```
 
-**完整替换 `Makefile`。** 默认串口源码增加两个 mm 文件，host-test 增加同一页算法的 ASan/UBSan 观察。
+将 pages 与 memory 加入默认内核，将 pages_test 与同一算法加入 host-test。前者随后实际写 RAM，后者只核对范围与所有权，两种观察各保留自己的证据。
+
+**完整替换 `Makefile`：**
 
 <!-- write: Makefile -->
 ```make
@@ -340,7 +352,9 @@ lab-boot-info:
 	./build/labs/boot-info
 ```
 
-**完整替换 `kernel/main.c`。** 内存初始化位于启动校验和异常表之后、命令循环之前。
+启动信息验证、异常设施就绪以后才调用内存初始化，失败可报告具体原因；成功演示结束才进入命令循环。页面元数据属于长期内核状态，不放在即将返回的入口局部数组中。
+
+**完整替换 `kernel/main.c`：**
 
 <!-- write: kernel/main.c -->
 ```c
@@ -425,6 +439,8 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 }
 ```
 
+从统一入口运行主机边界与当前 guest 回归，按本次实际日志核对地址和计数。
+
 <!-- run -->
 ```sh
 ./airios build  # 交叉编译并形成同一配置的镜像。
@@ -437,10 +453,10 @@ check('normal')  # guest实际写入、读回、归还并复用RAM。
 PYPAGES
 ```
 
-正常串口应在 READY 前新增 `[PAGES_READY]` 和 `[PAGES_DEMO_OK]`。前者输出 managed 与 free，相等说明尚未借出；后者输出 first、second、reused，first 与 second 不同，reused 与 first 相同，free 恢复。地址来自本轮启动图，不固定写死为某一页。主机观察输出 `PASS pages: inward rounding, ownership, exhaustion, reuse, invalid maps`。
+READY 前应新增 PAGES_READY 与 PAGES_DEMO_OK。前者在首次借出前 managed/free 相等；后者 first≠second、reused=first，最终 free 恢复。地址由本次启动图决定，不固定为某个常量。主机应打印 inward rounding、ownership、exhaustion、reuse、invalid maps 的 PASS。
 
-作者的故障操作已经写在主机程序中：耗尽后再申请得到 0，释放 `values[0]+1` 被拒绝，重复释放也被拒绝，重叠地图不能初始化。它们都不使宿主访问无效物理内存。guest 若实际写入或统计不符合预期，则给出具体 PANIC，不发布 READY。
+耗尽、`values[0]+1`、重复归还和重叠地图都已在观察中完整实现，不让主机访问无效物理范围。guest 写读或计数不符则 PANIC，不发布 READY。
 
-调试可在 `airi_page_alloc` 设置断点，观察 `pool->free` 先减一再返回；在 memory.c 写标记后，使用 GDB 的 `x/gx` 读取 `info->direct_map_offset+first`。必须读取虚拟别名，不能把 GDB 默认内存读取误认为物理总线访问。对应 Linux 的区别是：malloc/mmap 得到的通常是虚拟地址范围，RSS 反映驻留页；本节直接给内核调用者借出物理页，尚无按需缺页分配。P2 的 Linux 对照将用 mmap 与实际触碰把这两件事分开观察。
+调试 airi_page_alloc 时先看 free 减少，再到 memory.c 写后用 x/gx 读 direct_map_offset+first；GDB 默认读取虚拟地址，不能当物理总线探针。Linux malloc/mmap 通常交出虚拟范围，RSS 表示驻留页，而这里直接借物理页，还没有按需缺页。
 
-下一节用这些页面存页表，再装入 CR3，真正接管地址翻译；在此之前，HHDM 和所有已有内核映射仍由 Limine 建立。
+下一章将把借出的页用作页表、装入 CR3，接管翻译；当前访问仍依赖 Limine 建立的 HHDM 与内核映射。

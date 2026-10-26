@@ -24,3 +24,8 @@ not_assumed:
 limits:
 - 单在途同步请求，尚非用户阻塞异步I/O
 - FLUSH虚拟后端完成不冒充主机掉电实测
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/25-block-device.md#block-own-disk
+  establishes: 沿最后扇区的一次 read 连接端口、DMA、链首身份、idx 发布和完成；超时返回不等于 DMA 停止，保留静态隔离、三种故障与 FLUSH 边界。

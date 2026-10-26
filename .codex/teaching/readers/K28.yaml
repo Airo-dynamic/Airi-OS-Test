@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 本节仅发布nonblocking=1，阻塞接下一阶段
 - Linux对照仍未验证，不把READY当跨环境证明
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/28-pipes.md#pipe-endpoint-owner
+  establishes: 同一 child 数据流引出环中未读状态和端点存活；100 字节容量演算参与回绕，空/EAGAIN/EOF 与 HUP 按写者生命周期展开，保留原子创建和范围限制。

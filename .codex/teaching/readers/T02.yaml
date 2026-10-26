@@ -39,3 +39,8 @@ feedback:
   observation: 仅写固定来源和安全替换，无法辨认教学提交、分支终点、内存文件表及新旧目录各自的状态。
   revision: 分开解释commit与branch_commit、files的字节权限形状、source与来源字典，以及target/stage/previous的交接与失败范围。
 not_inferred: 已解释、敲完或运行成功不证明理解；隔离资料导出不等于真实guest再次运行。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/tools/02-snapshots.md#snapshot-git-model
+  establishes: 由移动资料混版引出 SHA/内存固定，再分别保护新输出和 HISTORY 交接；K13 身份、分支终点、输出清单与暂存树各自的用途连续展开。

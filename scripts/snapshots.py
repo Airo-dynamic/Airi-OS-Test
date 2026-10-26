@@ -228,7 +228,7 @@ def export_route(name, destination, alongside=None):  # 路线快照从固定正
 
 def write_route(name, target, source, commits, alongside=None):  # 公共导出与内部快照共用相同重建动作。
     from course import replay, plan, ordered  # 此函数不重新解析Git引用。
-    replay(target, name, False, alongside, source=source)  # 只执行write/append，不运行Shell。
+    replay(target, name, False, alongside, source=source)  # 只应用明确编辑动作，不运行Shell。
     data = plan(source)  # 使用同一组已固定的清单。
     selected = ordered([name] + ([alongside] if alongside else []), data)  # 共享前置只进入一次。
     for directory in ('dev-log', 'docs', '.codex/teaching'):  # 复制纯教程、画像和作者验证说明，不复制实现或技能。

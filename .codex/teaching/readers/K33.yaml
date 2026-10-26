@@ -23,3 +23,8 @@ not_assumed:
 - shell有POSIX参数/管线语法、GUI窗口已有用户TTY、开发板或网络已实现
 limits:
 - 单UART独占、静态ELF、每进程单线程，实际限速证明一次交错，不要求快设备每次都阻塞
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/33-shell-pipeline.md#shell-stdin
+  establishes: 沿输入 demo→父 shell 保留→孩子 exec→同一页内容经过 RAM 文件与注册副本→父恢复组织整章；UART 唯一消费者、FD0 CLOEXEC 和观察区间保留。

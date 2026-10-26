@@ -1,6 +1,6 @@
 # K23 · exec 先准备新映像，再保留 PID 提交替换
 
-从K22继续。fork让孩子从同一个调用点继续，exec需要让同一个孩子换成另一份程序。这里最重要的是替换顺序：找不到程序、名称指针坏、ELF损坏或资源不够时，旧进程必须还能继续；只有新空间完整后，才切根并放弃旧用户页。成功之后PID和父子关系保持，用户RIP/RSP却从新_start和新栈开始。
+fork 已让孩子继续旧程序中的一条分支，但控制台以后要运行的是用户选定的另一份程序。重新 fork 并不能完成这项变化：孩子仍有旧代码、旧堆和旧返回位置。exec 因而保留这个孩子的身份，换掉它将执行的用户映像。这里最重要的是替换顺序：找不到程序、名称指针坏、ELF损坏或资源不够时，旧进程必须还能继续；只有新空间完整后，才切根并放弃旧用户页。成功之后PID和父子关系保持，用户RIP/RSP却从新_start和新栈开始。
 
 本节的孩子先把堆值改99，调用缺失名称得到−2，再调用八字节坏ELF得到−8，两次都核对旧值与PID不变。随后exec worker，成功不返回旧调用；worker核对新argv、初值、BSS和零填充堆，再退出23，父仍用原孩子PID取得状态。串口同时接入programs和run NAME，坏文件或普通非零退出不能停止控制台。
 
@@ -9,11 +9,11 @@ K22已敲且未改变的函数可以保留；下面给出本节完整版本供�
 <a id="exec-transaction"></a>
 ## 失败与提交分别发生在哪个空间
 
-exec先把用户名称逐字节复制到64字节内核数组，检查每页可读和终止零，后面不再借用旧用户字符串。目录当前只有hello、processes、worker和明确损坏的broken，不是完整文件系统。未找到名称返回−2，未终止返回−36，坏指针返回−14；旧控制块和返回现场尚未改动。
+孩子传入 worker 时，名称字符串还在即将被替换的旧用户页中。若清掉旧页后才查名称，读取的已经是失效借用。exec 先把用户名称逐字节复制到 64 字节内核数组，检查每页可读和终止零，后面不再借用旧用户字符串。目录当前只有hello、processes、worker和明确损坏的broken，不是完整文件系统。未找到名称返回−2，未终止返回−36，坏指针返回−14；旧控制块和返回现场尚未改动。
 
-prepare_elf现在返回0、−8或−12，分别表示成功、格式不支持、资源失败。exec给它一个局部next所有者，并要求不另建内核栈；构造器只创建新的用户根、段、用户栈和initial寄存器值，不覆盖正在运行的旧f。所有失败都只清理next，返回旧用户系统调用的下一条指令。
+名称已取得内核副本，旧程序仍在运行。此时需要试着建好新映像，同时保留失败后回到原调用点的可能。prepare_elf 现在返回 0、−8 或 −12，分别表示成功、格式不支持、资源失败。exec给它一个局部next所有者，并要求不另建内核栈；构造器只创建新的用户根、段、用户栈和initial寄存器值，不覆盖正在运行的旧f。所有失败都只清理next，返回旧用户系统调用的下一条指令。
 
-成功提交时，把旧用户资源暂存到old，next继承PID、父PID和已运行计数，重置用户堆游标。当前内核栈明确转移给next，并清old.stack，避免清理旧映像时释放仍在执行的栈。把next.initial复制到实际f，next.frame指向这个真实内核栈现场，不能留下指向局部next.initial的指针。然后更新当前控制块、装新CR3，才销毁旧根和旧数据页。
+当 next 已有完整段页、用户栈和初始寄存器，才到不可再作为普通装载错误返回的提交点。成功提交时，把旧用户资源暂存到 old，next继承PID、父PID和已运行计数，重置用户堆游标。当前内核栈明确转移给next，并清old.stack，避免清理旧映像时释放仍在执行的栈。把next.initial复制到实际f，next.frame指向这个真实内核栈现场，不能留下指向局部next.initial的指针。然后更新当前控制块、装新CR3，才销毁旧根和旧数据页。
 
 | 时点 | 活动用户根 | 当前内核栈 | 允许失败的结果 |
 | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ prepare_elf现在返回0、−8或−12，分别表示成功、格式不支持�
 <a id="launch-result"></a>
 ## 程序退出码与内核失败分开
 
-原run_one把固定演示与启动放在一起。现在launch负责完整准备、运行和回收，只返回“能否启动”的错误，并把程序退出码、tick和调度计数复制到user_result；普通程序返回23也合法。run_one只用于作者的固定启动演示，在这些演示不符合预期时才PANIC。串口命令使用launch，坏ELF得到−8，旧命令循环仍能处理下一条输入。
+另一个区别发生在外层调用者：worker 正常退出 23，并不意味着内核启动它失败。原 run_one 把固定演示与启动放在一起。现在launch负责完整准备、运行和回收，只返回“能否启动”的错误，并把程序退出码、tick和调度计数复制到user_result；普通程序返回23也合法。run_one只用于作者的固定启动演示，在这些演示不符合预期时才PANIC。串口命令使用launch，坏ELF得到−8，旧命令循环仍能处理下一条输入。
 
 launch在成功和构造失败两条路径都核对页池与堆恢复。运行结束先复制必要数值，再清控制块，避免命令消费者拿着已回收进程指针。整个用户会话仍同步收拢，不提供并发命令客户端或通用远程协议。
 
@@ -571,7 +571,7 @@ bool airi_user_command(struct airi_console *console, const char *command) { // �
 <a id="exec-worker"></a>
 ## 新程序验证用户状态真的替换了
 
-worker不是旧孩子里另一个C函数调用，而是单独链接的ELF。它要求argv[0]=worker，读取自己的初始化数据与4096字节BSS，再申请第一个用户页：地址要重新从0x10000000开始，内容必须为零，不能继承旧孩子在同一VA写的99。退出23仍交给等待同一PID的父进程。
+提交成功后，不应继续访问旧孩子的堆，也不应回到 airi_exec 后一行。worker 是单独链接的 ELF，恢复的是它自己的 _start 与新用户栈。它要求argv[0]=worker，读取自己的初始化数据与4096字节BSS，再申请第一个用户页：地址要重新从0x10000000开始，内容必须为零，不能继承旧孩子在同一VA写的99。退出23仍交给等待同一PID的父进程。
 
 旧孩子的两次失败检查完成后才输出EXEC_FAILURE_OK，说明旧C代码和堆仍可访问。成功调用后紧跟的return77是完整的错误出口，若真的回到旧用户代码，父收到77就会使启动演示失败。
 
@@ -1012,9 +1012,9 @@ $(OUT)/user/worker.elf: $(USER_COMMON) $(OUT)/user/worker.o labs/airios/program.
 <a id="system-command-consumer"></a>
 ## 文本服务先分派，图形扩展继续独立
 
-console新增service函数指针，负责内核程序服务；原extension继续属于可选图形命令，例如theme。内置mem等查询之后先问service，未处理才问extension。main在console_init后绑定airi_user_command，图形初始化不能替换这条绑定。没有服务的宿主参考模型也不宣传programs/run，避免把模拟界面当成真实进程。
+这条运行路径接回 K09 的文本模型：输入 run worker 后，模型已经识别命令，但它不能自己持有进程页表。console 新增 service 函数指针，负责内核程序服务；原extension继续属于可选图形命令，例如theme。内置mem等查询之后先问service，未处理才问extension。main在console_init后绑定airi_user_command，图形初始化不能替换这条绑定。没有服务的宿主参考模型也不宣传programs/run，避免把模拟界面当成真实进程。
 
-programs列出初始目录，run NAME同步启动并等整个进程会话结束，再把程序结果写到同一文字环。用户stdout当前直接走UART，图形Terminal显示命令与结束摘要；完整图形TTY输出适配尚未接入。串口主线不需要frontend、字体或Cocoa。
+programs 列出初始目录。run NAME 通过 service 请求 launch，同步等整个进程会话结束，再把复制出的退出结果写到同一文字环；这时进程控制块已经可以回收，文本模型不再借用它。用户stdout当前直接走UART，图形Terminal显示命令与结束摘要；完整图形TTY输出适配尚未接入。串口主线不需要frontend、字体或Cocoa。
 
 **按完整版本更新 `include/airi/user.h`。** 系统命令只借用文本会话，不暴露进程内部对象。
 
@@ -1451,7 +1451,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 <a id="program-command-evidence"></a>
 ## 错误之后还要运行下一条命令
 
-启动观察现在等待完整P3标记，并要求EXEC_FAILURE_OK、EXEC_COMMIT和EXEC_WORKER_OK都存在。输入观察也等P3完成后才发送UART字节，再实际运行hello、坏ELF、返回23的worker、完整processes以及不存在名称，最后echo证明输入循环仍正常。不能只检查首个程序能跑，忽略失败后的全局状态。
+错误处理是否保住旧状态，要靠错误后的动作说明。坏 ELF 后仍能执行 echo，才证明控制台调用链没有被误当成用户失败一起终止。启动观察现在等待完整 P3 标记，并要求EXEC_FAILURE_OK、EXEC_COMMIT和EXEC_WORKER_OK都存在。输入观察也等P3完成后才发送UART字节，再实际运行hello、坏ELF、返回23的worker、完整processes以及不存在名称，最后echo证明输入循环仍正常。不能只检查首个程序能跑，忽略失败后的全局状态。
 
 **按完整版本更新 `scripts/boot.py`。** 旧P1/P2标记保留兼容，正常完成以P3为准。
 
@@ -1765,9 +1765,9 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
 ./airios test  # 六个启动配置与真实输入，包含程序成功、坏ELF和非零退出后继续输入。
 ```
 
-正常实测孩子7先输出EXEC_FAILURE_OK，随后`[EXEC_COMMIT] pid=7 program=worker old_pages=4 new_pages=5`，新worker输出EXEC_WORKER_OK并退出23；父仍wait同一个7并保留值42。之后的抢占、进程表满和回收继续通过，最后P3_READY。PID受前置演示影响，保持身份的关系不依赖固定数字。
+既有正常运行记录中，孩子 7先输出EXEC_FAILURE_OK，随后`[EXEC_COMMIT] pid=7 program=worker old_pages=4 new_pages=5`，新worker输出EXEC_WORKER_OK并退出23；父仍wait同一个7并保留值42。之后的抢占、进程表满和回收继续通过，最后P3_READY。PID受前置演示影响，保持身份的关系不依赖固定数字。
 
-运行`./airios run`，输入programs、run hello、run processes、run broken、run worker、echo still-alive。对应结果为正常0、完整多进程0、装载错误−8、合法退出23以及后续echo；错误文件不停止内核。Ctrl-A后X退出QEMU。图形支线合入后也可在Terminal输入同样命令，但本轮主要以UART记录完整stdout。
+运行`./airios run`，输入programs、run hello、run processes、run broken、run worker、echo still-alive。对应结果为正常0、完整多进程0、装载错误−8、合法退出23以及后续echo；错误文件不停止内核。Ctrl-A后X退出QEMU。图形支线合入后也可在Terminal输入同样命令，已有观察主要以 UART 记录完整 stdout。
 
 调试可以在exec_current开始、提交前和cleanup old前分别比较current->pid、space.root、frame->rip/rsp和stack句柄。失败时这些旧字段不变；成功后PID与内核栈不变，root和用户RIP/RSP已换，old.stack必须为空。不要把C结构赋值理解成自动引用计数，所有权转移由这段不可抢占的提交顺序明确完成。
 

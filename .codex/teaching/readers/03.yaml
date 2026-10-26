@@ -29,3 +29,8 @@ source_reading:
   at: ../../../dev-log/core/03-bytes.md#code-kernel-lib-base-c-1
   establishes: void 指针转换为 unsigned char 指针后，d[i] 和 s[i] 以字节偏移定位；i 递增而 n 保持总长度，零长度不访问数组，不依赖 NUL
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/03-bytes.md#nul-string
+  establishes: 共享算法只访问借用内存，主机观察入口另借 printf；同一重叠范围的读写方向解释结果，保留 NUL、零长度、地址表示和编译选项。

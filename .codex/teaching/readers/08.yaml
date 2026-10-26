@@ -30,3 +30,8 @@ source_reading:
   at: ../../../dev-log/core/08-real-boot-info.md#code-kernel-boot-limine-c-3
   establishes: 链接标签转换为 uintptr_t 后求地址整数差；地图描述复制到静态数组，framebuffer 的地址仍借用引导器已经映射的像素
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/08-real-boot-info.md#boot-requests
+  establishes: memory_request 从 ELF 零指针到装入内存、引导器写回、C 读取，再进入静态自有副本。区分地图/名称复制与像素地址借用，验证后打印和分类统计保留。

@@ -24,3 +24,8 @@ not_assumed:
 limits:
 - 当前只有受控字节映像，不称ELF装载
 - 运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/20-user-boundary.md#user-address-space
+  establishes: 从内核任务缺少隔离引入权限边界；同一用户字符串跨页验证、TSS 交接、所选现场和离栈回收连续展开，保留四项受控故障及 ABI 精度。

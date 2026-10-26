@@ -51,3 +51,8 @@ source_reading:
   status: 本版就地解释；不推断读者已掌握
 
 route_note: 在K13后运行，无图形前置。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/01-entry.md#runtime-main
+  establishes: 输出一行的三种执行环境分别展开；argc 初始栈、raw 寄存器与返回地址、远端 GDB 对本地 guest 的观察逐步对应，保留证据限制和 SSH255 未验证状态。

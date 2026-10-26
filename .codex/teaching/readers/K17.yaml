@@ -20,3 +20,8 @@ not_assumed:
 - 完整malloc ABI、用户堆、并发分配、自动扩容、页面回收策略
 limits:
 - 自有堆固定64KiB；运行与复敲不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/17-kernel-heap.md#heap-backing
+  establishes: 十六 backing 页与小对象分别持有；80+32+128 的合并支撑 208 请求，第三项持续有效。初始化失败回滚、同步快照和 P2 发布先后贯通，保留碎片及旧指针限制。

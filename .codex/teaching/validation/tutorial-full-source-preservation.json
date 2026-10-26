@@ -1,0 +1,385 @@
+{
+  "baseline": "accepted pilot working tree at start of 2026-10-24 full rewrite",
+  "git_base": "4c7aafa",
+  "chapters": {
+    "00": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "01": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "02": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "03": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "04": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "05": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "06": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "07": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "08": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "09": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "10": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K11": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K12": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K13": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L01": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "T01": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "T02": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "T03": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K14": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K15": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K16": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K17": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L02": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K18": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K19": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K20": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K21": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K22": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K23": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L03": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K24": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K25": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K26": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K27": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L04": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K28": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K29": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K30": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K31": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K32": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L05": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L06": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L07": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "K33": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    },
+    "L08": {
+      "source_state_identical": true,
+      "fences_identical": true,
+      "anchors_identical": true,
+      "actions_identical": true,
+      "run_commands_identical": true
+    }
+  },
+  "failures": [],
+  "supporting_documents": [
+    {
+      "path": "README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "labs/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "dev-log/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "docs/architecture.md",
+      "fences_identical": true
+    },
+    {
+      "path": "docs/knowledge-map.md",
+      "fences_identical": true
+    },
+    {
+      "path": "docs/system-practice.md",
+      "fences_identical": true
+    },
+    {
+      "path": "docs/verification.md",
+      "fences_identical": true
+    },
+    {
+      "path": "docs/roadmap.md",
+      "fences_identical": true
+    },
+    {
+      "path": "dev-log/tools/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "dev-log/core/next.md",
+      "fences_identical": true
+    },
+    {
+      "path": "dev-log/core/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "dev-log/linux/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "boot/AiriBoot/README.md",
+      "fences_identical": true
+    },
+    {
+      "path": "labs/linux/p1/README.md",
+      "fences_identical": true
+    }
+  ],
+  "checkpoint_manifest_identical": true,
+  "protection_self_check": {
+    "modified_fence_rejected": true,
+    "prose_change_allowed": true
+  }
+}

@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 本轮SSH255，Linux运行和GDB未验证
 - 已解释记录不表示读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/03-process.md#linux-fork-memory
+  establishes: 以同一匿名页、PID 和共享偏移解释 Linux 对照，修正真实 --child 参数与临时坏 ELF 的保留期，保留早晚 exec 失败区别及未验证状态。

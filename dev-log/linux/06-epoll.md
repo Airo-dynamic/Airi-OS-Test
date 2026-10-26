@@ -1,27 +1,27 @@
 # L06 · epoll返回的是当前可推进的连接，数据仍要自己读写
 
-从L05继续，guest机制对应K28–K32。你写过Reactor，今天沿一个真实TCP连接观察read/write下面的状态。AiriOS管道的ready返回条件，异步块请求的CQ返回结果；Linux epoll属于前者。一个EPOLLIN事件既不携带读出的字节，也不保证之后任意长度的recv都能完成。
+从L05继续，guest机制对应K28–K32。沿你写过的 Reactor 继续往下看：收到可读事件以后，应用为什么还要调用 recv，又为什么必须保存它实际返回的数量？本章用一个真实 TCP 连接把这两步分开。AiriOS管道的ready返回条件，异步块请求的CQ返回结果；Linux epoll属于前者。一个EPOLLIN事件既不携带读出的字节，也不保证之后任意长度的recv都能完成。
 
 <a id="epoll-pair"></a>
 ## 两个连接端，各自有接收缓冲区和发送进度
 
-pair在127.0.0.1上bind端口0，Linux分配空闲端口；getsockname取回，再connect和accept。这里建连用阻塞调用，外层timeout限制整个实验；建立后保留原fcntl标志并增加O_NONBLOCK，正式事件循环不能在recv/send里等另一端。程序不监听外网，不占固定端口，也不把建连辅助函数宣传为完整非阻塞服务器。
+发送的 abc 首先进入对端的内核接收缓冲，epoll 只帮助找出现在值得处理的连接，并不替应用把 abc 搬进数组。先准备这两个端点：pair 在 127.0.0.1 上 bind 端口 0，Linux分配空闲端口；getsockname取回，再connect和accept。这里建连用阻塞调用，外层timeout限制整个实验；建立后保留原fcntl标志并增加O_NONBLOCK，正式事件循环不能在recv/send里等另一端。程序不监听外网，不占固定端口，也不把建连辅助函数宣传为完整非阻塞服务器。
 
 epoll_create1建立一个内核兴趣集合，epoll_ctl ADD把连接FD和关心的条件放入其中。data.fd是我们随注册保存的整数身份，epoll_wait返回它，调用者据此定位连接状态；这里没有把局部C指针交给网络另一端。返回的就绪位只说明现在值得尝试，真正进度以recv/send返回值为准。
 
 <a id="epoll-lt-et"></a>
 ## abc只读a：LT再次返回，ET需要把bc主动读尽
 
-trigger为两种模式分别建立全新连接，发送abc。FIONREAD只是观察内核当前接收字节数，不消费它；先等三个字节全部到达，避免后续TCP分段到达被误认为相同状态的重复边沿。第一次epoll_wait后recv一个字节a，接收缓冲仍有bc，发送端不再添加数据。
+要区分两种通知方式，先让第一次事件之后的状态保持可辨认：abc 已全到达，应用只读走 a，还剩 bc。trigger 为两种模式分别建立全新连接，发送 abc。FIONREAD只是观察内核当前接收字节数，不消费它；先等三个字节全部到达，避免后续TCP分段到达被误认为相同状态的重复边沿。第一次epoll_wait后recv一个字节a，接收缓冲仍有bc，发送端不再添加数据。
 
 LT默认按仍成立的条件通知，第二次wait应继续有事件。ET加EPOLLET，只读a后没有新的数据到达，第二次短wait不返回新事件；bc仍在内核，不会因为没有通知而消失。作者随后读取bc，再读一次得到EAGAIN，完成正确的ET排空步骤。非阻塞与“读到EAGAIN”相配合：recv零是EOF，负一且errno=EAGAIN是暂时没有数据，不能混成同一种结束。
 
 <a id="epoll-pressure"></a>
 ## send短写和EAGAIN把未发后缀留在应用
 
-pressure把发送缓冲区请求调小，先连续发送，直到真实EAGAIN才转去消费接收端。SO_SNDBUF不是精确容量承诺，Linux可以调整请求值；程序记录实际send接受的字节数，不能预设第几次一定写满。sent只增加返回的正数，短写后下次继续同一消息的未发后缀；本例内容都是x，所以每个后缀值相同，实际业务还需保存对应缓冲区和偏移。
+前面的未读 bc 留在内核，发送端还会遇到另一种剩余：send 只接受前缀时，后缀仍属于应用。pressure 把发送缓冲区请求调小，先连续发送，直到真实EAGAIN才转去消费接收端。SO_SNDBUF不是精确容量承诺，Linux可以调整请求值；程序记录实际send接受的字节数，不能预设第几次一定写满。sent只增加返回的正数，短写后下次继续同一消息的未发后缀；本例内容都是x，所以每个后缀值相同，实际业务还需保存对应缓冲区和偏移。
 
-EPOLLOUT只在还有待发数据时订阅。全部262144字节被接受后DEL发送端注册，并shutdown(SHUT_WR)，FIN排在已有字节之后。接收端看到RDHUP仍继续recv，直到真正返回零才完成；如果立刻close，会丢掉尚未消费的尾部。每轮把接收端读到EAGAIN，使空间释放后发送端能够再次推进。十秒单调总截止和外层三十秒timeout共同限制失败路径。
+收到 EPOLLOUT 后也只再次尝试发送保存的后缀；如果已经没有待发数据，继续订阅会反复报告一个无需处理的条件。EPOLLOUT 只在还有待发数据时订阅。全部262144字节被接受后DEL发送端注册，并shutdown(SHUT_WR)，FIN排在已有字节之后。接收端看到RDHUP仍继续recv，直到真正返回零才完成；如果立刻close，会丢掉尚未消费的尾部。每轮把接收端读到EAGAIN，使空间释放后发送端能够再次推进。十秒单调总截止和外层三十秒timeout共同限制失败路径。
 
 程序要求实际出现至少一次EAGAIN，并核对全部内容、发送/接收总数和EOF。short_send可以为0，不能为了展示短写而编造一次正返回。单连接LT循环用于解释状态，不是生产公平调度器；多连接服务还要限制每轮配额、管理输出队列上限，防止一条连接占满内存或饿死其他连接。
 
@@ -132,7 +132,7 @@ int main(void) { fputs("x86-64 Linux is required for epoll.\n",stderr); return 7
 <a id="epoll-observe"></a>
 ## 观察真实调用，失败不能只保留预期输出
 
-run.sh记录内核、编译器和strace版本，跟踪epoll注册/等待、sendto/recvfrom与shutdown。libc的send/recv通常对应这些系统调用名称，源码函数名不必与strace显示名相同。strace改变调度与缓冲区时序，输出用于机制观察，不用于吞吐排名。
+完整收发结果由程序核对，系统调用边界再由跟踪记录；两者来自同一 Linux 运行。run.sh 记录内核、编译器和 strace 版本，跟踪epoll注册/等待、sendto/recvfrom与shutdown。libc的send/recv通常对应这些系统调用名称，源码函数名不必与strace显示名相同。strace改变调度与缓冲区时序，输出用于机制观察，不用于吞吐排名。
 
 **新建运行脚本。** 缺编译器、strace或timeout时打印具体依赖修复方法，result保持false。
 
@@ -382,11 +382,12 @@ if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义�
         sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
 ```
 
+
 ```sh
 ./airios linux-lab --phase p5-epoll # 在个人主机建立本机TCP连接并保存系统调用证据。
 ```
 
-2026-10-16本轮SSH返回255，Linux分支尚未编译、运行和跟踪。Mac拒绝分支可编译且运行返回77，sh -n通过；这些不能证明Linux路径通过。真实失败记录在artifacts/linux-p5-epoll/remote.json与connection.log。连接可用后应出现LT second_events=1、ET second_events=0，以及字节计数相等且EAGAIN大于零的压力结果，次数以实际环境为准。
+2026-10-16 的既有 SSH 连接返回 255，Linux分支尚未编译、运行和跟踪。Mac拒绝分支可编译且运行返回77，sh -n通过；这些不能证明Linux路径通过。真实失败记录在artifacts/linux-p5-epoll/remote.json与connection.log。连接可用后应出现LT second_events=1、ET second_events=0，以及字节计数相等且EAGAIN大于零的压力结果，次数以实际环境为准。
 
 回到旧网络库时，沿“应用输出队列 → send接受前缀 → 内核socket缓冲 → 对端消费”看背压。等epoll可写不能替代应用保存剩余字节；而AiriOS CQ的result已经对应一次已接受的请求，不需要收到CQ后再补一次实际设备读。AiriOS目前没有socket或TCP/IP，这部分由Linux实测补足。
 

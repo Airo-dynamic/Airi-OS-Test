@@ -1,6 +1,6 @@
 # K21 · 装载独立静态 ELF，进入自己的用户 C 运行时
 
-从K20继续。原来的受控汇编映像已经验证ring3和系统调用边界，但没有描述“代码在哪、哪些字节可写、哪些内存没有文件内容”。本节单独编译一个用户ELF，由内核解析程序头，按段分配页面，复制文件字节并保留零填充，再构造argc/argv初始栈，进入用户_start、main和自己的libc子集。
+K20 已能把一页指令放进 ring3，代码位置、栈位置和字节数量却都由内核预先约定。现在把用户程序写成普通 C：除了指令，它还有 initialized 的初值、尚无初值的 zeroed 数组和 main 的参数。只复制一段汇编字节，不能告诉内核这些对象需要哪些内存和权限。因此我们让用户构建产出一份独立 ELF，由文件中的程序头描述装载要求。本节单独编译一个用户ELF，由内核解析程序头，按段分配页面，复制文件字节并保留零填充，再构造argc/argv初始栈，进入用户_start、main和自己的libc子集。
 
 用户程序核对可写初始数据、跨页8192字节BSS、程序名、重叠移动和实际输出，最终从main返回0，由用户运行时调用AiriOS exit。原四个隔离演示继续保留回归。本节仍顺序运行单个上下文，没有fork/exec/wait或多个用户任务轮转；下节在这个装载边界上继续建立进程语义。
 
@@ -9,11 +9,13 @@
 <a id="elf-file-memory"></a>
 ## 文件里的字节不等于装载后的内存
 
-ELF文件头给出机器类型、入口和程序头表位置；装载器消费PT_LOAD程序头，不需要从节名猜哪些内容运行。p_offset指文件中的字节起点，p_vaddr指用户虚拟地址，p_filesz是需要复制的长度，p_memsz是进程中需要存在的长度。memsz大于filesz的尾部必须为零，C中未显式初始化的静态对象通常在这里。p_paddr不作为用户物理页目标：物理页由内核页池自己分配，否则一个文件就能指定覆盖内核。
+zeroed 需要在进程中占 8192 字节，却不必把 8192 个零都存进文件。内核必须按描述创建 RAM，不能用文件长度推断运行内存。这就是 ELF 程序头中 p_filesz 与 p_memsz 分别存在的原因：前者给出文件提供多少字节，后者给出进程应有多少字节，超出的尾部必须清零，C 未显式初始化的静态对象通常放在那里。
 
-比如本节C程序的initialized来自.data文件字节，而8192字节zeroed来自BSS零填充。段起止可能不恰好页对齐，映射要向外覆盖整页，文件复制仍只从准确的p_vaddr开始复制filesz。所有页面先清零，随后覆盖文件提供部分，BSS和页边缘保持零。
+ELF 文件头还给机器类型、入口和程序头表位置。装载器读取 PT_LOAD，不从节名猜哪些内容需要运行。每个 LOAD 的 p_offset 是文件起点，p_vaddr 是用户虚拟目标。p_paddr 不成为用户物理目标：物理页仍从内核页池分配，否则输入文件就能要求覆盖内核。
 
-当前只接受ELF64、小端、x86-64、静态ET_EXEC，最多16个程序头、8个LOAD和63个段数据页，为初始栈保留第64页。用户段限制在低256MiB，拒绝动态装载器、TLS、可执行栈、RWX和共享边缘页的LOAD布局。限制让每条失败有明确结果，不宣称支持所有合法ELF。
+本次 initialized 的值来自 .data 文件字节，zeroed 的值来自零填充。段的起止不一定对齐页边界，映射要向外覆盖整页；复制却仍从准确 p_vaddr 开始，只复制 filesz。先清零所有数据页，再覆盖文件部分，既保住 BSS，也让页边缘保持零。
+
+首版只接受 ELF64、小端、x86-64、静态 ET_EXEC，最多 16 个程序头、8 个 LOAD、63 个段数据页，第 64 页留给初始栈。用户段在低 256MiB，动态装载器、TLS、可执行栈、RWX 与共享边缘页的 LOAD 布局都拒绝。这是当前装载合同，范围外不代表所有 ELF 都非法，而是本实现不支持。
 
 **新建 `include/airi/elf.h`。** view只借用输入直到复制结束，失败不得改变调用者原view。
 
@@ -43,9 +45,13 @@ const char *airi_elf_inspect(const void *image, size_t bytes, struct airi_elf_vi
 <a id="elf-validation"></a>
 ## 在分配之前校验整份输入
 
-解析器先确认最小头可读，再memcpy到对齐局部结构，避免把可能未对齐的文件地址直接强转成结构指针。静态断言固定64字节文件头、56字节程序头。fits用offset≤bytes及length≤bytes−offset核对范围，不能先算offset+length后再比较，因为加法可能回绕。
+拿到这些装载要求后，先核对整份文件，再分配页。若前几段已分配，最后才发现入口或长度非法，就需要撤销半个映像；独立解析器先产出一个经过核实的 view，让资源所有者随后照它构造。
 
-每个LOAD检查filesz≤memsz、文件范围、虚拟右端、PF权限、页内偏移和p_align的2次幂约束，再比较向外舍入后的页区间。两个段即使原始字节不重叠，共享边缘页也可能要求矛盾权限；本节直接拒绝。入口必须位于可执行段的文件内容，不能落在NX数据或纯零填充尾部。所有已接受事实先放局部result，只有全部程序头结束后才一次写入view。
+文件地址可能未对齐，因此先确认最小头可读，再 memcpy 到对齐局部结构，不直接强转输入。静态断言固定文件头 64 字节、程序头 56 字节。范围检查 fits 使用 offset≤bytes 和 length≤bytes−offset，避免 offset+length 已回绕却通过比较。
+
+对每个 LOAD，依次检查 filesz≤memsz、文件跨度、虚拟右端、PF 权限、页内偏移以及 p_align 的 2 次幂要求。随后比较向外舍入的页区间：即使两个原始字节区间不重叠，共享边缘页也可能要求相反权限，本章直接拒绝。入口还必须在可执行段的文件内容内，不能落到 NX 数据或纯 BSS 尾部。
+
+这些检查先累积到局部 result，直到所有程序头成立才一次写回 view。失败不改变调用者的原 view；成功的 view 仍只是借用输入的描述，没有执行代码，也没有分配目标 RAM。调用者必须让输入活到文件字节复制完成。
 
 **新建 `kernel/process/elf.c`。** 不访问节表，不执行输入代码，不根据p_paddr写物理内存。
 
@@ -214,7 +220,7 @@ int main(void) { // 本程序只验证解析器，不替代guest的BSS和权限�
 <a id="user-libc-subset"></a>
 ## 用户库和内核字节库各自链接
 
-用户程序不能直接调用内核地址上的airi_memcpy，因为那是supervisor代码。用户库因此单独定义memcpy/memmove/memset/memcmp/strlen，和用户_start一起链接到用户ELF；内核仍链接自己的基础库。两份同名运行库处在不同链接目标和地址空间中，不会因内核包装ELF原始字节而合并符号。
+装载位置确定后，C 编译产生的调用还需要找到实际函数。hello 使用 memmove，如果把调用目标写成内核的 airi_memcpy 地址，用户取指会被 supervisor 权限拒绝；系统调用允许代办 write，并没有开放任意内核函数。用户库因此单独定义memcpy/memmove/memset/memcmp/strlen，和用户_start一起链接到用户ELF；内核仍链接自己的基础库。两份同名运行库处在不同链接目标和地址空间中，不会因内核包装ELF原始字节而合并符号。
 
 这只是明确列出的libc子集。字节函数采用标准名字，输出和进程接口采用airi前缀，失败直接返回负数，尚未提供errno、完整stdio、malloc、线程或POSIX兼容。memmove按地址方向保护重叠源，memcpy保留不重叠前提；所有指针仍必须指向用户自己的有效范围，库不会替用户越界访问获得特权。
 
@@ -284,7 +290,7 @@ size_t strlen(const char *text) { // 有效字符串必须在可访问范围内�
 }
 ```
 
-用户系统调用包装将RAX同时作为输入编号和输出结果，`+a`说明同一个C变量既读又写；D、S、d分别指定RDI、RSI、RDX。int80的保存约定沿K20，和Linux syscall会破坏RCX/R11的约定不同。memory/cc阻止编译器假定内存和标志不受这次边界影响。puts在用户空间先strlen，再把指针和长度交给内核完整检查；当前超过256字节会被明确拒绝。
+字节运算留在用户空间完成，输出则需要越过 K20 的边界。用户调用 airi_write 时，包装函数把普通 C 参数安放到 int80 约定的寄存器，返回时再把内核写进 RAX 的结果交回 C。用户系统调用包装将 RAX 同时作为输入编号和输出结果，`+a`说明同一个C变量既读又写；D、S、d分别指定RDI、RSI、RDX。int80的保存约定沿K20，和Linux syscall会破坏RCX/R11的约定不同。memory/cc阻止编译器假定内存和标志不受这次边界影响。puts在用户空间先strlen，再把指针和长度交给内核完整检查；当前超过256字节会被明确拒绝。
 
 **新建 `labs/airios/libc/syscall.c`。** airi_exit成功不返回，异常返回则用UD2明确失败。
 
@@ -314,9 +320,9 @@ long airi_puts(const char *text) { // 文本长度先在当前用户地址空间
 <a id="user-c-entry"></a>
 ## 从用户初始栈进入 main
 
-用户ELF入口也叫_start，但它单独链接，不和内核_start冲突。进入时RSP指向四个64位槽：argc=1、argv[0]的用户指针、argv结束NULL、空环境NULL；程序名字符串另放在同一用户栈高端。没有辅助向量、动态链接器或完整系统环境，属于本项目自己的最小启动协议。
+内核能够恢复到 ELF 的入口，却还不能直接把 main 当作普通 C 函数调用：CPU 进入 ring3 时，没有主机启动库替它准备 argc/argv，也没有一条内核 call 留下用户可用的返回地址。用户 ELF 因此有自己的 _start，负责把初始栈协议转换成 C 调用。这个符号单独链接，不和内核 _start 冲突。进入时RSP指向四个64位槽：argc=1、argv[0]的用户指针、argv结束NULL、空环境NULL；程序名字符串另放在同一用户栈高端。没有辅助向量、动态链接器或完整系统环境，属于本项目自己的最小启动协议。
 
-_start把栈首读入RDI，把紧随的指针数组地址放入RSI，对齐后call main。调用前RSP模16为0，call压入返回地址后C函数入口模16为8。main返回的EAX交给airi_exit，不会返回内核加载器的普通C调用；内核通过K20保留的完整现场继续。
+_start把栈首读入RDI，把紧随的指针数组地址放入RSI，对齐后call main。调用前RSP模16为0，call压入返回地址后C函数入口模16为8。main 的 call 返回地址属于用户 _start。它返回的 EAX 交给 airi_exit，不会返回内核加载器的普通C调用；内核通过K20保留的完整现场继续。
 
 **新建 `labs/airios/start.S`。** xor RBP标明用户C调用链没有上一层栈帧。
 
@@ -364,7 +370,7 @@ SECTIONS { /* 固定低地址，当前不支持PIE重定位。 */
 <a id="elf-user-workload"></a>
 ## 用 C 程序观察装载效果
 
-initialized和zeroed使用volatile，要求编译器真正读取装载后的数据；否则已知静态初值可能让检查被优化掉。程序逐字节核对8192字节BSS，写最后一个字节确认尾页可写，再验证自己的栈数组通过五个用户字节函数形成AABCD。argv[0]必须是hello、argv[1]为空，核对的是用户栈中的副本，不是内核指针。
+现在让用户代码消费装载器刚建立的内存。initialized 检查文件初值确实到了可写页，zeroed 检查没有文件内容的尾部确实变成零；仅打印“装载成功”无法证明这两项。initialized 和 zeroed 使用 volatile，要求编译器真正读取装载后的数据；否则已知静态初值可能让检查被优化掉。程序逐字节核对8192字节BSS，写最后一个字节确认尾页可写，再验证自己的栈数组通过五个用户字节函数形成AABCD。argv[0]必须是hello、argv[1]为空，核对的是用户栈中的副本，不是内核指针。
 
 最后的ELF_USER_OK由独立用户ELF中的只读消息经用户puts和系统调用输出；main非零结果会使内核拒绝演示通过。因此文件复制、BSS、权限、入口、参数和用户库真正连成同一次运行。
 
@@ -401,9 +407,9 @@ int main(int argc, char **argv) { // C参数由用户_start从用户初始栈取
 <a id="elf-load-owner"></a>
 ## 完整准备后再交给 CPU
 
-prepare_elf在分配前校验整个view，然后先建立内核陷入栈，克隆用户根，对每段按PF_W/PF_X转换成本内核权限，逐页借出并清零。owned数组现在最多64项，页面先登记所有权，映射失败也能由cleanup找到。复制时每次只处理当前页内的文件部分，通过软件lookup得到带偏移的物理地址，再使用HHDM写入尚未运行的页。
+前面的解析器给出“应装成什么”，这里才把描述变成真正的页。例如 zeroed 所在段先得到清零数据页，再由页表关联用户 VA 与内核借出的 PA；复制文件时只覆盖 filesz，剩余内存保留零。prepare_elf 在分配前校验整个 view，然后先建立内核陷入栈，克隆用户根，对每段按PF_W/PF_X转换成本内核权限，逐页借出并清零。owned数组现在最多64项，页面先登记所有权，映射失败也能由cleanup找到。复制时每次只处理当前页内的文件部分，通过软件lookup得到带偏移的物理地址，再使用HHDM写入尚未运行的页。
 
-所有段完成后另建RW/NX初始栈。initial_frame把程序名含NUL复制到栈顶，四个64位槽放在更低且16字节对齐的位置，argv[0]填用户虚拟地址。最后才分配PID和预制首次返回现场。实际切根仍统一由内核int129完成；所有失败仍在长期根和启动栈中回滚，既不执行半个映像，也不提前释放正在使用的栈。
+所有段完成后另建RW/NX初始栈。initial_frame把程序名含NUL复制到栈顶，四个64位槽放在更低且16字节对齐的位置，argv[0]填用户虚拟地址。此时文件、段页和参数已经齐备，但 CPU 尚未执行其中任何指令。最后才分配 PID 和预制首次返回现场。实际切根仍统一由内核int129完成；所有失败仍在长期根和启动栈中回滚，既不执行半个映像，也不提前释放正在使用的栈。
 
 **完整替换 `include/airi/user.h`。** 接口角色不变，演示现在还包括独立C用户ELF。
 
@@ -670,7 +676,7 @@ struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *f) { // CPU将�
 <a id="independent-user-build"></a>
 ## 两次链接，再包装原始输入
 
-Make先用用户small地址模型分别编译_start、hello和用户库，使用用户program.ld链接hello.elf。它不使用内核高地址脚本，也不链接宿主启动文件或libc。第二步的images.S只用.incbin包装当前配置的完整ELF字节；这个包装对象才进入内核链接，用户_start等符号仍只在用户ELF内部。
+装载器的输入到底从哪里来？本章还没有文件系统，先在构建时把完整 ELF 当作数据嵌进内核，运行时再解析它。这个安排包含两次不同的链接，不能把用户对象直接混进内核链接。Make 先用用户 small 地址模型分别编译_start、hello和用户库，使用用户program.ld链接hello.elf。它不使用内核高地址脚本，也不链接宿主启动文件或libc。第二步的images.S只用.incbin包装当前配置的完整ELF字节；这个包装对象才进入内核链接，用户_start等符号仍只在用户ELF内部。
 
 images.o显式依赖同一OUT下的hello.elf，防止用户程序变化后仍嵌入旧文件。AIRI_HELLO_ELF由Make作为带引号的路径宏传入；它是构建时的输入路径，不是guest会打开的宿主文件。运行时内核只读取已嵌入的受界限保护字节，后续文件系统阶段再提供其他映像来源。
 
@@ -1016,11 +1022,11 @@ assert not subprocess.check_output([tool('llvm-nm', 'llvm'), '-u', str(binary)])
 PYELF
 ```
 
-本轮QEMU输出`[ELF_LOAD] entry=0x400000 segments=3 data_pages=6 argc=1`，然后`[ELF_USER_OK] argc=1 data=initialized bss=8192 libc=own`，pid5正常退出0，页池与堆空闲恢复。实际.data/BSS段包含对齐空隙，所以memsz和映射页数不只等于8192数组本身；以当前readelf报告为准。主机ELF检查覆盖正常输入、十四类破坏和原view保持；宿主不执行这些用户指令。
+既有 QEMU 记录输出`[ELF_LOAD] entry=0x400000 segments=3 data_pages=6 argc=1`，然后`[ELF_USER_OK] argc=1 data=initialized bss=8192 libc=own`，pid5正常退出0，页池与堆空闲恢复。实际.data/BSS段包含对齐空隙，所以memsz和映射页数不只等于8192数组本身；以当前readelf报告为准。主机ELF检查覆盖正常输入、十四类破坏和原view保持；宿主不执行这些用户指令。
 
 故障操作已完整写在elf_test.c：每次只改一个字段，错误字符串指出格式或范围，旧view保持原字节。这里还没有exec替换运行中的地址空间；错误ELF与旧进程的事务交接会在exec接入时一并验证，不能提前宣称已完成。
 
-调试沿L01的QEMU/GDB连接，在airi_elf_inspect断点处等待前四个受控演示结束后，再给GDB加入独立用户符号：`add-symbol-file hello.elf 0x400000`、`hbreak main`、`continue`。hello.elf要先用scp传到自己的调试目录；内核批量调试脚本尚未自动发送这个新产物。main处查看argc、argv[0]、zeroed和initialized，再对照当前CR3和用户CS。远端SSH本轮仍失败，没有伪造新的GDB停点证据。
+调试沿L01的QEMU/GDB连接，在airi_elf_inspect断点处等待前四个受控演示结束后，再给GDB加入独立用户符号：`add-symbol-file hello.elf 0x400000`、`hbreak main`、`continue`。hello.elf要先用scp传到自己的调试目录；内核批量调试脚本尚未自动发送这个新产物。main处查看argc、argv[0]、zeroed和initialized，再对照当前CR3和用户CS。此前远端 SSH 连接失败，交互 GDB 停点仍未验证。
 
 下一步让多个用户上下文并存，时钟在完整用户现场边界轮转，再以页内容直接复制实现首版fork，使用本节ELF装载为exec准备新空间，wait负责结束状态和回收。COW、动态链接、完整POSIX和多线程进程继续保持明确边界。
 

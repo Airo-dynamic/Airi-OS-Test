@@ -9,11 +9,20 @@ already_explained:
 first_use:
 - concept: 部分提交与SQ身份
   at: ../../../dev-log/linux/07-uring.md#uring-submit
-  establishes: get_sqe准备参数，submit只报告接受数量，数字cookie不依赖顺序
+  establishes: 五项表固定偏移/长度/目标；cookie103对应buffers[3]，get_sqe/prep只准备，submit累计交出数量而非字节或完成数
 - concept: CQ与借用缓冲
   at: ../../../dev-log/linux/07-uring.md#uring-completion
-  establishes: 负res不是线程errno，短读只验证有效前缀，消费CQ与释放数据是不同动作
+  establishes: wait成功只取得记录；cookie103的res=6只验证六字节；FSYNC的0不是读EOF；cqe_seen归还槽不释放普通数组，不能套用AiriOS的BUSY接口
 not_assumed:
 - Linux允许io_uring、安装liburing即内核可用、完成必须乱序
 limits:
 - SSH255，实际Linux分支及依赖未验证；普通静态数组不称固定注册缓冲
+
+prose_revision:
+  date: 2026-10-24
+  limitation: require用perror核对CQ时可能显示旧errno，且失败项未必先打印实际cookie/res；已明示，不视为完整诊断。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/07-uring.md#uring-submit
+  establishes: 保留已认可完整稿并复查 L05/L06/K32 交接；cookie103 的六字节有效前缀、提交数量、CQ 槽与应用数组寿命以及 liburing 错误诊断限制仍完整。

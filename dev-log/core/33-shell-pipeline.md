@@ -1,15 +1,15 @@
 # K33 · 用户shell启动程序，沿一页数据走完文件与异步设备路径
 
-从K32继续；Linux L05–L07分别解释线程等待、epoll就绪和io_uring完成，guest构建不要求Linux主机在线。图形支线仍可暂停。本节把已有机制串成可用的串口工作流：内核monitor输入run sh，进入独立用户ELF，用户shell再fork/exec运行demo，完成后wait收取结果并继续接收命令。
+前面一直由 ring0 的 monitor 接收 run NAME，再替用户启动程序。现在把选择与启动也交给用户程序：monitor 只启动 sh，之后由 sh 接受 demo、fork 孩子并 exec，父 shell 等孩子结束再显示提示符。从 K32 继续；Linux L05–L07分别解释线程等待、epoll就绪和io_uring完成，guest构建不要求Linux主机在线。图形支线仍可暂停。本节将已建立的进程、文件和完成路径接到用户输入。
 
 前面的内核monitor运行在ring0，直接调用launch；现在的sh运行在ring3，只能调用自有libc和int80。它没有权限读UART端口、内核进程表或块队列。用户shell与桌面Terminal的窗口控件是不同对象，当前不会为窗口增加一个隐藏用户TTY。
 
 <a id="shell-stdin"></a>
 ## UART输入只交给一个所有者
 
-普通程序的新FD表仍只安装stdout1和stderr2，FD0空着，旧files/worker实验依赖这个约定。直接启动sh时额外安装只读terminal_input到0，标CLOEXEC；fork复制表项引用，但孩子成功exec其他程序时只关闭自己的0，父shell继续持有输入。输入与输出使用不同固定对象，最后引用释放不能把固定对象配置清零，下次shell仍能接入。单元检查覆盖这次引用转移与再次打开。
+输入的同一个字节不能既被 monitor 当作命令，又被 sh 当作程序名。我们先在会话边界确定唯一读者，再给它一个用户可用的 FD。普通程序的新 FD 表仍只安装 stdout1 和 stderr2，FD0空着，旧files/worker实验依赖这个约定。直接启动sh时额外安装只读terminal_input到0，标CLOEXEC；fork复制表项引用，但孩子成功exec其他程序时只关闭自己的0，父shell继续持有输入。输入与输出使用不同固定对象，最后引用释放不能把固定对象配置清零，下次shell仍能接入。单元检查覆盖这次引用转移与再次打开。
 
-arch_serial_read只在UART接收就绪时读一个字节，无数据返回-1；字节零仍是合法数据，不能与空状态混同。file_transfer先验证完整用户输出跨度，再逐字节取当前前缀到256字节内核副本，然后复制到目标用户页。没有字节返回内部EAGAIN，由K29的IO_READ保存原用户地址与现场，PIT唤醒的普通服务栈重查。读取零字节立即返回零，不登记等待；pread到此输入返回ESPIPE。
+sh 调用 read(0,&c,1) 后并不直接访问设备端口；文件传输按 FD 识别固定输入对象，再进入架构读取。arch_serial_read 只在 UART 接收就绪时读一个字节，无数据返回-1；字节零仍是合法数据，不能与空状态混同。file_transfer先验证完整用户输出跨度，再逐字节取当前前缀到256字节内核副本，然后复制到目标用户页。没有字节返回内部EAGAIN，由K29的IO_READ保存原用户地址与现场，PIT唤醒的普通服务栈重查。读取零字节立即返回零，不登记等待；pread到此输入返回ESPIPE。
 
 launch在用户会话结束前不返回内核monitor，因此monitor不与sh争抢同一UART。当前没有终端复用、行规程、信号、后台任务或多个输入会话；要有多个shell，需要先做终端对象和输入路由，不能仅复制FD0。
 
@@ -506,9 +506,9 @@ int main(void) { // 独立进程，每次建立干净RAM目录。
 <a id="shell-user-parser"></a>
 ## shell保留自己的映像，孩子成功exec才替换
 
-sh先验证目录输出的ENOSPC与EFAULT、stdin空读和坏输出指针。通过后发布USER_SHELL_READY。行缓冲64字节包含末尾NUL，退格只撤已收字符，CR后紧随LF只执行一次；一旦溢出，剩余整行全部丢弃，不能把被截短前缀当可执行名称。
+用户读到 d、e、m、o 后，仍只是在自己的 line 数组中累积名称；回车才决定启动。先保证这个输入和名称查询边界能处理失败：sh 先验证目录输出的 ENOSPC 与 EFAULT、stdin 空读和坏输出指针。通过后发布USER_SHELL_READY。行缓冲64字节包含末尾NUL，退格只撤已收字符，CR后紧随LF只执行一次；一旦溢出，剩余整行全部丢弃，不能把被截短前缀当可执行名称。
 
-help、programs和exit是shell自己的内建操作。其他整行作为一个无参数程序名：父fork得到孩子PID，子调用exec，成功从新_start开始，失败仍在子旧映像里打印负错误并exit127；父waitpid阻塞，拿到这个孩子的真实退出码后打印SHELL_COMMAND_DONE，再读下一行。父的line在父地址空间里，孩子替换页面不会破坏它。当前不支持参数、重定向、管线语法、作业控制与嵌套sh。
+收到 demo 后，如果 shell 自己直接 exec，成功就失去再次显示提示符的旧映像。因此它保留自己，只让孩子替换。help、programs 和 exit 是 shell 自己的内建操作。其他整行作为一个无参数程序名：父fork得到孩子PID，子调用exec，成功从新_start开始，失败仍在子旧映像里打印负错误并exit127；父waitpid阻塞，拿到这个孩子的真实退出码后打印SHELL_COMMAND_DONE，再读下一行。父的line在父地址空间里，孩子替换页面不会破坏它。当前不支持参数、重定向、管线语法、作业控制与嵌套sh。
 
 programs系统调用30从exec使用的同一注册表形成有界换行文本。容量不足不复制半份，实际输出包含NUL，返回长度不含NUL；用户获得名字，不获得ELF地址或内部指针。kernel monitor的programs也遍历相同注册表。目录里保留broken等故障样本，列出名称不等于保证它是合法ELF。
 
@@ -755,13 +755,15 @@ int main(void) { // 内核监控台run sh后从此用户入口继续。
 <a id="shell-pipeline"></a>
 ## demo：用户页与注册副本的两个寿命
 
-shell运行demo后，新程序先airi_alloc申请4096字节，内核逐页分配、清零、建立用户可写映射，完整成功才推进heap_next并输出USER_ALLOC。程序检查整页为零，在首512字节放入模式数据。/demo RAM文件按256字节副本上限分两次写入，再用pread分两段读回页的1024处，比较后关闭FD；它是RAM文件，重启不持久。
+shell 为 demo 创建孩子并 exec 后，新程序先 airi_alloc 申请 4096 字节。内核分配、清零、建立可写映射，全部成功才前移 heap_next 并报告 USER_ALLOC。程序检查整页为零，再在首 512 字节填模式。这里的用户页会活到进程退出，没有单独的对象 free。
 
-随后申请两个注册buffer，put把用户页前512字节复制到写buffer。fork孩子得到用户页副本，但异步owner为空，不继承这两个handle。父提交WRITE扇区257，CQ等待；孩子用真实ticks推进并打印OTHER_PROGRESS。普通快设备不保证一定有这个交错，作者另用QMP实际限速证明一次等待期间的任务进展，guest不插入伪造设备延迟。
+先让同一模式经过 RAM 文件：/demo 按 256 字节系统调用副本上限分两次写，再用 pread 分两段读到用户页偏移 1024，比较内容后关闭 FD。文件能跨程序保留，却不会跨 QEMU 重启持久化；这一步还没接设备。
 
-父收到cookie1/正确handle/WRITE/512后，才提交FLUSH cookie2并等待结果0，再提交READ cookie3等待512。每次先接受，再等待，再验证CQ身份和结果；airi_io_next返回0只是成功取回一条完成，实际字节数在cqe.result。最后get把读buffer复制到页的512处，比较与原数据一致，收取CQ后才free两个注册资源，再wait孩子退出。
+接下来把用户页前 512 字节 put 到注册写 buffer，另申请读 buffer。注册对象是内核池副本，设备不直接借用户页。fork 后孩子得到用户页副本，但 owner 为空，不继承两个 handle。父提交扇区 257 的 WRITE 并等 CQ，孩子用真实 tick 工作、报告 OTHER_PROGRESS。快设备可能在 next 前已完成，交错证据另由 QMP 真实限速取得，guest 不伪造延迟。
 
-扇区257属于独立异步实验范围，不是正式追加日志区。WRITE→FLUSH→READ说明这里的设备同步顺序；没有模拟宿主掉电，不因读回正确就宣称物理断电保证。程序返回后，shell取得退出码；用户页由进程退出统一回收，注册buffer与用户页不是同一个free协议。
+父恢复执行不等于写已完成，必须核对自己的 cookie1、handle、WRITE 和 result=512。之后才提交 cookie2 的 FLUSH，等结果 0，再提交 cookie3 的 READ，等结果 512。每次都分别处理接受、等待、CQ 身份和操作结果；airi_io_next 返回 0 只表示取得记录，实际字节数在 cqe.result。
+
+读 CQ 已收取，buffer 才解除 BUSY。get 将它复制到用户页偏移 512，与原模式比较，然后 free 两个注册对象并 wait 孩子。扇区 257 属于独立异步实验区，不是正式日志；WRITE→FLUSH→READ 说明请求同步顺序，没有经历主机断电。demo 返回后 shell 收退出码，用户页由进程退出统一回收，不能把页回收与注册 buffer 的 free 当成一个协议。
 
 **新建贯通演示。** 应用错误只exit1，shell能够继续处理下一条命令。
 
@@ -809,7 +811,7 @@ int main(void) { // shell fork后exec，独立页表和异步owner。
 <a id="shell-kernel-entry"></a>
 ## 内核注册两个ELF，并保持图形入口可返回
 
-user.c只增加sh/demo映像目录、UART读分支、目录调用30、根shell输入接入、成功页分配记录，以及monitor的图形限制。已有fork/exec/等待调度的机制不变，完整版本用于逐段对照。图形构建定义AIRI_GRAPHICAL_CONSOLE时，monitor的run sh明确提示从./airios run串口进入，立即返回；不能让窗口等待一个未接线的输入通道。其他用户程序仍可运行，stdout仍写UART。
+shell 的控制逻辑留在用户 ELF，内核只提供已经解释过的连接处。user.c 只增加 sh/demo 映像目录、UART读分支、目录调用30、根shell输入接入、成功页分配记录，以及monitor的图形限制。已有fork/exec/等待调度的机制不变，完整版本用于逐段对照。图形构建定义AIRI_GRAPHICAL_CONSOLE时，monitor的run sh明确提示从./airios run串口进入，立即返回；不能让窗口等待一个未接线的输入通道。其他用户程序仍可运行，stdout仍写UART。
 
 **更新进程与系统调用连接处。** 保留此前相同函数，逐项加入本节已解释的接线。
 
@@ -2226,7 +2228,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 <a id="shell-verification"></a>
 ## 用UART输入与真实限速完成作者演示
 
-shell_test先暂停QEMU，连接UART后继续，等待P5完整就绪，再发送run sh。进入用户提示符后才对airi-disk设置1 IOPS，demo的USER_ALLOC给出真实PID；脚本要求OTHER_PROGRESS位于此PID一次CQ登记与result0唤醒之间，同时存在设备start/complete和PIPELINE_USER_OK。只有VM仍在运行或只有SUBMIT日志均不能通过。
+这条“贯通路径”不是 shell 的管线语法；证据要同时落到用户输入、孩子身份、设备操作和父 shell 恢复。shell_test 先暂停 QEMU，连接UART后继续，等待P5完整就绪，再发送run sh。进入用户提示符后才对airi-disk设置1 IOPS，demo的USER_ALLOC给出真实PID；脚本要求OTHER_PROGRESS位于此PID一次CQ登记与result0唤醒之间，同时存在设备start/complete和PIPELINE_USER_OK。只有VM仍在运行或只有SUBMIT日志均不能通过。
 
 随后撤掉限速，运行storage、recover、files，故意运行missing和broken，再运行hello证明失败后仍可继续。programs查询验证真实目录；80字符行必须整行丢弃，退格改正后的hellx加Delete再o和CRLF应运行hello。exit后等待内核monitor真正收拢会话，再echo确认UART仍工作。每次等待35秒，失败也保留串口日志，finally回收本测试QEMU；测试只重置自己8MiB盘，不碰交互目录。
 
@@ -2682,6 +2684,6 @@ if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义�
 
 依次输入run sh、programs、demo、storage、recover、missing、hello、exit，再在内核提示符输入echo after-shell。demo应有USER_ALLOC、IO_TRACE、PIPELINE_CONTINUE和PIPELINE_USER_OK，shell按真实退出码给出code=0。普通未限速设备的等待/切换数量允许变化，不要求人为制造每次阻塞。
 
-2026-10-16作者实际观察到了父CQ等待区间内的另一个用户进展，设备与RAM文件512字节读回正确，失败exec后可继续，shell退出后monitor仍可输入。完整回归与独立重建结果绑定在.codex/teaching/validation/K33.json，详细串口在artifacts/shell-normal/serial.log。Linux P6的相同负载对照在L08，不把guest成功代替Linux运行。
+2026-10-16 的既有运行中，作者实际观察到了父CQ等待区间内的另一个用户进展，设备与RAM文件512字节读回正确，失败exec后可继续，shell退出后monitor仍可输入。完整回归与独立重建结果绑定在.codex/teaching/validation/K33.json，详细串口在artifacts/shell-normal/serial.log。Linux P6 的固定负载对照在 L08，不把guest成功代替Linux运行。
 
 现在主线已连接启动、用户程序、分配、文件、等待、设备完成和继续运行。后续可独立选择图形TTY、WebUI宿主网关、设备中断完成或开发板；当前没有网络栈、POSIX shell、多核或通用桌面进程服务。

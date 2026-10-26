@@ -1,28 +1,30 @@
 # L02 · 在 Linux 分开观察虚拟范围、驻留和访问权限
 
-从 K17 继续，沿用个人 Linux 主机，不需要图形课程。AiriOS 已经亲手实现物理页、页表和对象堆，现在换到 Linux 用户程序，申请 64 MiB 虚拟范围，逐步写入，再把第一页改成只读，让一个独立子进程完整演示非法写入的结果。最后解除范围，记录真实 VMA、RSS 和缺页次数。
+自制系统已经把物理页、虚拟映射和小对象分开。现在在 Linux 用户程序申请 64 MiB，先只保留范围，再写第一页和所有页，查看哪个变化能反映到驻留统计。随后只读化首个页，让子进程完整执行一次非法写，父进程验证结果后解除范围。
 
-本节新建 labs/linux/p2/memory.c 与 run.sh，再替换 Linux 执行脚本和统一入口，旧 P1 程序不变。默认 Linux 主机仍是 airi@ssh.airi-dynamic.top，新的独立远端目录是 AiriOS-labs/p2。本轮 SSH 连接返回255，尚未运行 Linux 程序或 GDB；以下给出完整操作与应观察的关系，不把示意关系当作实测数字。连接失败不要求暂停内核主线。
+从 K17 继续，新增 p2/memory.c 与 run.sh，再给执行器增加阶段选择；p1 保留。仍用个人 `airi@ssh.airi-dynamic.top` 的 `AiriOS-labs/p2`，不依赖图形。既有记录 SSH255，未运行本版 Linux/GDB，以下是可执行步骤与应观察关系，不预填实测数字，也不据连接问题阻断内核路线。
 
 <a id="linux-vma-rss"></a>
-## mmap 返回了什么
 
-mmap 返回一个用户虚拟地址。MAP_PRIVATE|MAP_ANONYMOUS 表示私有匿名范围，不从某个普通文件 FD 读取初始内容；fd 参数因此为−1，文件偏移为0。成功后 Linux 已经记住该范围和权限，这段管理记录称为 VMA。它不保证每一页此时都已经分配并驻留在物理内存中；真实写入可能触发缺页，再建立本次访问需要的物理页和映射。
+## 地址已经返回，哪些页真正驻留还要继续观察
 
-RSS 是驻留集大小，本节读取 /proc/self/smaps 中包含目标地址的那一段 VMA 的 Rss，而不是把进程总内存变化全部算到这次 mmap。映射头给出实际起止和权限；内核可能把相邻同属性区域合并，mprotect 又可能将一个 VMA 拆成多个，因此同时输出 Size 和头行。Private_Dirty 是该 VMA 私有脏页统计，AnonHugePages 记录匿名透明巨大页；它们解释为什么观察值不一定以预想粒度变化。进程累计 minor_faults 也包含其他访问，不能把它精确当成这一个 VMA 的缺页数。
+mmap 交出用户虚拟地址。MAP_PRIVATE|MAP_ANONYMOUS 选择私有匿名范围，不从普通文件 FD 提供内容，因此 fd=−1、offset=0。成功时内核已经保存范围与权限，称为 VMA；不保证每页都有物理页驻留，后续写入才可能触发缺页与按需映射。
 
-程序先只建立范围，再写第一页，最后每页写一个字节。volatile 保证这些实际访问不会被编译器删除。页大小用 sysconf 查询，不能把 AiriOS 当前4KiB假设带到任意 Linux。若内核支持，madvise NOHUGEPAGE 减少透明巨大页影响；建议失败会保留具体日志并继续输出真实巨大页统计，不伪造固定RSS结果。
+snapshot 用地址在 smaps 中找到覆盖它的实际 VMA，打印头、Size、Rss、Private_Dirty、AnonHugePages。这里不是进程总 RSS；相邻同属性范围可能合并，mprotect 也可能拆分，所以不能只看请求长度。特别是首个页改只读后，快照可能只覆盖被拆出的首页，Rss 变小并不说明余下 64 MiB 全被归还。minor_faults 是进程累计量，还含其他访问。
+
+先观察 reserved，再写一页、每页一字节。volatile 保留访问，sysconf 给本机页大小，不把 AiriOS 的 4 KiB 强加给 Linux。可用时 madvise NOHUGEPAGE 减少透明巨大页影响；建议失败仍打印实际巨大页统计，不伪造固定步长或 RSS 数值。
 
 <a id="linux-permission-fault"></a>
-## 让非法写影响一个进程
 
-mprotect 把首个实际页改成 PROT_READ，Linux 负责更新页表权限与相关翻译缓存，用户程序不能自己装 CR3。随后 fork 创建子进程：同一调用在父进程返回子 PID，在子进程返回0，失败返回−1。本节只用它隔离一次明确的非法写；完整进程地址空间、复制与 COW 在 P3 继续研究。
+## 权限改变后，用子进程承担预期非法写
 
-子进程写只读页应被 Linux 以 SIGSEGV 终止；父进程不做这次写，用 waitpid 等刚创建的子进程，再用 WIFSIGNALED/WTERMSIG 解码状态。父进程仍能读原值0x41。AiriOS 目前没有用户进程，未登记故障会停止内核；Linux 将这次非法用户访问限制到子进程。这是两套运行环境的真实差别，不能把 AiriOS 的内核 PF 恢复代码直接当 Linux 信号处理。
+mprotect 把第一页改为 PROT_READ，更新表和缓存的是 Linux，用户不装 CR3。fork 在父进程返回子 PID，在孩子返回 0，失败为 −1；这里只用它隔离故障，完整地址空间/COW 留到 P3。
 
-fork 前 fflush 清掉已有 stdio 缓冲，避免复制缓冲后重复输出。子进程若没有发生预期故障，则执行 _exit(99)，不经过复制来的 stdio 清理；父进程会拒绝这个普通退出。RLIMIT_CORE 只限制当前实验进程及其孩子，不修改系统配置，不产生预期故障的 core 文件。
+孩子写 0x42 应以 SIGSEGV 结束，父进程精确 waitpid 这个孩子，解码 WIFSIGNALED/WTERMSIG 并确认仍读到 0x41。若孩子竟继续，就 `_exit(99)`，父亲拒绝普通退出。fork 前 fflush 避免复制旧 stdio 缓冲后重复打印，RLIMIT_CORE 仅限制本实验与孩子，不改主机策略。
 
-**新建 `labs/linux/p2/memory.c`。** snapshot 只比较地址数值和 proc 头；munmap 后不再解引用旧指针。
+这与 AiriOS 当前内核故障停止全机不同，不能把其精确恢复函数直接当 Linux 信号机制。munmap 之后仅保留地址整数查 proc，不再解引用旧 mapping。
+
+**新建 `labs/linux/p2/memory.c`：**
 
 <!-- write: labs/linux/p2/memory.c -->
 ```c
@@ -127,13 +129,14 @@ int main(void) { // 普通Linux用户态程序，由Linux拥有页表和物理�
 ```
 
 <a id="linux-run-record"></a>
-## 让失败结果也留下记录
 
-run.sh 首先要求当前内核确实为 Linux，再把 result.json 写成 passed=false，避免旧成功在新失败后继续出现。普通程序的输出直接写文件，if 使用真实退出状态；不用 `程序 | tee` 后误把 tee 的成功当程序成功。GDB 在 main 停下，输出调用栈和真实映射，再继续完整实验。两个程序运行都完成后才发布 passed=true。
+## 父进程验证了孩子的故障，才是这次程序的成功
 
-本节程序由 Linux 的 libc 和运行时进入 main；AiriOS 的字节库和页表代码没有链接进去。故障子进程的 SIGSEGV 是实验结果的一部分，父进程验证它后正常退出0。若 /proc、mprotect 或工具不可用，脚本保留失败输出并非零退出。
+run.sh 先确认 Linux、将 passed 置 false，再直接运行并保存输出。if 消费真正程序的状态，不经 `程序 | tee` 误取 tee 成功。父进程验证 SIGSEGV 后正常退出 0，GDB 再重新运行一次、在 main 看栈与映射，两个运行都完成才置 true。
 
-**新建 `labs/linux/p2/run.sh`。** `$(uname -s)` 只取得当前内核名称，双引号保留它作为单个测试值。
+程序使用 Linux 的 libc/运行时，没有链接 AiriOS 页表代码。缺 /proc、mprotect 或工具都会保留原因并非零，不能把环境不可用当成预期故障已发生。`$(uname -s)` 取当前内核名，双引号保留一个比较值。
+
+**新建 `labs/linux/p2/run.sh`：**
 
 <!-- write: labs/linux/p2/run.sh -->
 ```sh
@@ -161,9 +164,11 @@ gdb -q -batch -ex 'set pagination off' -ex 'break main' -ex run -ex 'bt' -ex 'in
 printf '{"passed":true,"phase":"p2"}\n' > artifacts/result.json # 程序与调试器都正常结束后才发布成功。
 ```
 
-Linux 执行器新增 --phase，按 p1/p2 选本节源文件和独立远端目录。实际建立 SSH 连接前，先在本机写 verified=false 和本次 host/directory；连接失败仍保存 connection.log 和返回码。只有远端执行及下载的 result.json 都明确成功，才改为 verified=true。源码复制、远端运行和回收证据仍通过已解释的 SSH、scp、tar；实验没有进入远端时，不拿本地编译替代它。
+执行器新增 --phase，选 p1/p2 的源码和独立目录。先在本机保存本次 host/directory 与 verified=false，再连 SSH；连接失败也能留下 connection.log/返回码。只有远端运行和取回的 result 都符合才改 true。
 
-**完整替换 `scripts/linux_lab.py`。** 失败证据在复制源码之前就能落到本机，不会只留一条终端文字。
+传源码、远端编译、运行、打包取证仍是已解释的 SSH/scp/tar 过程。本地语法通过不代替 Linux 的实际 VMA 与信号观察。
+
+**完整替换 `scripts/linux_lab.py`：**
 
 <!-- write: scripts/linux_lab.py -->
 ```python
@@ -211,7 +216,9 @@ if result.get('passed') is not True:  # get缺键返回None，只有布尔True�
 print(f'Remote evidence downloaded: {dest}')  # 显示本轮证据可查看位置。
 ```
 
-**完整替换 `scripts/manage.py`。** 新参数转交 Linux 执行器；不选择阶段仍运行既有 P1，内核构建不依赖远端。
+统一入口将阶段值交给执行器，不选仍为既有 p1。内核 build/test 不等远端连接，这次实验的未验证状态不会被别的构建成功覆盖。
+
+**完整替换 `scripts/manage.py`：**
 
 <!-- write: scripts/manage.py -->
 ```python
@@ -365,15 +372,15 @@ if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义�
         sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
 ```
 
+从统一入口选择 p2，真实结果以该次远端状态和下载文件为准。
+
 <!-- run -->
 ```sh
 ./airios linux-lab --phase p2  # 在个人Linux主机真实构建、运行、调试并带回证据。
 ```
 
-本轮实际结果是 SSH 返回255，`artifacts/linux-p2/remote.json` 中 verified=false、status=connection failed，具体连接文字在同目录 connection.log。C 源码已在 Mac 以 C11、Wall/Wextra/Werror 编译通过；Mac 运行明确返回77并说明需要 Linux，这只验证语法与错误环境出口。远端的保留范围、触碰后 RSS、SIGSEGV 和 GDB 停点均尚未验证。
+既有记录为 SSH255，remote.json 仍 verified=false、status=connection failed，文字在 connection.log。此前 Mac 仅用 C11/Wall/Wextra/Werror 编译、执行拒绝分支返回 77；没有证明 Linux 驻留、信号或 GDB，本次改稿未重跑。
 
-连接可用后的操作：在下载的 `artifacts/linux-p2/artifacts/memory.log` 顺序查看 reserved、one page、all pages、read-only、unmapped 五个快照。前四段展示范围、驻留和权限变化，最后应找不到覆盖旧地址的 VMA；不预填某台机器的 RSS 数字。GDB 输出在 gdb.log，环境、编译器和页大小在 environment.txt。单独登录该目录也可以执行 `gdb ./memory`、`break main`、`run`、`next`，在每个 snapshot 前后对照 smaps；子进程默认从 GDB 分离，父进程等待它的真实信号结果。
+连接可用后按 memory.log 的 reserved、one page、all pages、read-only、unmapped 依次查看；范围、驻留、权限是不同列，最后应无 VMA 覆盖旧地址。gdb.log 留停点，environment.txt 留版本与页大小，不预写某机器 RSS。手工 GDB 可在各 snapshot 前后对照 smaps；默认孩子分离，父亲仍等实际信号结果。
 
-回到 BOSS/Taishan：申请缓冲区成功、已经触碰对应页、数据是否在页缓存中，是不同问题。页分配失败、进程 RSS 增长和 O_DIRECT 的对齐要求也不能用同一个统计解释。本节覆盖虚拟范围、实际触碰和权限；文件页缓存、直接I/O和持久性在 P4 的专门实验处理。
-
-参考：[mmap](https://man7.org/linux/man-pages/man2/mmap.2.html)、[smaps](https://man7.org/linux/man-pages/man5/proc_pid_smaps.5.html)、[mprotect](https://man7.org/linux/man-pages/man2/mprotect.2.html)、[fork](https://man7.org/linux/man-pages/man2/fork.2.html)。Linux 的按需分配比当前 AiriOS 主动借页并映射更完整，不能据本节把两者当成同一种内存策略。
+对应 BOSS/Taishan，申请缓冲成功、已经触碰、数据是否在文件页缓存是不同问题。页分配失败、RSS 增长、O_DIRECT 对齐也不能互相解释；文件缓存与持久性留 P4。参考 [mmap](https://man7.org/linux/man-pages/man2/mmap.2.html)、[smaps](https://man7.org/linux/man-pages/man5/proc_pid_smaps.5.html)、[mprotect](https://man7.org/linux/man-pages/man2/mprotect.2.html)、[fork](https://man7.org/linux/man-pages/man2/fork.2.html)。Linux 按需机制不等于自制系统主动借页映射。

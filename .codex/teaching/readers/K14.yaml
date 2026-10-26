@@ -20,3 +20,8 @@ not_assumed:
 - 用户进程、设备中断、调度、页分配、页表和信号
 limits:
 - 运行证据不记录为读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/14-exceptions.md#trap-frame
+  establishes: 沿 ud2 故障到 IDT、统一异常现场、C 精确登记与 iretq 恢复组织全文；静态表和局部描述符寿命分开，GP 错误码与未登记停止条件保留，既有实测不冒称本轮。

@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 64条固定记录，专用工作负载验证固定文本
 - Linux同步与原子替换另行对照，当前用户I/O仍同步等待
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/27-user-storage.md#storage-service
+  establishes: 由新内核无法取得旧 count 引出正式日志服务和双启动；用户副本、静态服务与 DMA 逐层交接，纠正标题将 QEMU 误称 CPU 进程，保留同步等待边界。

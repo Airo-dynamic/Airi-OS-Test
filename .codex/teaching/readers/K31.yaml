@@ -9,10 +9,10 @@ already_explained:
 first_use:
 - concept: 多重身份与固定记录
   at: ../../../dev-log/core/31-async-queues.md#async-three-identities
-  establishes: 设备id、cookie、代数handle和owner epoch分别关联，result才是I/O结果
+  establishes: 设备id定位硬件位置，cookie定位请求，handle识别一份注册对象，owner/epoch识别资源轮次；submit/pump/pop的0与completion.result分开
 - concept: CQ信用与缓冲BUSY
   at: ../../../dev-log/core/31-async-queues.md#async-credit
-  establishes: 接受预留完成位置，收集才解锁buffer并归还信用，SQ空不代表可无限提交
+  establishes: 接受增加outstanding，设备结束回收SQ但保留CQ信用与BUSY，pop才释放；四项CQ未收时第五项仍拒绝
 - concept: ACTIVE晚完成
   at: ../../../dev-log/core/31-async-queues.md#async-late-owner
   establishes: 排队可撤销，ACTIVE副本保持到后端收集，同编号新epoch不接旧完成
@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 硬件单在途，软件SQ四项，不承诺性能提升
 - 用户接口与真实进程退出/exec接下一节，晚完成当前由明确主机模型验证
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/31-async-queues.md#async-three-identities
+  establishes: 保留已认可完整稿并复查 K30→K31→K32；cookie30、四份 CQ 信用、BUSY 到 pop、epoch/handle 晚完成及唯一硬件消费者保持连续，精确替换配方不变。

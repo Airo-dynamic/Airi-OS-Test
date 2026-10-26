@@ -34,3 +34,8 @@ source_reading:
   at: ../../../dev-log/core/07-first-boot.md#code-scripts-first-boot-py-1
   establishes: Popen交回运行中的进程，poll的None表示未退出；monotonic设90秒总截止时间，finally负责成功与失败后的回收
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/07-first-boot.md#code-config-boot-limine-conf-1
+  establishes: 区分主机 staging、外层 ISO 与 CD 映像内部 FAT；固件读启动映像的 EFI，Limine 再取配置与内核。固定版本构建规则已核实，完整行、超时与主机回收条件保留。

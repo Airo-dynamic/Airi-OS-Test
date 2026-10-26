@@ -33,3 +33,8 @@ feedback:
   observation: 旧报告失效与新报告写出属于不同阶段，测试还需要说明被替换ROOT与真实课程来源并非同一对象。
   revision: 正文分别说明audit早退和链接错误记录，沿core/linux进度示例解释module属性替换，再建立差异块与covers的位置关系。
 not_inferred: 已解释、敲完或工具成功不证明理解；不设置答题门槛。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/tools/03-check-and-progress.md#tool-navigation
+  establishes: 内容成立后再查导航；同一声明支撑入口、路线位置与 current 的区别，真实失败输入保护旧文件，差异块身份只负责固定覆盖范围。

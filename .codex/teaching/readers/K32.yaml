@@ -27,3 +27,8 @@ not_assumed:
 limits:
 - 固定复制池、四项软件SQ和单硬件在途
 - Linux实验另行记录，guest P5_READY不证明Linux实测
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/32-user-async.md#async-user-abi
+  establishes: 用户局部描述与 BUSY 数据分开；fork 整数不授予资源、exec 同 PID 换 epoch、CQ 输出先验后 pop 连续解释，限速证据按同一等待区间核对。

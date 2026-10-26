@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 仍单硬件请求，非阻塞驱动接口不等于完整用户异步I/O
 - 设备可能在首次poll前已完成，演示不伪造pending必然可见
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/30-block-begin-poll.md#block-begin-poll
+  establishes: 由 perform 不交还控制权引出 begin/poll；同一扇区请求的状态跨调用保存，同步适配只收自己提交，日志忙拒绝发生在事务前。

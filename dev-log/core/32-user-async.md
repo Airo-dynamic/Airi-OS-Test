@@ -1,13 +1,13 @@
 # K32 · 用户请求离开调用栈之后，谁把完成交回来
 
-从K31继续。本节让真正ring3程序申请注册buffer、提交四条请求、等待CQ并验证结果，同时让另一个用户继续执行。随后在请求已开始或完成时退出、exec，确认旧资源不会交给新轮次。最后以QEMU真实限速证明一次CQ阻塞期间另一个任务取得CPU，而不要求快设备也人为等待。
+K31 的 cookie30 已走完软件 SQ、设备与 CQ，但提交者还是可信内核代码。现在让 ring3 程序做同样的写入：系统调用要复制描述并检查资源归属，CQ 暂空时还要保留那一次 next 调用，让另一个用户取得 CPU。随后在请求已开始或完成时退出、exec，确认旧资源不会交给新轮次。最后以QEMU真实限速证明一次CQ阻塞期间另一个任务取得CPU，而不要求快设备也人为等待。
 
 <a id="async-user-abi"></a>
 ## 用户有两类对象，寿命不同
 
-用户提交结构只有sector和cookie，内核在int80返回前复制完，所以用户函数submit里的局部结构可立即结束寿命，下次调用可以复用同一地址。注册buffer却从接受请求开始保持BUSY，直到对应CQ被收集；用户put/get/free都会在BUSY时返回−16。完成前可复用提交描述，不可复用请求借用的数据资源，这两个规则不能混在一起。
+同一个 submit 调用里出现两份“缓冲”，它们的寿命不同。局部提交描述说明做什么，注册 buffer 保存被操作的数据。用户提交结构只有 sector 和 cookie，内核在int80返回前复制完，所以用户函数submit里的局部结构可立即结束寿命，下次调用可以复用同一地址。注册buffer却从接受请求开始保持BUSY，直到对应CQ被收集；用户put/get/free都会在BUSY时返回−16。完成前可复用提交描述，不可复用请求借用的数据资源，这两个规则不能混在一起。
 
-airi_io_alloc返回正句柄，不是C指针。当前注册的是内核固定512字节池，put/get显式复制；设备DMA仍用驱动静态区。它不是Linux io_uring注册用户页的零拷贝接口，也不宣称兼容IORING_REGISTER_BUFFERS。范围仍限制在256–271独立实验扇区，正式日志不会被这个用户接口覆盖。
+例如用户把提交描述放在栈上，int80 返回后可以重用这段栈；cookie30 借用的注册 buffer 却仍为 BUSY，直到 CQ 收取。airi_io_alloc 返回正句柄，不是 C 指针。当前注册的是内核固定512字节池，put/get显式复制；设备DMA仍用驱动静态区。它不是Linux io_uring注册用户页的零拷贝接口，也不宣称兼容IORING_REGISTER_BUFFERS。范围仍限制在256–271独立实验扇区，正式日志不会被这个用户接口覆盖。
 
 编号23申请，24 put，25 get，26 free；27提交时传操作、handle和16字节描述地址；28 next接受CQ输出与wait标志，0不等、1阻塞；29提供只读状态。next返回0表示复制出一条完成，真正I/O结果在completion.result。负CQ结果、空队列−11、坏输出−14与提交未接受是不同层次的结果。
 
@@ -43,9 +43,9 @@ _Static_assert(sizeof(struct airi_io_completion) == 32, "completion ABI size"); 
 <a id="async-observer"></a>
 ## 轨迹来自真实状态变化，观察器不拥有请求
 
-引擎新增可选event回调。接受SQ后报告submit，后端接收后报告start，CQ形成后报告complete；旧epoch或无主完成报告drop，关闭时尚未开始的请求报告cancel。观察器只在当前调用内借请求元数据，不能保存指针或重入修改引擎。它不影响CQ信用与设备所有权，不把数据内容或内核地址写进串口。
+要证明父等待期间孩子确实运行，需要把日志放在实际状态变化处，而不能由用户打印“已并发”就算通过。引擎新增可选 event 回调。接受SQ后报告submit，后端接收后报告start，CQ形成后报告complete；旧epoch或无主完成报告drop，关闭时尚未开始的请求报告cancel。观察器只在当前调用内借请求元数据，不能保存指针或重入修改引擎。它不影响CQ信用与设备所有权，不把数据内容或内核地址写进串口。
 
-内部state按owner与epoch统计当前请求与buffer，另外数同PID的旧ACTIVE；quiescent核对全部owner、注册buffer和请求单元。静态池不会改变物理页free数，因此仅比较页数不足以发现注册资源泄漏。新主机断言在reset后确认当前active=0、retired_active=1、outstanding=0，后端收集后retired_active归零。
+同样，页池计数恢复只说明动态页面归还；K31 的固定池即使泄漏，也不会改变页池统计。内部 state 按 owner 与 epoch 统计当前请求与 buffer，另外数同PID的旧ACTIVE；quiescent核对全部owner、注册buffer和请求单元。静态池不会改变物理页free数，因此仅比较页数不足以发现注册资源泄漏。新主机断言在reset后确认当前active=0、retired_active=1、outstanding=0，后端收集后retired_active归零。
 
 **更新算法与内核服务声明。** 内部观察接口和公开io_abi分开，不向用户交池布局。
 
@@ -555,7 +555,7 @@ int main(void) { // host只验证明确模型，真设备由独立guest演示。
 <a id="async-service-stack"></a>
 ## IRQ只决定服务时机，普通启动栈推进设备
 
-submit只入SQ。普通系统调用尾部poll_waiters可以取已经形成的CQ，但不直接pump设备。时钟调度发现IO_WAIT或任何异步工作时暂回启动栈；launch的服务循环先pump一次，再重查等待者，然后公平选择用户。没有用户可运行则真正等PIT。即使另一个用户纯计算不调用系统调用，设备仍能获得周期服务。
+用户提交返回后，设备还需要有人持续 pump。若只在提交者再进系统调用时推进，它正等 CQ 就可能永远没有完成；若在 IRQ 里直接复制用户数据，又会把长操作塞进中断链。这里把时机与实际工作分开。submit 只入 SQ。普通系统调用尾部poll_waiters可以取已经形成的CQ，但不直接pump设备。时钟调度发现IO_WAIT或任何异步工作时暂回启动栈；launch的服务循环先pump一次，再重查等待者，然后公平选择用户。没有用户可运行则真正等PIT。即使另一个用户纯计算不调用系统调用，设备仍能获得周期服务。
 
 airi_arch_idle把sti/hlt留在x86适配，airi_arch_user_gate把int129留在同一架构层。user_gate现在是一次普通C调用，调用期间它的返回地址和陷入frame都在长期启动栈上；暂回后函数返回，旧栈空间可再使用，下一次进入用户前重新调用登记新继续点。进程层仍负责区分暂时服务与最终退出。CS选择子、用户frame与页表仍是当前x86实现，增加两个适配函数不表示已经能直接换开发板。
 
@@ -724,13 +724,15 @@ void airi_async_demo(void) { // 先在内核独立证明队列，再接用户系
 <a id="async-process-owner"></a>
 ## fork复制整数，exec与exit处理资源所有权
 
-新进程完成映像与PID准备后才open异步owner；fork给孩子一个空上下文，不继承父注册buffer。孩子用户栈里的父handle整数虽然复制了，内核按孩子PID检查仍返回−9。这里是自有接口的明确策略，与Linux共享ring/FD的规则分开。
+fork 先复制用户页，所以孩子局部变量里也会出现父 handle 的整数；但资源授权并没有跟随整数复制。新进程完成映像和 PID 准备后才 open owner，fork 给孩子空上下文。内核以孩子 PID 查父 handle，仍返回 −9。这是本接口的策略，不能套用 Linux 共享 ring/FD 规则。
 
-exec先准备完整新ELF，再reset当前PID的owner。reset在撤销旧轮次前确认可以产生新epoch，失败则清next并返回原调用，旧映像与I/O资源仍有效；成功后旧QUEUED与CQ撤销，ACTIVE副本留在内核。old临时控制块的async_owned必须清false，next才持新轮次，避免cleanup旧页表时顺便关闭新owner。PID计数也在回绕前拒绝，不让0或旧身份重新出现。
+exec 保持 PID，却需要让新映像与旧 I/O 隔离。因此先完整准备新 ELF，再 reset 当前 PID 的 owner。reset 在撤销前确认新 epoch 可产生；失败就清 next，旧映像和 I/O 资源继续有效。成功后撤销旧 QUEUED 与 CQ，ACTIVE 的稳定副本仍留在内核等待后端结束。
 
-exit立即close owner并清async_owned，关闭文件后进入僵尸；ACTIVE可能仍在设备上，既不借用户页也不借已销毁owner指针。所有用户结束后先回收其页面和栈，再由长期内核对象drain无主ACTIVE，最后检查静态池完全回收。已开始写请求的副作用可能在用户退出后继续发生，退出不是撤销已发出的设备写；本节生命周期演示使用读请求，不暗中改变正式日志。
+提交新所有者时，把 old 临时控制块的 async_owned 清 false，只让 next 持新轮次；否则清旧页表会连带关闭新 owner。PID 同样在回绕前拒绝，避免重新出现 0 或旧身份。数字身份和轮次共同承担的是资源联系，不能靠槽位置或 C 指针代替。
 
-CQ等待先验证完整32字节用户输出，再尝试pop；空且wait=1时保存该用户地址、原frame并设IO_ASYNC。之后在目标自己的页表上复制完成，写frame.RAX=0，再设RUNNABLE。只读或非法输出必须在消费CQ之前拒绝，不能丢结果、归还信用或提前解锁buffer。
+exit 立即 close owner、清 async_owned、关闭 FD，再进入僵尸。ACTIVE 此后既不借用户页，也不借已销毁 owner 指针，仍可能在设备上继续。全部用户结束后先回收页与栈，再由长期内核对象 drain 无主 ACTIVE，最后检查静态池完全回收。已开始写的副作用可能在退出以后发生，退出不等于撤销设备写；本节生命周期演示使用读请求，不改正式日志。
+
+CQ 交回用户也有一个不可提前消费的边界。next 先验证完整 32 字节输出，再尝试 pop；空且 wait=1 才保存用户地址与原 frame，设 IO_ASYNC。普通服务随后经目标页表复制完成，写 frame.RAX=0，再设 RUNNABLE。非法或只读输出必须在 pop 前拒绝，否则用户没得到结果，CQ、信用与 BUSY 却已经被消费。
 
 **按完整版本更新进程路径。** 接口、owner标志、fork/exec/exit、CQ等待和服务循环要一起更新；相同旧代码保留。
 
@@ -1592,9 +1594,9 @@ async先申请四个注册对象并验证第五个−28，再释放spare验证�
 
 父每次next可在空CQ真正阻塞，也可立即取得快设备已完成的记录。按cookie而非位置核对，正常设备读回512字节模式；只读写CQ为−30，读和FLUSH仍须正常；已隔离设备有效I/O以CQ−5返回，越界仍CQ−22。受限配置明确结束错误路径，不伪装完整正常生命周期。
 
-正常分支再启动读请求孩子并退出；父在复用槽的新buffer写parent-new，提交FLUSH并收集。单硬件消费者必须先收集旧ACTIVE才开始这个FLUSH，因此随后验证新内容不变时，旧设备借用已结束。另一个孩子发读后exec async-reset，新程序确认注册集合和CQ为空，写new-image并等retired_active归零，再确认内容未被旧完成覆盖。设备很快时关闭可能发生在完成后，轨迹会准确显示实际active或completed，不强迫固定时序。
+四条正常 CQ 证明结果能够交回，还要在提交者消失时检查旧结果会交给谁。正常分支再启动读请求孩子并退出；父在复用槽的新buffer写parent-new，提交FLUSH并收集。单硬件消费者必须先收集旧ACTIVE才开始这个FLUSH，因此随后验证新内容不变时，旧设备借用已结束。另一个孩子发读后exec async-reset，新程序确认注册集合和CQ为空，写new-image并等retired_active归零，再确认内容未被旧完成覆盖。设备很快时关闭可能发生在完成后，轨迹会准确显示实际active或completed，不强迫固定时序。
 
-最后根进程提交读和FLUSH却不收集即退出；内核根据当时阶段cancel或drop，再排空并核对池。默认实测中观察到退出孩子和exec孩子都曾active=1，随后出现各自旧epoch的drop；这不是所有机器每次都必须重复的时间保证。
+最后根进程提交读和FLUSH却不收集即退出；内核根据当时阶段cancel或drop，再排空并核对池。既有默认实测中观察到退出孩子和exec孩子都曾active=1，随后出现各自旧epoch的drop；这不是所有机器每次都必须重复的时间保证。
 
 **新建 `labs/airios/async.c`。** 先strlen再比较async-reset，避免对短argv固定读更长字面量而跨出用户栈页。
 
@@ -2290,7 +2292,7 @@ $(OUT)/user/async.elf: $(USER_COMMON) $(OUT)/user/async.o labs/airios/program.ld
 <a id="async-throttled-proof"></a>
 ## 用真实慢设备验证等待期间另一个用户继续
 
-快设备可能在调用next前已有CQ，因此不能把“每次都应阻塞”写成验收。storage_test复用已有UART/QMP生命周期，在两个新CPU恢复同一日志之后，再启第三个guest；启动完成才用QMP block_set_io_throttle将独立airi-disk限制为1 IOPS。QEMU实际推迟设备I/O，guest没有为演示伪造延迟。
+“另一个用户曾运行”与“它在父这一次等待期间运行”不是同一个证据。必须把进展放进同 PID 的登记和唤醒之间。快设备可能在调用 next 前已有 CQ，因此不能把“每次都应阻塞”写成验收。storage_test复用已有UART/QMP生命周期，在两个新CPU恢复同一日志之后，再启第三个guest；启动完成才用QMP block_set_io_throttle将独立airi-disk限制为1 IOPS。QEMU实际推迟设备I/O，guest没有为演示伪造延迟。
 
 第三次run async的记录只消费该命令之后的新输出。程序第一次fork提供实际父PID，测试逐个寻找这个PID的CQ登记与对应WAKE，要求ASYNC_OTHER_PROGRESS出现在其中一个等待区间内，同时有真实start和complete轨迹。这样才证明另一个用户在父同一次CQ等待期间运行，不能仅凭QEMU仍存活或一行静态“并发”文字通过。
 
@@ -3023,13 +3025,14 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
+
 ```sh
 ./airios test # 八组模型/算法、九种启动、三条输入、两次恢复启动和一次真实节流会话。
 ./airios run # 输入run async，再查看IO_TRACE、WAIT与最终资源回收。
 ```
 
-2026-10-16本轮完整回归通过，第三会话实际接受1 IOPS并观察到另一用户在CQ登记与唤醒之间进展。正常ASYNC_USER_DEMO_OK的blocked/woken/switches来自本次运行；快路径可变化，pools=reclaimed在launch真正drain和quiescent之后才打印。只读与隔离配置分别出现ASYNC_READONLY_OK、ASYNC_UNAVAILABLE_OK。
+2026-10-16 的既有完整回归通过，第三会话实际接受1 IOPS并观察到另一用户在CQ登记与唤醒之间进展。正常ASYNC_USER_DEMO_OK的blocked/woken/switches来自该次实际运行；快路径可变化，pools=reclaimed在launch真正drain和quiescent之后才打印。只读与隔离配置分别出现ASYNC_READONLY_OK、ASYNC_UNAVAILABLE_OK。
 
 这条路径已经是用户库→系统调用→SQ→等待与切换→真实设备→CQ→同一次用户调用继续。它仍使用固定缓冲副本、四项软件队列和单硬件在途，不提供完整Linux ABI、并行性能承诺或TCP/IP。接着通过Linux线程、epoll与liburing实验对照更完整的接口，最后用用户shell把已有程序串成可交互演示。
 
-QMP参数依据为[QEMU官方块限速接口](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-block_set_io_throttle)，实际接受结果和限制以本轮证据为准。
+QMP参数依据为[QEMU官方块限速接口](https://www.qemu.org/docs/master/interop/qemu-qmp-ref.html#command-block_set_io_throttle)，实际接受结果和限制以该次证据为准。

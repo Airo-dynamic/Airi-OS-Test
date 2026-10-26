@@ -36,3 +36,8 @@ feedback:
   observation: K11缺少文件编辑范围，绘图调用被误写成前章已有，回调和Make条件只有概括。
   revision: 从mem的同一UART路径展开占位实现、同步扩展和构建选择；明确全部文件完成后构建，旧观察器由K12取代。
 not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/11-serial-build.md#display-selection
+  establishes: 以同一 mem 保留串口主线，链接时选显示定义；回调函数/数据指针和命令栈副本寿命分别解释。Make 条件只读取必要清单，主机检查不冒充设备证据。

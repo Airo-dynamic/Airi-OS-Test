@@ -1,16 +1,16 @@
 # K11 · 让串口构建独立于图形支线
 
-从第 10 章继续，UART 收到 `mem` 后已经能返回真实内存统计。接下来报告异常、分配页面和处理 I/O 仍需要这条通路。日常构建因此先固定为只选择文本与设备实现；即使工程里没有字体和窗口代码，也能生成同一个串口内核。
+第 10 章的一条 mem 已能经 UART 进入会话并返回统计。接下来报告异常、分配页面和操作设备都要复用这条通路，而这些能力不需要字体或窗口。因此默认构建只选择启动、文本与设备实现，缺少图形目录也应得到相同的串口内核。
 
-本章会替换入口、控制台接口和 Makefile，并新建架构提示函数、串口显示实现及主机检查程序。保留第 10 章的输入驱动、启动适配、字节库和镜像脚本。完成全部文件后再构建，中途入口引用的新接口尚未全部声明和定义。
+本章仍沿一次输入处理组织边界：架构层提供忙等提示，文本会话保存命令，选中的显示实现报告是否绘图，入口继续发送串口结果。需要替换入口、控制台接口和 Makefile，增加架构提示、串口显示实现与主机检查；输入驱动、启动适配、基础库和镜像脚本保留。新接口到章末才闭合，全部文件写完再构建。
 
 <a id="display-selection"></a>
 
 <a id="arch-relax"></a>
 
-## 让处理器提示留在架构实现中
+## 空闲时做什么，由架构实现提供
 
-空闲循环目前反复轮询设备，`pause` 只给 x86 处理器忙等提示，没有让出任务。通用入口改为调用普通 C 函数 `airi_arch_relax`，x86 指令的实现留在 arch/x86_64。这个边界不意味着已经支持其他架构；将来的页表、异常栈和上下文仍需要各架构实际实现。
+主循环暂无设备事件时仍轮询，pause 只提示 x86 CPU 正在忙等，没有切换任务。把这条指令藏在 airi_arch_relax 后，通用入口只调用一个普通 C 接口，架构实现再决定具体指令。当前仍只有 x86-64，页表、异常与上下文并未因此自动支持其他架构。
 
 **新建 `include/airi/arch.h`：**
 
@@ -22,7 +22,7 @@ void airi_arch_relax(void);  // 在忙等的一次迭代间提示处理器；不
 #endif  // 结束重复包含保护。
 ```
 
-收到命令前，主循环的每次空转都会调用这一声明。它的 x86 实现只执行原有 `pause`，随后返回轮询循环；设备状态和命令缓冲都保持原样。
+声明给出了空闲分支的调用形式，下面的定义才执行原来的 pause。它返回后仍回到同一次轮询，设备与命令状态不变；不会把“函数返回”解释成“已经等到输入”。
 
 **新建 `kernel/arch/x86_64/cpu.c`：**
 
@@ -36,13 +36,13 @@ void airi_arch_relax(void) {  // 本实现只用于当前 x86-64 目标。
 
 <a id="serial-display-link"></a>
 
-## 在链接时选择呈现消费者
+## 同一个调用名，在构建时选定一份消费者
 
-第 10 章在入口里直接写 `graphics=false`。现在把“有没有完成画面”交给 `airi_console_draw` 返回，入口仍然负责输入和串口输出。默认目标为这个名字提供一个很小的函数：接受 console，直接返回 false。这样入口能按同一接口编译；选择可选图形实现时，再由另一个同名函数读取会话并绘图。
+第 10 章入口直接设 graphics=false。现在入口先调用 airi_console_draw，由选中的实现报告是否完成绘图。默认定义接受 console 后直接返回 false，文字仍由入口调用 airi_serial_write；即便 BootInfo 带有效帧缓冲，也不把设备存在当作已绘图。
 
-这里由 Make 决定把哪一份定义交给链接器。C 调用只认识函数名和签名，链接器将该引用连接到选中的定义；若两份都加入同一个目标，会产生重复定义。当前的串口实现称为占位实现，它只报告“未绘图”，实际发送文字仍由主循环调用 `airi_serial_write` 完成。BootInfo 即使包含有效显示描述，返回值也仍为 false。
+选择发生在 Make 与链接阶段：C 只产生同一函数名的引用，链接器把它连到 serial_display.c 的定义；图形路线可选另一份同名实现，但两份不能同时进入一个目标，否则重复定义。这样会话不必先持有图形状态，入口也无需通过运行时加载另一套代码。
 
-`(void)console` 将形参作为明确不用的值处理，避免未使用参数的编译警告；它没有解引用地址。另一个 `airi_dashboard_draw` 同样保留可选显示接口，本章入口只调用前者。
+`(void)console` 明确本定义不用形参，避免警告，并不读取该地址。airi_dashboard_draw 也保留相同的可选接口，本章入口实际调用前者。
 
 **新建 `kernel/console/serial_display.c`：**
 
@@ -61,9 +61,9 @@ bool airi_dashboard_draw(const AiriBootInfo *info) {  // 与可选图形实现�
 }
 ```
 
-串口显示实现已经给出了 false。入口初始化 console 后调用它，于是走 `DISPLAY_SERIAL` 分支并发布 `graphics=0`。随后收到 m、e、m 时只更新输入；回车时仍由原命令函数生成内存统计，主循环逐行写回 UART。只有 `graphics` 为真时才会调用重画，默认构建不会进入这条路径。
+初始化会话后，入口得到 false，发 DISPLAY_SERIAL 与 graphics=0，再发布 `[AIRI_P1_READY]`。之后 m、e、m 只改输入，回车仍由原命令分支形成统计，入口将新行写回 UART；只有 graphics 为真才重画。
 
-启动完成标记改用 `[AIRI_P1_READY]`，发布位置在显示接口返回之后；输入处理后的记录仍为 `[CONSOLE_UPDATE]`。第 12 章的等待器将使用这两个标记。
+处理后的记录继续使用 CONSOLE_UPDATE。启动与命令完成各有发布位置，第 12 章等待器将分别使用它们，而不是用“QEMU 仍在运行”判断就绪。
 
 **完整替换 `kernel/main.c`：**
 
@@ -144,17 +144,15 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 
 <a id="command-extension"></a>
 
-## 将额外命令交给同步消费者
+## 内置分派之外，才同步交给可选处理者
 
-`mem` 的处理仍属于文本会话；主题偏好则由可选图形状态持有。如果把主题字段和处理函数直接写进 console，默认构建也会依赖这些状态。因此为内置命令之外的输入保留一个可选处理入口，主线不安装它。
+mem 已由文本模型实现，主题等额外状态则由可选图形方持有。若 console 直接保存主题，就会让默认构建依赖图形。这里只在内置分支之后留一个可选函数地址，默认不安装，theme day 仍报告未知命令。
 
-结构字段 `bool (*extension)(struct airi_console *, const char *, void *)` 保存函数地址。括号中的 `*extension` 表示它是函数指针，最前面的 bool 是被调用函数的返回类型，后面的括号给出三个形参类型。调用 `c->extension(c, start, c->extension_context)` 时，三个实参依次为当前会话、去掉首尾空格的命令和安装者的数据地址。
+字段 `bool (*extension)(struct airi_console *,const char *,void *)` 是函数指针：bool 是返回类型，后面的三项规定调用参数。执行 `c->extension(c,start,c->extension_context)` 时，分别交出当前会话、已去首尾空格的命令和安装方的数据地址。
 
-`void *extension_context` 可以保存不同对象的地址，但不携带对象类型，也不复制对象。以后安装处理函数的一方必须传入自己实际持有的对象，并在函数中恢复为匹配的具体指针类型后才能读取成员。会话只保存地址；该对象必须在所有可能的回调调用期间有效。函数指针与这个数据指针各有用途，不能互换。
+数据指针 void* 不带对象类型，也不复制对象。安装者必须持有那份对象，并在回调中恢复成匹配类型；会话只借地址，对象要活到最后一次可能调用。函数地址决定执行谁，数据地址决定交给它哪个对象，二者不能互换。
 
-回调返回 true 表示已处理，并可通过 `airi_console_print` 把结果复制到环中；false 表示不认识，仍由解释器报告原有错误。`command` 是 execute 栈上的副本，回调只能在调用期间读取它，不能保存地址供以后使用。整个回调是同一内核执行流里的普通函数调用。
-
-初始化会清零整个会话，所以默认 `extension` 和 `extension_context` 都是 NULL。`mem` 仍在内置分支完成；`theme day` 走到末尾时，`&&` 先检查函数地址，为 NULL 就不计算右边的调用，随后生成未知命令错误。
+回调在当前执行流同步完成：true 表示已处理，可通过 airi_console_print 将文字复制进同一输出环；false 继续原未知命令路径。command 只是 execute 的栈副本，回调不能保存其地址供将来读取。初始化清零两个字段，`&&` 先检查函数非空才调用，所以默认路线安全地略过扩展。
 
 **完整替换 `include/airi/console.h`：**
 
@@ -212,7 +210,9 @@ int airi_keyboard_decode(uint8_t code);  // 保留修饰键状态并把一个扫
 #endif  // 结束当前条件编译范围
 ```
 
-扩展的输出也需要进入同一文本环。将原来只在 console.c 内可见的 `emit` 改为公开名字 `airi_console_print`，保留原有容量、逻辑行号和覆盖规则；内置命令改用这个名字。`execute` 的末尾才增加扩展检查，已识别的 `mem`、`echo` 等命令不会再交给它。历史记录仍在分派之前更新，所以成功查询与未知命令都各计一次提交。
+扩展产生的文字和内置命令需要相同的环与序号。把原文件内的 emit 改为公开 airi_console_print，保留容量和覆盖规则；已识别的 mem/echo 等仍在原分支结束，只有末尾才尝试扩展。
+
+历史与计数在分派前已经更新，所以一次成功查询或一次未知命令都只记一次提交。公开输出接口没有增加异步借用，也没有把局部命令转成长期对象。
 
 **完整替换 `kernel/console/console.c`：**
 
@@ -467,15 +467,13 @@ bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑�
 
 <a id="serial-build-rules"></a>
 
-## 让默认目标完全不读取前端
+## 让实际源文件选择与调用接口一致
 
-入口现在引用了 `airi_arch_relax` 和 `airi_console_draw`，Make 必须加入对应实现。`SOURCES` 先列出共同的启动、文本和设备源码，再按 profile 追加一份显示实现。
+入口新增 airi_arch_relax/draw 引用，SOURCES 必须给出定义。共同启动、文本与设备源码先列出，再按 PROFILE 选择显示实现，而不是先打开图形清单再决定不用。
 
-`$(filter desktop-%,$(PROFILE))` 有两个参数：逗号前是匹配模式，逗号后是要检查的文字。`%` 匹配剩余部分；PROFILE 为 normal 时结果为空，为 desktop-normal 时结果是 desktop-normal。`ifneq (结果,)` 判断它是否与空值不同，只有非空才读取 `frontend/sources.mk`。因此默认目标选择 serial_display.c，且不会尝试打开图形清单。
+`$(filter desktop-%,$(PROFILE))` 用逗号前模式匹配后面的文字。normal 得空，desktop-normal 得自身；ifneq 仅在结果非空时读取 frontend/sources.mk，默认则加入 serial_display.c。它决定实际编入哪些定义。
 
-`$(patsubst desktop-%,%,$(PROFILE))` 则替换前缀，产生 CASE：normal 仍为 normal，desktop-no-framebuffer 得到 no-framebuffer。CASE 决定故障宏，完整 PROFILE 决定产物目录，所以两种实现分别写入 `build/normal` 与 `build/desktop-normal`，不会共用对象。
-
-文件末尾的另一个 filter 检查 `MAKECMDGOALS`，即命令行明确请求的目标名。只有 ui-preview、ui-test 或 lab-editor 才读取图形动作规则。当前执行 all 和 host-test，两个图形条件都不成立。
+CASE 用 patsubst 去掉 desktop- 前缀，desktop-no-framebuffer 得 no-framebuffer，用来选故障宏。产物目录仍用完整 PROFILE，所以 build/normal 与 build/desktop-normal 不共用对象。另一个 filter 检查 MAKECMDGOALS，只在 ui-preview、ui-test、lab-editor 这些显式动作时读取图形动作规则；本章 all/host-test 均不会进入。
 
 **完整替换 `Makefile`：**
 
@@ -610,18 +608,20 @@ lab-boot-info:
 	./build/labs/boot-info
 ```
 
-同一条 `mem` 输入还需要在主机上检查数组容量与历史变化，才能较快定位文本算法错误。host-test 只链接基础库、启动校验、文本会话和扫描码转换；`AIRI_HOST_TEST` 排除真实端口指令。它不会调用显示接口，因此不需要链接占位显示函数或图形代码。
+## 主机核对算法，guest 才证明设备路径
+
+同一条 mem 可以先在主机检查文本与历史，便于把数组错误与设备错误分开。host-test 只链接基础库、启动验证、会话和扫描码转换，AIRI_HOST_TEST 排除端口指令；它不调用显示接口，无需显示占位或图形源码。
 
 <a id="host-checks"></a>
 
-检查程序使用 `assert(条件)`：条件为假时显示所在位置并中止进程，Make 随之收到非零退出；全部成立后才到达末尾的 PASS。NDEBUG 会关闭这些断言，所以当前编译参数不定义它。ASan 在运行中检测越界等内存访问，UBSan 检查它能捕获的未定义行为；它们都只作用于本次主机程序。
+assert 条件为假就报告位置并中止进程，Make 收到非零；全部成立才到 PASS。NDEBUG 会关闭断言，当前不定义它。ASan 查越界等访问，UBSan 查可检测的未定义行为，两者只验证这次主机程序，不能替代 UART 实测。
 
-四组检查分别沿已有操作展开：
+四组检查各自恢复相同起点，再观察不同边界：
 
-- 字节移动把同一输入交给自制函数与主机 libc，比较整个数组，连未移动的周边字节也一起核对。
-- 格式化遍历输出容量，比较完整所需长度与全部保存字节；零容量仍只统计，容量一只存 NUL。
-- 启动验证每次从 `fixture()` 返回的合法结构副本开始，只损坏一个字段，避免前一个错误遮住后一个。
-- 命令检查向含 4 MiB 可用区域的会话提交 `mem`，结果应含 4096 KiB；随后继续检查未知命令、草稿与历史、输入容量、输出环和扫描码状态。分页部分只改变模型状态，未绘制画面。
+- 字节函数与主机 libc 处理相同数组，比较全部字节，范围外的误写也会暴露。
+- 格式化遍历容量，比较完整长度和完整数组；容量零只统计，一只写 NUL。
+- 每次由 fixture 返回合法启动副本，只损坏一项，避免先前错误遮住当前拒绝条件。
+- 会话从 4 MiB 地图提交 mem 得 4096 KiB，再查未知命令、草稿/历史、容量、环覆盖、分页与扫描状态。分页只改模型，未绘制画面。
 
 **新建 `tests/unit/base_test.c`：**
 
@@ -806,7 +806,7 @@ int main(void) {  // 观察程序入口；返回非零表示预期状态未出�
 }
 ```
 
-运行 all 先取得串口 ELF 与镜像，host-test 再编译并执行刚写出的检查程序。此处保留第 01 章的工具选择入口，尚未使用统一 airios 命令。
+all 先构建默认串口 ELF 与镜像，host-test 再编译运行上述检查。仍由 01 章的工具选择函数组成真实 Make 调用，统一 airios 命令尚未实现。
 
 **在学习目录根目录运行：**
 
@@ -820,4 +820,6 @@ subprocess.run(make_command(target='host-test'), check=True)  # 检查基础函�
 PY
 ```
 
-编译命令中只出现共同源码与 serial_display.c，主机检查完成后输出 PASS host。当前入口将报告 `graphics=0`，命令仍沿原 UART 路径处理。新的启动标记已替换旧教学标记；第 07、10 章的 first_boot.py 和 first_input.py 对应当时的版本，本章之后改用 K12 的启动与输入等待器。
+构建输入应只有共同源码与 serial_display.c，主机检查全部通过才打印 PASS host。串口入口的 graphics=0 不影响 mem 的设备路径。
+
+READY 现已改为 AIRI_P1_READY，第 07、10 章早期观察脚本属于当时版本，不再用它们等待新标记。下一章建立匹配当前入口的启动、输入等待器，把主机算法检查和真实设备证据一起组织起来。

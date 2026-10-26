@@ -1,22 +1,20 @@
 # L01 · 对照 Linux 的函数调用、系统调用与内核入口
 
-AiriOS 已直接在内核里写 UART。普通 Linux 程序输出同样一行文字，却不能像当前内核那样直接执行设备访问；它需要请求 Linux 内核代办。这里先观察 `./ordinary one two` 在 `main` 收到的参数，再让 `raw` 自己准备一次写请求并核对返回值，最后回到 AiriOS 的汇编入口，观察 C 函数赖以执行的栈。
+AiriOS 已在内核里直接写 UART。普通 Linux 程序也能输出文字，却没有同样的设备权限；它把写请求交给 Linux，输出对象由内核管理。这里保持同一项“输出一行”的目标，分别观察普通 main、无运行时的原始系统调用，再回到自己的内核栈。
 
-源码起点是 K13。两份 Linux 程序在个人主机 `airi@ssh.airi-dynamic.top` 的 `~/AiriOS-labs/p1` 目录运行；AiriOS 内核仍在本机 QEMU 中执行。远端需要 x86-64 Linux、C 编译器 `cc`、GNU Binutils 的 `readelf/objdump/nm`、GDB 和 Python 3；本机继续使用前面建立的构建环境，并需 Python 3.12 以上、SSH 与 scp。Apple Silicon 上的 macOS 不能直接执行下面生成的 Linux ELF。
+源码从 K13 继续。ordinary/raw 在个人 x86-64 Linux 主机 `airi@ssh.airi-dynamic.top` 的 `~/AiriOS-labs/p1` 执行，AiriOS 仍在本机 QEMU 中运行。远端要有 cc、GNU Binutils 的 readelf/objdump/nm、GDB 与 Python 3；本机保留构建环境、Python 3.12+、SSH/scp。Apple Silicon 的 macOS 不能直接运行这些 Linux ELF。
 
-远端脚本使用已有的 SSH 密钥与访问配置，`BatchMode=yes` 禁止停下来询问密码。账户尚不能非交互登录、远端工具缺失或远端不是 x86-64 时，后面的运行会失败；失败状态与本轮实际输出决定是否完成观察。本章不把连接成功等同于程序实验成功。
+SSH 采用现有密钥和配置，BatchMode=yes 不等待密码。连接、远端架构或工具不符都会失败；即使登录成功，也还没有证明程序或调试实验完成。运行命令和证据分别留在后面对应路径。
 
 <a id="runtime-main"></a>
 
-## 普通 C 程序从运行时进入 main
+## main 收到参数之前，运行时已经做过什么
 
-链接普通 C 程序时，编译驱动还加入运行时启动代码和 C 标准库 libc。启动代码负责把进程刚装载好的状态转换成 C 函数可以使用的状态。如果生成的 ELF 带有 `PT_INTERP` 段，Linux 先把执行权交给其中指定的动态装载器；装载器准备所需共享库，再进入程序自己的 ELF 入口。没有解释器的静态程序则直接从自己的入口开始。这一分支可以在后面保存的 `ordinary-elf.txt` 中核对，规则见 [execve 手册](https://man7.org/linux/man-pages/man2/execve.2.html)。
+执行 `./ordinary one two` 时，Linux 按 ELF 建立进程初始状态。普通编译驱动还链接启动代码与 libc：若 ELF 有 PT_INTERP，内核先交给指定动态装载器，装载器准备共享库再进入程序入口；无解释器的静态程序直接进入自身入口。ordinary-elf.txt 将显示实际采用哪条路径，规则见 [execve](https://man7.org/linux/man-pages/man2/execve.2.html)。
 
-程序的运行时从初始栈取得参数，建立 `argc/argv`，再按 C 调用约定进入 `main`。`main` 不是内核最初交出执行权的位置；它返回后，运行时还会处理退出工作并将状态交给内核。
+程序运行时从初始栈取出参数，按 C ABI 调用 main；main 返回以后，运行时还处理退出并将状态交回内核。因此 main 不是最初入口。本次 argc=3，argv 是指针数组，前三项指向 `"./ordinary"`、`"one"`、`"two"`，各字符串以 NUL 结束，argv[argc] 才是空指针。argv[0] 通常由启动者给出，不是内核强制从文件路径推导。
 
-`argc` 是参数个数，`argv` 是字符串指针数组，每个字符串用 NUL 结束，数组的 `argv[argc]` 则是空指针。本次命令 `./ordinary one two` 让 `main` 收到 `argc=3`，前三项分别指向 `"./ordinary"`、`"one"`、`"two"`。`argv[0]` 通常由启动者写成命令名称，并不是内核从可执行文件路径强制推导出来的值。
-
-`printf` 按 `%d/%s/%ld` 分别消费整数、字符串指针和 `long`，格式化后交给 libc 的标准输出流 `stdout`。这个流可能先缓存字节，再请求内核写出，所以一次 `printf` 不必对应一次原始系统调用。程序还调用 `getpid` 取得当前 Linux 进程号；它只用于辨认这次运行，与 AiriOS 尚未实现的任务编号无关。
+下面 printf 按 `%d/%s/%ld` 读取参数，写入 libc 的 stdout；流可以缓存，所以一次 printf 不必等于一次内核 write。getpid 取得这次 Linux 进程号，只用于辨认运行，不是自制内核的任务编号。
 
 **新建 `labs/linux/p1/ordinary.c`：**
 
@@ -35,21 +33,19 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
 }
 ```
 
-第二行由 `puts` 固定写出，用来标记程序采用的输出路径。`printf/puts` 实际触发了几次内核写请求，需要系统调用跟踪才能观察；本章的寄存器单步针对后面自行准备请求的 `raw`。
+puts 再写一行固定说明，但这两次库调用实际形成几次内核请求，要用系统调用跟踪才能判断。本章接下来直接准备原始 write，把要观察的寄存器边界固定下来。
 
-## 自定义入口直接请求 Linux 写出字节
+## 没有 CRT 的入口，自己组成一次 Linux 请求
 
 <a id="syscall-boundary"></a>
 
-普通函数调用在当前用户程序的权限下转入另一段代码。系统调用则让用户程序请求内核服务：`syscall` 指令进入内核预设的入口，Linux 根据调用号和寄存器参数选择服务，再把结果交回用户程序。本次请求是“将这 47 个字节写到标准输出”；程序不需要自己驱动终端，也不需要知道标准输出后来被接到了文件还是管道。
+普通函数调用仍在用户程序权限内执行。syscall 则转入 Linux 预设入口，内核按调用号与寄存器参数选择服务，再返回结果。本次服务要求“向 fd=1 写出这 47 字节”，不要求程序知道输出最后是终端、文件还是管道。
 
-文件描述符 fd 是当前进程持有的整数句柄。1 通常指标准输出，Linux 据此找到已打开的输出对象；它不是 UART 端口 0x3f8，也不是内存地址。write 的字符串地址仍在程序地址空间，内核按长度读取字节并写到句柄对应对象，返回成功字节数；原始系统调用出错时返回负的错误编号。这是直接执行指令时读取的结果，C 库接口还会转换错误表示，区别见 [Linux 系统调用概述](https://man7.org/linux/man-pages/man2/intro.2.html)。
+fd 是当前进程的一项整数句柄，1 通常是标准输出。它既不是 0x3f8 设备端口，也不是消息地址；RSI 另外给出用户地址，RDX 另外给长度，内核按这些参数读取并写到句柄对应对象。原始指令返回成功字节数或负错误编号，libc 包装还会转换错误，见 [系统调用概述](https://man7.org/linux/man-pages/man2/intro.2.html)。
 
-Linux x86-64 原始入口的 RSP 指向 `argc`，后面依次保存 `argv` 的指针；C 参数寄存器尚未自动设置。本例不调用 `main`，也不读取参数，而是让自定义 `_start` 将 write 号 1 放 RAX，标准输出 fd=1 放 RDI，文本地址放 RSI，长度 47 放 RDX，再执行 `syscall`。Linux x86-64 的寄存器分配见 [syscall 手册](https://man7.org/linux/man-pages/man2/syscall.2.html)。
+本例 `_start` 不调用 main，RSP 仍指初始 argc/argv 栈，C 参数寄存器尚未自动准备。它自己把 write 号 1 放 RAX、fd=1 放 RDI、消息地址放 RSI、47 放 RDX，再执行 syscall；返回结果在 RAX，RCX/R11 被机制改写。普通 SysV C 第四参数用 RCX，Linux syscall 用 R10，这次只用前三项，见 [syscall 寄存器约定](https://man7.org/linux/man-pages/man2/syscall.2.html)。
 
-Linux 内核返回结果到 RAX，RCX/R11 被调用机制改写。普通 System V C 调用第四整数参数使用 RCX，Linux syscall 第四参数使用 R10，本例仅使用三项。`.ascii` 按给定文字保存字节，write 用明确长度。AiriOS 的 outb 则直接写设备端口，三种调用各有执行位置。
-
-写完后用调用号 60 请求退出。这个原始调用终止当前线程；本例没有创建其他线程，所以整个进程随之结束。它和 C 库负责终止所有线程的退出接口存在范围差异，见 [Linux退出调用说明](https://man7.org/linux/man-pages/man2/_exit.2.html)。
+.ascii 保存消息字节，不追加 NUL，write 依靠明确长度。返回后仅完整 47 字节算成功，短写或负错误都选择退出状态 1，尚无通用重试循环。最后调用号 60 退出当前线程；本例单线程，因此进程结束。它与 libc 结束整个线程组的包装范围不同，见 [退出调用](https://man7.org/linux/man-pages/man2/_exit.2.html)。AiriOS 的 outb 则直接触达设备，不经过 Linux 服务入口。
 
 **新建 `labs/linux/p1/raw_start.S`：**
 
@@ -87,9 +83,11 @@ exit_now:  /* 两种结果在此共享Linux退出请求。 */
 .section .note.GNU-stack,"",@progbits  /* 空标记节声明不需要可执行栈，供链接器形成栈权限。 */
 ```
 
-现在将两份源码变成 Linux 可执行文件。普通程序使用编译驱动默认加入的运行时；`raw` 的 `-nostdlib` 排除启动文件和默认库，`-static` 不使用共享库，`-no-pie` 生成固定地址的可执行文件，`-Wl,-e,_start` 将入口选择传给链接器。`readelf` 读取 ELF 的头和装载信息，`objdump` 把机器指令显示为汇编，`nm -u` 只列未解决的外部符号。
+## 同一份源码在直接运行和调试中各有一次进程
 
-脚本先构建和直接运行，再启动 GDB 重新运行两份程序。直接运行 `raw` 时，Shell 把 fd=1 接到 `artifacts/raw-output.txt`；GDB 内的那次运行则把同一行文字送进调试记录。两次执行共用代码，参数与进程状态各自重新建立。
+ordinary 由 cc 默认加入启动代码；raw 的 `-nostdlib -static -no-pie` 排除启动文件和默认库，选择固定地址，`-Wl,-e,_start` 将入口选项传给链接器。readelf 读 ELF，objdump 显示机器指令，nm -u 列未解决引用；raw 不应有解释器或外部符号。
+
+脚本先直接运行，再由 GDB 各自重新启动。直接 raw 的 fd=1 由 Shell 重定向到 raw-output.txt，GDB 那次则把同样字节送入调试记录。它们共用代码，不共用一次运行的寄存器或参数状态。
 
 **新建 `labs/linux/p1/run.sh`：**
 
@@ -115,9 +113,9 @@ test ! -s artifacts/raw-undefined.txt  # -s检测非空，!取反，确认没有
 if readelf -l raw | grep -q INTERP; then exit 1; fi  # 若程序段含解释器，则拒绝当前独立静态目标；grep -q只以状态报告匹配。
 ```
 
-直接执行的 `raw` 必须写出完整 47 字节才以 0 退出。返回负错误或只写出一部分时，它都选择状态 1；脚本因 `set -e` 在这个普通命令失败处停止，后续 GDB 不会继续执行。这里还没有一般用途的短写重试循环。`set -u` 拒绝读取未定义变量；`-e` 在 `if` 条件等位置有例外，例如上面的 `grep` 未匹配时会进入正常的下一步，不能把 `-e` 理解为任何非零状态都会退出。
+直接运行结束以后，先以完整 47 字节和退出 0 核对写请求，再进入 GDB；这不会把一次 stdout 文件观察当成另一次调试的寄存器证据。raw 必须完整写出才退出成功。返回负错误或只写出一部分时，它都选择状态 1；脚本因 `set -e` 在这个普通命令失败处停止，后续 GDB 不会继续执行。这里还没有一般用途的短写重试循环。`set -u` 拒绝读取未定义变量；`-e` 在 `if` 条件等位置有例外，例如上面的 `grep` 未匹配时会进入正常的下一步，不能把 `-e` 理解为任何非零状态都会退出。
 
-接下来让 GDB 观察同一写请求的边界。`-q` 减少启动文字，`-nx` 不读取个人初始化文件，`-batch` 执行 `-ex` 给出的各条命令后退出。`start one two` 在 `main` 处停下，参数仍是 `one two`；`starti one two` 在本次执行的第一条机器指令停下。由于 `raw` 没有解释器，后者就是自己的 `_start`。动态程序的 `starti` 可能先停在装载器中，这两种停法的区别见 [GDB 启动命令](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Starting.html)。
+GDB 的停点将把“参数已准备”和“内核已返回”分别显示出来。`-q` 减少启动文字，`-nx` 不读取个人初始化文件，`-batch` 执行 `-ex` 给出的各条命令后退出。`start one two` 在 `main` 处停下，参数仍是 `one two`；`starti one two` 在本次执行的第一条机器指令停下。由于 `raw` 没有解释器，后者就是自己的 `_start`。动态程序的 `starti` 可能先停在装载器中，这两种停法的区别见 [GDB 启动命令](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Starting.html)。
 
 `info registers` 读取指定寄存器的当前值，`print argc` 则用调试信息找到 C 参数，`backtrace` 显示当前能够还原的函数调用帧。`break airi_before_write` 安装断点，`continue` 让程序继续到断点或结束。`set startup-with-shell off` 让 GDB 直接启动目标程序，避免个人 Shell 的初始化和展开规则介入参数。分页关闭后，批处理也不会停下来等待翻页。
 
@@ -154,7 +152,7 @@ gdb -q -nx -batch ./raw \
     > artifacts/raw-gdb.txt 2>&1
 ```
 
-最后把输出、寄存器与停点一起核对。`re.search` 从一行记录中取得 `next` 和 `expected` 两个十六进制地址；正则里的两个括号形成捕获组，`group(1)/group(2)` 分别取值。匹配失败返回 `None`，`match and ...` 会先拒绝它，再比较两个地址。只有所有断言成立才写 `result.json`。
+输出文件已证明完整字节，调试记录还需证明这次 syscall 前后的参数和返回位置对应。最后把两种证据一起核对。`re.search` 从一行记录中取得 `next` 和 `expected` 两个十六进制地址；正则里的两个括号形成捕获组，`group(1)/group(2)` 分别取值。匹配失败返回 `None`，`match and ...` 会先拒绝它，再比较两个地址。只有所有断言成立才写 `result.json`。
 
 Python 正文通过 here-doc 送入标准输入；`<<'PY'` 中的引号使 Shell 不展开正文里的 `$`、反斜杠等内容。结尾 `PY` 必须独占一行，并从行首开始。它属于 Shell 的结束标记，不是 Python 语句。
 
@@ -187,7 +185,11 @@ print('PASS Linux P1: normal CRT/main and raw _start/syscall, ELF + GDB verified
 PY
 ```
 
-两个程序与观察脚本已经齐全，本机还需要把它们送到 Linux。`linux_lab.py` 先通过 SSH 创建实验目录，再用 scp 传三份源码；它不从本机上传已经编译好的二进制。SSH 的参数列表让本机进程保持实参边界，但列表最后的远端命令仍由远端 Shell 解释，目录文字还需要 `shlex.quote`。
+## 本机传源码，Linux 构建和运行，再取回证据
+
+程序与观察脚本已写好，linux_lab.py 在个人主机创建独立目录，用 scp 只传 ordinary.c、raw_start.S、run.sh，不上传本机二进制；Linux 自己按 run.sh 编译。
+
+本机启动 SSH 用 argv 保留参数边界，但最后一项仍是远端 Shell 命令文字。目录因而还需 shlex.quote，不能把本机列表等同远端没有 Shell。连接失败发生在运行前，不能从该错误推断系统调用行为。
 
 **新建 `scripts/linux_lab.py`：**
 
@@ -219,9 +221,9 @@ subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp
 execution=subprocess.run(ssh+[f'cd {shlex.quote(remote)} && sh run.sh'])  # 远端先切实验目录，再执行shell；暂不check，失败也先下载证据。
 ```
 
-`execution` 保存远端 Shell 的退出状态。这里暂不使用 `check=True`，因为程序可能已经运行到一半，仍需要取回已经产生的输出。下一段让远端 `tar` 将整个 `artifacts` 目录编码为归档字节，SSH 把这些字节带回本机；`io.BytesIO` 为字节提供文件式读取接口，供 `tarfile` 解析。
+execution 先保存远端退出状态，暂不 check=True，是为了失败后也尝试带回已经产生的记录。远端 tar 将 artifacts 编为 stdout 归档字节，SSH 返回 bytes，BytesIO 提供文件式接口交给 tarfile。
 
-本机解包位置是 `artifacts/linux-p1`，归档本身仍含一层 `artifacts/`，所以输出文件实际在 `artifacts/linux-p1/artifacts/`。`filter='data'` 按 Python 的数据归档规则限制解包成员。若远端非零，取回记录后仍报告失败，不会读取旧 `result.json` 作为成功。
+本机解到 artifacts/linux-p1，但归档还有 artifacts 这一层，所以实际文件在 `artifacts/linux-p1/artifacts/`。data 过滤限制成员路径。取回成功只证明传输完成，execution 非零仍报实验失败；仅远端执行和 passed 都符合才保存对应远端身份，不能用旧 JSON 代替。
 
 **追加到 `scripts/linux_lab.py` 末尾：**
 
@@ -243,17 +245,15 @@ if result.get('passed') is not True:  # get缺键返回None，只有布尔True�
 print(f'Remote evidence downloaded: {dest}')  # 显示本轮证据可查看位置。
 ```
 
-## 沿自己的栈进入内核 C 函数
+## 回到本机虚拟 CPU，观察自己建立的栈
 
 <a id="remote-debug"></a>
 
-GDB 是远端 Linux 上的主机程序，实际栈和寄存器属于本机 QEMU 模拟的 CPU。QEMU 的 GDB stub 只在本机回环地址 `127.0.0.1` 监听，接受寄存器、内存和断点请求；SSH 反向转发负责把远端 GDB 的连接送到它。GDB 不作为 guest 内的线程执行。
+第三条路径的 GDB 仍是远端主机程序，被观察 CPU 却属于本机 QEMU。QEMU 的 GDB stub 只监听本机回环 127.0.0.1，SSH 反向转发把远端连接带回；调试器不是 guest 线程，也不替 CPU 执行内核代码。
 
-调试时使用带符号的 ELF，GDB 才能把数值地址对应到函数和 C 类型。远端源码映射为调试器找到源文件，实际机器码仍由本机的启动镜像装入内存。
+kernel-debug 先构建 normal，再复制同次 ELF 与源码供 GDB 解释符号。substitute-path 把 ELF 中的本机源码路径映到远端 source，CPU 实际载荷仍由本机 ISO 装入。若符号 ELF 与镜像不同次，地址可能失配，所以这两份材料必须对应。
 
-`./airios kernel-debug` 先在本机构建 normal 配置，随后脚本复制这份 ELF 与对应源码。`set substitute-path` 将 ELF 调试信息中的本机源码目录映射到远端 `source`，供 GDB 显示对应行。CPU 执行的仍是本机镜像里的机器码；若 ELF 与镜像不是同次构建，符号指向的地址就可能失配。
-
-准备路径与复制完成后，脚本才启动本地 QEMU。前半段只建立远端观察材料，尚未启动虚拟机。
+下面先准备远端观察文件，后半段才启动 QEMU 和 GDB。复制成功只说明调试材料就绪，尚未命中任何入口。
 
 **新建 `scripts/kernel_debug.py`：**
 
@@ -295,13 +295,13 @@ subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp
     str(ROOT/'build/normal/airios.elf'),f'{args.host}:{remote}/airios.elf'],check=True)  # 复制普通配置带符号ELF，仅供远端GDB解释地址与类型。
 ```
 
-端口 0 让本机为临时 socket 选择一个空闲端口；关闭临时 socket 后，再让 QEMU 使用这个编号。这个分配并不同时预留 Linux 那一端的端口，反向转发若遇到占用会因 `ExitOnForwardFailure=yes` 失败。`-R 127.0.0.1:端口:127.0.0.1:端口` 让远端 GDB 连接远端回环地址，SSH 再把连接送回本机 QEMU 的 GDB stub。
+本机临时 socket 绑定端口 0，取得空闲编号后释放，再由 QEMU 使用。这个编号没有同时预留远端端口，SSH 的 `ExitOnForwardFailure=yes` 使远端占用明确失败；`-R 127.0.0.1:端口:127.0.0.1:端口` 将远端回环连接带回本机 stub。
 
-`hbreak *名称` 按符号的准确指令地址设硬件断点。第一次停在 `_start` 时还在使用引导器给的栈；继续到 `airi_limine_start` 后，汇编已经把 RSP 换到自己的 64 KiB 数组。进入 C 的 `call` 还压入了返回地址，所以此时 RSP 应严格小于 `airi_stack_top`、大于 `airi_stack_bottom`。这个比较确认当前栈指针的位置，没有建立溢出保护。
+GDB 连接后从三个停点观察不同结果。hbreak 按准确符号指令地址设硬件断点：`_start` 尚用引导器栈，airi_limine_start 已执行换栈与 call，airi_kernel_main 首指令则仍在 RDI 保存第一参数。前者的 RSP 应在自有 bottom/top 之间，因为 call 已从 top 压入返回地址；这只检查位置，尚无保护页。
 
-第三个断点停在 `airi_kernel_main` 的首条指令，参数还保存在 ABI 规定的 RDI 中。`((AiriBootInfo*)$rdi)->version` 将这个寄存器值解释为启动描述指针，再按结构字段偏移读取 `version`；`print/x` 让地址显示为十六进制。默认串口内核同样可能收到帧缓冲描述，读取 `framebuffer.width` 只说明引导数据里有什么，并不表示内核已绘图。
+`((AiriBootInfo*)$rdi)->version` 把参数值作为结构地址读字段，print/x 显示十六进制。显示 width 只说明响应携带了描述，串口内核也可收到它，不表示已绘图。脚本断言的是栈边界和 magic，其余打印项供观察，不扩展为完整合同校验。
 
-QEMU 的 `-S` 在 CPU 复位时暂停，GDB 连接后才让固件与引导器继续执行，直到命中内核断点。这个调试入口和虚拟地址观察行为见 [QEMU 的 GDB 说明](https://www.qemu.org/docs/master/system/gdb.html)。会话结束或失败后，`finally` 都会请求结束 QEMU，再等待并回收进程；GDB 的 `detach` 本身并不负责退出 QEMU。
+-S 在 CPU 复位时暂停，连接后继续固件直到断点，见 [QEMU GDB](https://www.qemu.org/docs/master/system/gdb.html)。detach 只断调试连接，最后 finally 仍须结束、等待并回收 QEMU；会话超时也保存已收到记录再清理。
 
 **追加到 `scripts/kernel_debug.py` 末尾：**
 
@@ -369,24 +369,24 @@ with (work/'qemu.log').open('w') as log:  # QEMU主机输出写文件，离开wi
             process.wait()  # 回收已经结束的进程，避免留下子进程资源
 ```
 
-在学习目录运行下面两条完整命令。第一条执行 Linux 程序，第二条调试本地虚拟机；它们需要 SSH 通路，会写上述独立实验目录。
+下面两条是使用个人 SSH 通路的实际操作：第一条运行 Linux 程序，第二条调试本机虚拟 CPU。它们分别写上述独立目录，不把这两个环境合为同一次实验。
 
 ```sh
 ./airios linux-lab  # 向个人主机传输并实际运行两份程序，保存输出与GDB记录。
 ./airios kernel-debug  # 远端GDB连接本地QEMU，观察自有栈及C启动参数。
 ```
 
-成功时，`artifacts/linux-p1/artifacts/ordinary-output.txt` 包含 `main(argc=3)`，`raw-output.txt` 包含 `raw: _start -> syscall(write) -> syscall(exit)` 并以换行结束。同目录的 `raw-gdb.txt` 应记录写前的调用号 1、fd 1、长度 47，写后的结果 47，以及相同的 `next/expected` 地址。数值地址随实际构建变化，检查的是两者关系，不是某个固定地址。
+Linux 路径成功时，ordinary-output.txt 应有 main(argc=3)，raw-output.txt 应恰好为带换行的 47 字节。raw-gdb.txt 还要显示写前 number=1、fd=1、length=47，写后 result=47，且 next 与 expected 地址相同；具体地址随构建变化，比较的是本次关系。
 
-`artifacts/kernel-debug/gdb.txt` 是另一条观察路径：其中的 `AIRI_STACK_OK=1` 表示调试时 RSP 在自有栈内，`AIRI_KERNEL_ABI_OK=1` 表示 RDI 指向的数据具有预期的 magic。其他 `print` 命令把版本、内存区域数和地址留下供查看；当前成功条件没有逐项断言这些字段的具体值，也没有跟进 `airi_kernel_main` 内部的完整合同校验。
+内核路径另在 `artifacts/kernel-debug/gdb.txt` 保存停点。AIRI_STACK_OK=1 只说明 RSP 在自有栈，AIRI_KERNEL_ABI_OK=1 只说明 RDI 指向预期 magic；其他字段虽打印，没有逐项断言，也没有跟完主函数内部验证。
 
 <a id="linux-evidence"></a>
 
-两条命令的失败位置不同。SSH 尚不能登录时，错误只出现在当前终端，脚本还来不及生成新的实验记录；进入远端脚本后，已经写出的输出保留在远端 `artifacts`，本机脚本会尝试打包取回。若取回本身也失败，记录仍需从远端取得。内核调试只有进入 GDB 会话后才会写 `gdb.txt`；会话超时则保存异常中已收到的字节，随后回收本机 QEMU。
+证据能否留下取决于失败阶段。SSH 未登录时只在当前终端报错，进入 run.sh 后远端 artifacts 才逐项形成，本机会尝试取回，取回失败仍需从远端取得。内核调试到 GDB 会话才有 gdb.txt，超时则保存异常已收到字节并清理本机进程。
 
-这些脚本复用上述证据目录，失败也可能留下以前的 `result.json` 或尚未被本次执行覆盖的文件。判断本轮结果应以刚运行命令的退出状态、实际输出与文件时间对应，不能仅凭目录里有一份成功 JSON。修复 SSH 访问或缺失工具后，重新执行同一条命令；连接失败本身不提供任何 Linux 寄存器或 guest 断点证据。
+这些目录会复用，旧 result.json 或本次尚未覆盖的文件可能仍在。以刚执行命令的状态、实际输出和文件时间对应判断，不凭成功 JSON 的存在。修复访问或工具后仍重跑同一命令，连接失败不提供寄存器或断点证据。
 
-2026-10-15 的作者运行中，两条命令都因 SSH 返回 255 停止，尚未获得本版的远端输出与 GDB 停点；具体环境和状态保留在[验证说明](../../docs/verification.md)。下面的本地连续重建只检查脚本语法，不会调用上述远程命令。
+2026-10-15 的既有运行中，两条命令均 SSH255，本版远端输出与停点尚未验证，详见[验证说明](../../docs/verification.md)。下面的本地命令只检查脚本语法，不执行上述 SSH 操作。
 
 **在学习目录根目录运行：**
 
@@ -396,4 +396,6 @@ python3 -m py_compile scripts/linux_lab.py scripts/kernel_debug.py  # 本地仅�
 sh -n labs/linux/p1/run.sh  # 只做Shell语法检查，不执行Linux二进制或GDB。
 ```
 
-本地检查成功只表示这些脚本可以解析。三条路径各自有了明确的观察位置：运行时进入 `main`，用户态通过 `syscall` 请求 Linux，AiriOS 则在自己的栈上进入 C 并直接访问设备。后续用户态阶段将继续观察地址空间与文件描述符在启动程序时怎样变化；文件与内存实验的具体场景见[项目对照](../../docs/system-practice.md)。
+本地语法检查通过，仍不等于 Linux 程序或 guest 断点已运行。三条路径分别说明了已有与待验证的边界：运行时调用 main，用户程序以 syscall 请求 Linux，自制内核则在自有栈执行 C 并访问设备。
+
+后续用这些区别继续理解地址空间、进程和 fd，而不是把不同环境的同名函数视为同一个机制。具体业务对照见[项目实践](../../docs/system-practice.md)。

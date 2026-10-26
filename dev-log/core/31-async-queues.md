@@ -1,17 +1,21 @@
 # K31 · 提交队列可以满，完成还没收集也不能提前释放缓冲
 
-从K30继续。本节先把异步资源管理写成独立算法，再用真实VirtIO后端执行四条请求：写、FLUSH、读回、越界错误。用户系统调用接下一节。这样可以在引入用户地址和进程退出之前，单独看清SQ容量、CQ信用、请求身份和晚完成的生命周期。
+K30 已将一次块操作拆成 begin 与 poll：前者交出请求，后者检查设备是否结束。但硬件当前只有一个在途位置，其他调用者不能把自己的数据覆盖进去。现在需要一层软件队列，先接住几条请求，依次交给设备，并把结果保留到提交者来收取。
+
+先跟随一次写入：提交者注册一个 512 字节 buffer，放入模式数据，再提交写扇区 256、cookie30 的请求。接收成功只说明软件队列记住了它；稍后 pump 才让设备开始，设备结束以后还要形成完成记录，最后由 pop 交给提交者。下面分别保存这些阶段需要的状态，而不是把所有“返回 0”都当成已经写完。
+
+本章先建立内核中的独立算法，再用真实 VirtIO 后端执行写、FLUSH、读回和越界错误。用户地址、系统调用与真实进程退出/exec 的接入留到下一节；本章用明确的主机模型检查资源撤销后的晚完成。
 
 <a id="async-three-identities"></a>
-## 槽号、句柄和cookie分别指认谁
+## 一条完成需要找回请求，也需要找回它的资源
 
-设备只认识K25的描述符链首id0。本节软件请求单元另存cookie，它由提交者选择，用来把完成关联回原请求，不按返回位置猜身份。注册buffer使用带代数的handle：低字节为池索引加1，高位是单调generation；释放后复用同一槽会产生新handle，旧整数不能命中新对象。
+写入者附上的 cookie30 是本次请求身份，完成记录原样带回它。K25 的设备描述符链首 id0 则是驱动管理硬件队列的位置，同一个硬件位置可以先后服务许多软件请求，不能用 id0 代替 cookie，也不能按完成出现的位置猜请求。
 
-每个owner还有epoch，表示同一编号当前这一轮资源。将来PID在exec前后不变，但旧映像的请求不能写入新映像的buffer或CQ，因此reset先确认能取得新epoch，再撤销旧轮次。完成同时核对owner、epoch和handle。owner不是内部进程指针，关闭和槽复用不会让请求留下悬空控制块地址。
+注册 buffer 有另一个句柄 handle，用来找到哪份已登记的数据。它与 cookie 回答不同问题：一个是请求借哪份资源，一个是完成属于哪次操作。后面同一个 owner 尚未收取的请求中，cookie 必须唯一；收取以后才可复用。不同 owner 的资源不能互相访问。
 
-共享io_abi只有固定宽度数值：submission含sector与cookie，completion含cookie、buffer、result、operation和零reserved。result才是I/O结果：读写成功512，FLUSH成功0，失败为负；submit返回0仅接收，pump返回0仅表示服务函数没有内部失败，pop返回0仅表示复制出一条完成。这些返回不能互相替代。
+共享 `io_abi` 只放固定宽度数值，不放进程内指针。submission 保存 sector 与 cookie；completion 带回 cookie、buffer、result、operation，reserved 置零。数据操作成功的 result 为 512，FLUSH 为 0，失败为负。submit 的 0 只是接收，pump 的 0 是本次服务没有内部失败，pop 的 0 是成功交出一条记录；实际 I/O 结果要继续读取记录中的 result。
 
-**新建 `include/airi/io_abi.h`。** 先固定不含指针的自有记录，下一节用户编译才接入它，不称Linux ABI。
+**新建 `include/airi/io_abi.h`。** 下一节用户程序会使用这份自有记录，本章还不是 Linux ABI。
 
 <!-- write: include/airi/io_abi.h -->
 ```c
@@ -33,24 +37,28 @@ _Static_assert(sizeof(struct airi_io_completion) == 32, "completion ABI size"); 
 ```
 
 <a id="async-credit"></a>
-## 接受请求时就为完成预留位置
+## 接收请求时，就要保证将来有地方放结果
 
-引擎固定8个owner、32个512字节注册buffer、每owner最多4个buffer，全局4个排队/ACTIVE请求，每owner4个CQ信用。SQ用四个请求单元保存完整副本，按sequence选择最早排队项；CQ使用head/count环。它不是共享内存环，也不宣称io_uring的零拷贝提交路径。
+软件引擎用四个请求单元保存 QUEUED 或 ACTIVE 请求，这里称为 SQ。每个单元保存操作数值和自己的 512 字节副本；写提交时复制注册 buffer 的内容，之后设备推进不再借用调用者传入的地址。注册池有 32 个 512 字节 buffer，最多八个 owner，每个 owner 最多注册四个。owner 是引擎的数字身份，本章还不是内部进程控制块指针。
 
-提交先检查操作、handle、重复cookie、owner信用与全局空槽；都满足后才复制写数据、把buffer设BUSY并加outstanding。失败−11表示根本没有接受，buffer仍IDLE。设备完成后请求单元可回收，但outstanding不减，CQ与buffer继续占用；只有pop收集后才归还信用并把buffer解锁。因此SQ已空也可能因为CQ未收集而不能提交，不能无限积累无人处理的完成。
+设备已经结束，不表示提交者已经读过结果。若立即把所有位置都交给新请求，尚未读取的完成可能无处保存。因此每个 owner 另有四项 CQ 和四份完成信用：接受一条请求就增加 outstanding，先预留它将来需要的结果容量，直到 pop 收取才归还信用。
 
-同一buffer从提交到CQ收集始终BUSY，put/get/free都返回−16，包括硬件已经完成的时段。用户必须先取得这条完成，才可查看或重用buffer。不同owner不能拿外来handle访问内容。cookie在当前owner未收集请求中必须唯一，收集后可复用。
+例如同一 owner 已接收四条请求，四次设备操作后来都结束，SQ 单元可以全空，CQ 却有四条未读结果，outstanding 仍是 4。此时第五条请求仍应返回 −11；如果只检查 SQ，就会允许结果无限积累。CQ 用 head/count 环保存有效结果，SQ 则按接收时的 sequence 找最早 QUEUED，物理槽复用顺序不等于提交顺序。这些都是内核内的固定结构，不是 Linux 共享内存环或零拷贝提交路径。
+
+数据 buffer 从接受到 pop 始终 BUSY。即使设备已经完成，put/get/free 仍返回 −16；收取对应 CQ 后才恢复 IDLE，允许查看、覆盖或释放。没有接收的请求不改变原状态，原本 IDLE 的 buffer 继续 IDLE，不能把失败的 submit 当作需要等待的请求。
 
 <a id="async-late-owner"></a>
-## owner退出后，设备还可能在做什么
+## 提交者撤销资源，已经开始的设备操作仍需结束
 
-请求单元自己持有512字节副本，写提交时从注册buffer复制；真实DMA仍由K30驱动的静态请求持有。关闭owner可以立即取消QUEUED、撤销注册对象与CQ，但ACTIVE请求单元必须保留到后端poll结束。即使原owner已经不存在，后端仍有一个稳定输出地址，收集后按epoch判断无主并丢弃完成，再回收该单元。
+本轮资源由 owner 与 epoch 一起识别。以后某个 PID exec 后编号可以相同，却已经是另一轮资源；旧请求不能写进新映像的 buffer 或 CQ。open 分配新 epoch，reset 在确认代数尚可增长后才撤销旧轮次，失败保留旧状态。
 
-reset与直接close分别覆盖exec和退出的需要。同一编号新epoch可以拿到复用槽的新handle，旧完成不能被交给新CQ，也不能覆盖新内容。这里没有让设备直接DMA到用户页，所以进程页面回收和设备目标寿命可以分开；以后若实现用户页直达DMA，就必须固定页面并显式等待设备结束，不能照搬当前撤销策略。
+关闭 owner 时，尚未交给设备的 QUEUED 可以取消，注册 buffer 和 CQ 也可撤销；ACTIVE 却不能立刻清空。它保存的副本仍是后端 poll 的稳定输出位置，只有真实 poll 结束以后才能回收。完成时重新按 owner 编号查当前上下文，再比 epoch；原 owner 不存在或已换轮次，就丢弃旧完成，不交给新 CQ。
 
-pump每次最多收集一个ACTIVE，再尝试最早QUEUED；一旦begin成功就返回，不等设备。最多处理四个立即错误，避免坏输入使内核服务无界循环。越界扇区是已接受请求的I/O错误，通过CQ−22返回且不进入后端；不支持的操作格式则在submit阶段立即−22，没有CQ。后端暂忙−16保留SQ项，设备错误也形成CQ。内部信用或handle不变量破坏才让引擎faulted并要求内核停止。
+handle 还要区分同一注册槽前后创建的对象：低字节是池索引加 1，高位是单调 generation，复用槽会得到新值。完成重新核对 owner、epoch 和完整 handle，防止旧整数指向新 buffer。保存数值身份而不借内部控制块地址，也使关闭 owner 后的 ACTIVE 不会悬空解引用。
 
-**新建 `include/airi/async.h`。** 这些内部池结构只供算法、内核和主机模型使用，用户只看io_abi数值。
+设备 DMA 的实际目标仍由 K30 驱动的静态请求持有；引擎单元与注册 buffer 之间另行复制。当前没有直接 DMA 到用户页，所以撤销提交者的资源与结束设备借用可以分开。以后若直接使用用户页，必须固定页面并等设备真正结束，不能照搬当前的撤销办法。
+
+**新建 `include/airi/async.h`。** 内部池结构供算法、内核和主机模型使用，未来用户只接触 io_abi 数值。
 
 <!-- write: include/airi/async.h -->
 ```c
@@ -112,7 +120,11 @@ void airi_async_demo(void); // 固定QEMU内核队列演示，用户API接下一
 #endif // 结束保护。
 ```
 
-**新建 `kernel/io/engine.c`。** 先把接受、设备借用、CQ发布与收集四个时刻分别实现。
+## 先建立身份和资源的稳定查找
+
+engine 的辅助查找先按 owner 编号取当前轮次，再按 handle 的低字节定位注册槽，核对完整 handle、owner 与 epoch。找不到就返回错误，不能把任意句柄当地址。初始化复制可信后端接口，记录可访问扇区范围；open、close、reset 管理一轮资源，关闭时仅撤销尚未交出的请求，ACTIVE 保留到后端结束。
+
+**新建 `kernel/io/engine.c`，先写初始化、查找与 owner 生命周期：**
 
 <!-- write: kernel/io/engine.c -->
 ```c
@@ -176,6 +188,18 @@ int airi_aio_reset(struct airi_aio_engine *e, unsigned id) { // 同一PID的新�
     airi_aio_close(e, id); // 已有ACTIVE保留到poll，排队和旧句柄撤销。
     return airi_aio_open(e, id); // 自己刚释放了一个上下文槽，正常必可取得新epoch。
 }
+```
+
+## 注册句柄必须区分同一槽的前后两份数据
+
+注册先找全局空 buffer，再设置 owner 和 epoch，清除旧内容，生成新的 handle。若没有其他注册插入，槽 0 在 generation 为 1 时得到 `(1<<8)|1=257`，释放后复用且代数增为 2 时得到 513；低字节仍指向同一个槽，完整整数已经不同。generation 是全局增长值，实际下一次不一定恰好加一到这个示例值。
+
+put 把传入字节复制到 IDLE 注册 buffer，并清零短输入的尾部；返回后不再借传入地址。get 同样只从 IDLE 复制，free 也要求 IDLE。分配检查每 owner 四个、全局 32 个的容量，代数不能回绕；资源不符或 BUSY 时不复制或释放。
+
+**追加注册、复制与释放接口：**
+
+<!-- append: kernel/io/engine.c -->
+```c
 long airi_aio_buffer_alloc(struct airi_aio_engine *e, unsigned id) { // 固定注册池，数据不放入用户进程控制块的局部副本。
     struct airi_aio_owner *owner = find_owner(e, id); // 资源必须属于活轮次。
     if (!owner || e->faulted) // 没有可用引擎身份。
@@ -238,6 +262,18 @@ long airi_aio_buffer_free(struct airi_aio_engine *e, unsigned id, uint64_t handl
     airi_memset(buffer, 0, sizeof(*buffer)); // 槽可复用，下一handle使用新全局代数。
     return 0; // 活动请求没有借此地址，IDLE证明可回收。
 }
+```
+
+## submit 接受后，哪些状态已经改变
+
+回到 cookie30 的写请求。submit 先核对操作格式、owner 信用、句柄、IDLE 状态和 cookie 唯一性，再找全局空请求槽；任一条件失败都没有接受。检查全部成立后，写数据复制到请求单元，buffer 改 BUSY，outstanding 加一，单元成为带 sequence 的 QUEUED，然后返回 0。
+
+提交给错 owner 的 handle 不会取得资源；重复 cookie 在 QUEUED、ACTIVE 和未收取 CQ 中都被拒绝。SQ 满或本 owner 信用不足返回 −11；非法操作格式立即 −22，不产生 CQ。sequence 也必须能继续增长，不能回绕改变 FIFO 判断。FLUSH 没有数据 buffer，要求 handle 为零，但同样占一份请求容量与完成信用。
+
+**追加 `airi_aio_submit`：**
+
+<!-- append: kernel/io/engine.c -->
+```c
 int airi_aio_submit(struct airi_aio_engine *e, unsigned id, unsigned operation, uint64_t handle, uint64_t sector, uint64_t cookie) { // 接收只入SQ，不直接等待设备。
     struct airi_aio_owner *owner = find_owner(e, id); // 当前轮次是所有后续关联依据。
     if (!owner || e->faulted) // 没有有效上下文。
@@ -276,6 +312,18 @@ int airi_aio_submit(struct airi_aio_engine *e, unsigned id, unsigned operation, 
     ++owner->outstanding; // 接受时预留CQ容量，完成时不释放信用。
     return 0; // 请求可稍后开始，也可通过CQ报I/O错误。
 }
+```
+
+## 设备结束、发布 CQ 与收取是三个时刻
+
+后端用 0 表示本次设备操作成功结束。complete 根据 operation 把它转换成记录里的结果：读写为 512，FLUSH 为 0；负值则保留为 I/O 错误。成功读先把请求副本复制进注册 buffer，错误读保留原内容。cookie、handle 和结果全部写入 CQ 后才增加 count，避免发布半条记录。
+
+请求单元此时可回收，但 buffer 仍 BUSY，outstanding 也不减少。pop 先复制 CQ 头项并验证它与当前注册对象匹配，再解锁 buffer、移动 head、减少 count 和 outstanding，最后把完整值交给调用者。pop 返回 0 只表示取到了记录，调用者仍要检查 completion.result；没有结果返回 −11。内部信用、handle 或 BUSY 状态不一致属于引擎不变量破坏，必须停止，不能当作普通设备失败继续覆盖结果。
+
+**追加 CQ 形成与 `airi_aio_pop`：**
+
+<!-- append: kernel/io/engine.c -->
+```c
 static int complete(struct airi_aio_engine *e, struct airi_aio_request *request, int result) { // 后端已结束借用，才能回收请求单元。
     struct airi_aio_owner *owner = find_owner(e, request->owner); // 不保存已销毁进程指针。
     if (owner && owner->epoch == request->epoch) { // 同一ID的新轮次不能收到旧完成。
@@ -313,6 +361,20 @@ int airi_aio_pop(struct airi_aio_engine *e, unsigned id, struct airi_io_completi
     *completion = value; // 所有不变量成立后才交出结果。
     return 0; // 不是本条I/O的结果，具体字节/错误在completion.result。
 }
+```
+
+## pump 一次推进多少，何时把控制权交回服务方
+
+pump 先检查唯一 ACTIVE。poll 返回 1 表示仍在途，本次服务就返回 0，等待以后再检查；0 或负值才进入 complete。后端已经结束借用以后，ACTIVE 位置才释放。随后按 sequence 找最早 QUEUED，begin 接收成功便标 ACTIVE 并立即返回，本次不等待设备。
+
+若后端暂忙 −16，请求保留在 SQ。若数据请求扇区不在允许范围，软件直接形成 CQ−22，不访问后端；因为 submit 已经接受过它，调用者必须从 CQ 收到结果，不能把它变成一次没有完成的消失请求。设备错误同样走 CQ。一次最多处理四个立即失败，避免坏输入令服务循环无界运行；内部不变量破坏才把引擎设 faulted 并要求内核停止。
+
+`airi_aio_work` 看的是 QUEUED 或 ACTIVE，包括已经没有 owner 的 ACTIVE。只有未收取 CQ 时它可以为假，因为此时没有设备工作需要推进，但提交者仍有结果和信用未释放。服务方要据此区分“需要继续 pump”与“资源全部收齐”。
+
+**追加 `airi_aio_pump` 与工作检查：**
+
+<!-- append: kernel/io/engine.c -->
+```c
 int airi_aio_pump(struct airi_aio_engine *e) { // 只由普通内核服务调用，不在IRQ中睡眠或分配。
     if (e->faulted) // 上次内部不变量失配。
         return -5; // 不继续覆盖状态。
@@ -366,13 +428,15 @@ bool airi_aio_work(const struct airi_aio_engine *e) { // 用于决定是否需�
 ```
 
 <a id="async-model"></a>
-## 模型延后两次检查，再给实际结果
+## 用可控制的在途阶段检查撤销和复用
 
-主机后端明确规定begin只保存请求，前两次poll返回1，之后才改模型介质或复制读结果。它不是伪造QEMU速度，而是为所有权测试提供可控制的在途时段。测试按cookie核对四条完成，验证全局SQ满、CQ信用满、重复cookie、外来handle、BUSY修改/释放和失败读保留原内容。
+主机模型实现同一 begin/poll 接口。begin 只保留请求，前两次 poll 固定返回 1，之后才修改模型介质或交回读取字节。这使测试能在设备尚未结束时主动 close/reset，观察本章需要保护的阶段，不是在伪造 QEMU 的真实速度。
 
-晚完成分别在reset同编号和close原owner后发生。新对象占用复用槽并写入new或foreign，旧请求真实经过模型poll之后，新CQ仍为空、新内容不变。32个buffer和8个上下文的耗尽与回收也明确检查。ASan/UBSan检查内存和未定义行为，但这些模型结论不替代下一段的真实设备证据。
+模型检查四条完成的 cookie，并分别触发全局 SQ 满、owner CQ 信用满、重复 cookie、外来 handle、BUSY 修改与释放以及错误读保留原内容。reset 同编号后创建新对象写入 new，或 close 后让别的 owner 复用槽写入 foreign；旧 ACTIVE 真实经过后续 poll 以后，新 CQ 仍应为空、新数据仍应不变。测试也借尽并回收 32 个 buffer 与八个上下文，防止只覆盖一次成功分配。
 
-**新建 `tests/unit/async_test.c`。** 断言对应资源交接和错误结果，不把运行通过记成读者掌握。
+ASan/UBSan 另查内存和未定义行为，模型结果支持的是受控时序下的生命周期结论。下一段还需真实设备证明接收与字节往返，两种证据不互相替代。
+
+**新建 `tests/unit/async_test.c`：**
 
 <!-- write: tests/unit/async_test.c -->
 ```c
@@ -494,15 +558,26 @@ int main(void) { // host只验证明确模型，真设备由独立guest演示。
 ```
 
 <a id="async-real-device"></a>
-## 四条真实请求共用一个硬件位置
+## 把四条软件请求交给一个真实硬件位置
 
-service使用静态engine，避免把几十KiB池压进16KiB进程内核栈。演示owner7001/7002只是算法编号，尚未创建对应用户进程。独立块区256–271与正式日志16–143分开；先保存256号扇区，再提交cookie30写、cookie10 FLUSH、cookie20读回和cookie40越界到16。最后一条必须产生CQ−22而不接触正式日志。
+service 用长期静态 engine，避免把几十 KiB 固定池放进 16 KiB 任务栈。它只把引擎的 begin/poll 接到 K30 块接口；本次 7001、7002 是算法 owner 编号，还没有创建相应用户进程。
 
-第五条由另一owner提交仍得−11，证明全局四槽已满，不只是第一个owner信用不足。完成全积累到CQ后，SQ已空，再提交仍因未收集信用得−11；buffer释放仍为−16。收集四条后核对全部cookie、handle与result，读回pattern，再撤销owner并恢复原扇区、FLUSH。
+实验范围为扇区 256–271，正式日志在 16–143。先同步保存 256 号扇区，再创建 writer、reader 和 error_buffer 三个句柄，初始化 writer 的模式数据。四项属于 owner7001：
 
-当前硬件最多一个在途，所以这四条按提交顺序串行执行；身份关联仍明确保存，不能把本演示说成已经实现乱序设备队列或并行性能提升。只读/隔离设备明确跳过这条写读演示，用户错误完成接下一节。
+| cookie | 请求与资源 | 期望的 completion.result |
+| --- | --- | --- |
+| 30 | writer 写扇区 256 | 512 |
+| 10 | FLUSH，无 buffer | 0 |
+| 20 | reader 读扇区 256 | 512 |
+| 40 | error_buffer 读扇区 16 | −22，软件拒绝越界，不碰正式日志 |
 
-**新建 `kernel/io/service.c`。** 真实后端适配与演示等待策略在这里，pump本身不睡眠。
+先全部 submit，不立即 pop。owner7002 再提交第五条 FLUSH 也得 −11，这次它自身尚无信用占用，说明拒绝来自全局四槽。演示循环 pump，必要时用时钟唤醒后的下一轮继续检查，等待策略在 service，不放进 submit 或 pump。
+
+设备操作全结束后，四个 SQ 单元已回收，但 owner7001 四份完成仍在 CQ；再次提交 FLUSH 应因信用满得到 −11，writer 的 free 仍为 −16。之后逐条 pop，按 cookie 和 handle 核对各自结果，收完才能 get reader 并与 pattern 比较。最后关闭两 owner，恢复保存的 256 号扇区并 FLUSH，不能让一次观察改变实验之前的内容。
+
+当前后端最多一个在途位置，四条按提交顺序串行执行。cookie 仍明确记录身份，不能由此宣称已实现硬件乱序、并行队列或性能提升。只读或隔离设备会明确跳过写读演示；用户接口下的错误完成接下一章。
+
+**新建 `kernel/io/service.c`：**
 
 <!-- write: kernel/io/service.c -->
 ```c
@@ -571,154 +646,46 @@ void airi_async_demo(void) { // 先在内核独立证明队列，再接用户系
 }
 ```
 
-**更新构建。** guest加入engine/service，host-test增加第八组明确后端模型。
+## 接入构建和启动，分别保留两种观察
 
-<!-- write: Makefile -->
-```make
-# 用既有make_command取得交叉工具参数；统一airios入口在K13加入。
-# 内核C编译器由调用参数覆盖；此处默认clang，不借宿主libc。
-CC := clang
-# ELF链接器默认LLD，调用参数可传入真实找到的路径。
-LD := ld.lld
-# 主机实验用宿主编译器，可以链接宿主libc。
-HOST_CC := cc
-# ?=仅在调用者未赋值时取normal，各测试配置独立构建。
-PROFILE ?= normal
-# $(PROFILE)展开当前配置名称，OUT指向这一配置的产物目录。
-OUT := build/$(PROFILE)
+guest 增加 engine/service，host-test 增加第八组 async 模型。前者连接真实设备，后者控制晚完成时序，不能只运行其中一个就认为另一条路径已验证。
+
+**更新 `Makefile`。** 原有规则保留，按下面唯一的旧文本窗口替换。
+
+**guest 源文件列表：第一块定位旧文本，用第二块完整替换。**
+
+<!-- replace: Makefile -->
+<!-- before -->
+```makefile
+# 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
+SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
+    kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c
+# 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
+ifneq ($(filter desktop-%,$(PROFILE)),)
+```
+<!-- after -->
+```makefile
 # 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
     kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c kernel/arch/x86_64/paging.c kernel/mm/heap.c kernel/arch/x86_64/timer.c kernel/task/task.c kernel/process/user.c kernel/process/elf.c kernel/fs/file.c kernel/drivers/virtio_block.c kernel/storage/journal.c kernel/storage/demo.c kernel/storage/service.c kernel/io/engine.c kernel/io/service.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
-include frontend/sources.mk # 本分支取得图形自己的源码清单。
-# guest 图形适配与纯 C 前端进入同一内核，参考服务和 Cocoa 不进入。
-SOURCES += kernel/console/display.c $(UI_SOURCES)
-else # 没有desktop-前缀时只选择串口实现。
-# 串口实现没有字体、绘图与桌面状态。
-SOURCES += kernel/console/serial_display.c
-endif # 结束当前可选图形分支。
-# 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
-CASE := $(patsubst desktop-%,%,$(PROFILE))
-# patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o $(OUT)/kernel/arch/x86_64/switch.o $(OUT)/labs/airios/probe.o $(OUT)/labs/airios/images.o
-# 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
-CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
-          -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
-          -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 预处理器从自有include、固定协议头third_party和前端include取得声明。
-CPPFLAGS := -Iinclude -Ithird_party
-# 只有显式图形配置需要前端头文件。
-ifneq ($(filter desktop-%,$(PROFILE)),)
-CPPFLAGS += -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
-endif # 结束当前可选图形分支。
-# Make条件只在no-framebuffer配置加入下方测试宏。
-ifeq ($(CASE),no-framebuffer)
-# +=追加预处理选项，让启动适配模拟缺少图形响应。
-CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-endif # 结束 no-framebuffer 的编译条件
-# 缺内存响应配置采用独立构建目录和下面宏。
-ifeq ($(CASE),missing-memory)
-# 模拟必需内存地图缺失，内核应打印具体PANIC。
-CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
-endif # 结束 missing-memory 的编译条件
-# 设备超时故障镜像故意不发布avail.idx，正常镜像不含注入。
-ifeq ($(CASE),block-timeout)
-CPPFLAGS += -DAIRI_TEST_BLOCK_TIMEOUT # 验证真实PIT截止与DMA隔离，不冒充设备断电。
-endif # 结束块设备故障配置。
-# 栈保护故障镜像让未映射栈触发DF，由IST1报告。
-ifeq ($(CASE),stack-guard)
-CPPFLAGS += -DAIRI_TEST_STACK_GUARD # 此镜像不能发布READY。
-endif # 结束栈故障配置。
-# 时钟故障镜像仅供K18作者演示超时，不进入正常启动配置集合。
-ifeq ($(CASE),timer-masked)
-CPPFLAGS += -DAIRI_TEST_TIMER_MASKED # PIT仍计数，但PIC阻止IRQ0到达CPU。
-endif # 结束时钟故障条件。
-# 作者故障配置不登记恢复，应报告真实异常后停止。
-ifeq ($(CASE),trap-fatal)
-CPPFLAGS += -DAIRI_TEST_FATAL_TRAP # 仅此构建目录触发未处理 UD2。
-endif # 结束故障配置。
-# 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
-ifeq ($(CASE),edit-experiment)
-# 单引号由shell保护内部双引号，编译器取得C字符串宏值；下一续行同时设置学习日志文字。
-CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
-            -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-endif # 结束 edit-experiment 的文字覆盖条件
+```
 
-# 这些名称是动作目标，即使同名文件存在也执行其规则。
-.PHONY: all kernel image host-test clean
-# 默认动作依赖镜像，触发内核编译、链接和镜像制作。
-all: image
-# 只构建独立内核ELF，不制作启动镜像。
-kernel: $(OUT)/airios.elf
-# 模式规则将相同相对路径的C源文件编成当前配置对象；%匹配路径主体。
-$(OUT)/%.o: %.c
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# 同一对象布局下编译带预处理的汇编入口。
-$(OUT)/%.o: %.S
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# ELF依赖全部对象与链接脚本，任一变化会重新链接。
-$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld
-# 这一完整续行命令用ELF x86-64、无标准库、静态链接、4KiB页对齐和不可执行栈；-T指定自有布局，最后-o写目标。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
-	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-# 镜像先要求独立ELF成功。
-image: $(OUT)/airios.elf
-# 把同一配置的ELF装入UEFI启动镜像。
-	python3 scripts/image.py $(PROFILE)
-# 主机字节算法、启动合同与命令状态检查，保留assert并启用ASan/UBSan。
-host-test:
-# 先建立主机检查产物目录。
-	@mkdir -p build/tests
-# 以下完整续行命令编译主机检查；fno-builtin避免优化绕过被测实现，sanitizer检查内存和未定义行为，AIRI_HOST_TEST避开真实端口指令。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -DAIRI_HOST_TEST -Iinclude tests/unit/base_test.c \
-	    kernel/lib/base.c kernel/boot/info.c \
-	    kernel/console/console.c kernel/arch/x86_64/input.c \
-		    -o build/tests/base_test
-# 只有全部assert成立才打印PASS，失败状态返回Make。
-	./build/tests/base_test
-# 独立编译同一物理页算法，主机不解引用 guest 地址。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -Iinclude tests/unit/pages_test.c \
-	    kernel/mm/pages.c kernel/boot/info.c kernel/lib/base.c -o build/tests/pages_test
-# 验证耗尽、保留范围、重复释放和舍入边界。
-	./build/tests/pages_test
-# 同一四级页表算法在受控arena里验证，绝不安装宿主页表。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -DAIRI_HOST_TEST -Iinclude tests/unit/vm_test.c \
-	    kernel/arch/x86_64/paging.c kernel/mm/pages.c kernel/boot/info.c kernel/lib/base.c -o build/tests/vm_test
-# 覆盖翻译、共享分支、空表回收和中途耗尽的所有权回滚。
-	./build/tests/vm_test
-# 在宿主受控backing上验证同一小对象实现，不借用guest地址。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -Iinclude tests/unit/heap_test.c \
-	    kernel/mm/heap.c kernel/lib/base.c -o build/tests/heap_test
-# 交错分配与归还时检查所有活对象内容和最终容量。
-	./build/tests/heap_test
-# 解析器在独立小端字节夹具中核对正常与损坏ELF，不执行输入指令。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -Iinclude tests/unit/elf_test.c \
-	    kernel/process/elf.c kernel/lib/base.c -o build/tests/elf_test
-# 失败不得写出半份view，也不得越界读取映像。
-	./build/tests/elf_test
-# 文件算法在主机使用同一实现，验证引用、偏移和容量回滚。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -Iinclude tests/unit/file_test.c \
-	    kernel/fs/file.c kernel/lib/base.c -o build/tests/file_test
-# 仅全部文件边界成立才继续启动检查。
-	./build/tests/file_test
-# 日志后端模型验证提交顺序、错误返回与掉电缓存边界。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -Iinclude tests/unit/journal_test.c \
-	    kernel/storage/journal.c kernel/lib/base.c -o build/tests/journal_test
+**主机 async 模型目标：第一块定位旧文本，用第二块完整替换。**
+
+<!-- replace: Makefile -->
+<!-- before -->
+```makefile
+# 模型不声称真实主机掉电，真设备另由guest演示。
+	./build/tests/journal_test
+# 清理仅删除可重建产物，保留运行证据artifacts。
+clean:
+```
+<!-- after -->
+```makefile
 # 模型不声称真实主机掉电，真设备另由guest演示。
 	./build/tests/journal_test
 # 异步队列用明确延后后端验证SQ/CQ、代数句柄和晚完成。
@@ -729,403 +696,79 @@ host-test:
 	./build/tests/async_test
 # 清理仅删除可重建产物，保留运行证据artifacts。
 clean:
-# 调用shutil删除build；ignore_errors允许尚不存在目录。
-	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'
-# 后缀替换得到自动依赖文件；前缀-允许首次构建尚无.d。
--include $(OBJECTS:.o=.d)
-
-
-# 手动选择图形动作时才读取支线目标；默认构建不检查该目录。
-ifneq ($(filter ui-preview ui-test lab-editor,$(MAKECMDGOALS)),)
-include frontend/targets.mk # 仅显式图形动作读取相应规则。
-endif # 结束当前可选图形分支。
-
-# 三个观察名称均是动作，即使有同名文件也运行。
-.PHONY: lab-memmove lab-boot-info
-# 重新构建重叠移动与截断输出观察。
-lab-memmove:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/base/memmove_trace.c kernel/lib/base.c -o build/labs/memmove
-# 打印左/右重叠及截断结果。
-	./build/labs/memmove
-# 重新构建合法/损坏启动数据观察。
-lab-boot-info:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/boot/boot_info_probe.c kernel/boot/info.c -o build/labs/boot-info
-# 打印启动合同的正常与独立失败原因。
-	./build/labs/boot-info
-
-# 用户C使用自己的低地址模型、入口和库；绝不沿用内核高地址链接脚本。
-USER_FLAGS := --target=x86_64-unknown-none-elf -std=c11 -O1 -g -Wall -Wextra -Werror -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie -mno-red-zone -mgeneral-regs-only -mcmodel=small
-# 每个配置拥有独立用户对象，避免跨配置复用旧二进制。
-USER_OBJECTS := $(OUT)/user/start.o $(OUT)/user/hello.o $(OUT)/user/bytes.o $(OUT)/user/syscall.o
-# 入口汇编与内核汇编分别形成对象，符号_start不在同一个链接目标中冲突。
-$(OUT)/user/start.o: labs/airios/start.S
-# 先建立独立用户产物目录。
-	@mkdir -p $(dir $@)
-# 当前交叉编译器不链接宿主运行时。
-	$(CC) $(USER_FLAGS) -c $< -o $@
-# 用户C程序只读取自有用户库声明。
-$(OUT)/user/hello.o: labs/airios/hello.c labs/airios/include/airi_libc.h
-# 先建立输出目录。
-	@mkdir -p $(dir $@)
-# 编译为用户模型对象。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# 用户库的字节实现与系统调用实现共用这一规则。
-$(OUT)/user/%.o: labs/airios/libc/%.c labs/airios/include/airi_libc.h
-# 输出目录与当前配置绑定。
-	@mkdir -p $(dir $@)
-# 所有用户库均使用同样的freestanding约束。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# 用户独立静态ELF是嵌入输入，不是内核的直接链接对象。
-$(OUT)/user/hello.elf: $(USER_OBJECTS) labs/airios/program.ld
-# 用户只链接自己的_start、main和libc子集，无宿主依赖。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_OBJECTS) -o $@
-# 包装汇编明确依赖本配置用户ELF，文件变动就重新嵌入。
-$(OUT)/labs/airios/images.o: labs/airios/images.S $(OUT)/user/hello.elf $(OUT)/user/processes.elf $(OUT)/user/worker.elf $(OUT)/user/files.elf $(OUT)/user/storage.elf $(OUT)/user/pipes.elf $(OUT)/user/waits.elf
-# 建立包装对象目录。
-	@mkdir -p $(dir $@)
-# 单引号保护路径宏内部双引号，.incbin只读本配置生成文件。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DAIRI_HELLO_ELF='"$(OUT)/user/hello.elf"' -DAIRI_PROCESS_ELF='"$(OUT)/user/processes.elf"' -DAIRI_WORKER_ELF='"$(OUT)/user/worker.elf"' -DAIRI_FILES_ELF='"$(OUT)/user/files.elf"' -DAIRI_STORAGE_ELF='"$(OUT)/user/storage.elf"' -DAIRI_PIPES_ELF='"$(OUT)/user/pipes.elf"' -DAIRI_WAITS_ELF='"$(OUT)/user/waits.elf"' -c $< -o $@
-
-# 第二个用户程序只复用用户入口与库，不把hello的main再次链接进去。
-USER_COMMON := $(filter-out $(OUT)/user/hello.o,$(USER_OBJECTS))
-# 普通用户C工作负载仍使用相同低地址编译约束。
-$(OUT)/user/processes.o: labs/airios/processes.c labs/airios/include/airi_libc.h
-# 创建当前配置目录。
-	@mkdir -p $(dir $@)
-# 只读取用户库头，不引入内核实现。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# 多进程工作负载有自己的独立静态ELF。
-$(OUT)/user/processes.elf: $(USER_COMMON) $(OUT)/user/processes.o labs/airios/program.ld
-# 入口与库复用，main只选择processes.o。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/processes.o -o $@
-
-# exec目标独立编译，保持同一用户ABI与链接布局。
-$(OUT)/user/worker.o: labs/airios/worker.c labs/airios/include/airi_libc.h
-# 建立当前配置输出目录。
-	@mkdir -p $(dir $@)
-# 普通用户C仅链接自己的运行库。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# worker也有自己的_start和main，原始ELF只在包装时进入内核。
-$(OUT)/user/worker.elf: $(USER_COMMON) $(OUT)/user/worker.o labs/airios/program.ld
-# 复用用户入口与库，不混合其他程序main。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/worker.o -o $@
-
-# 文件演示有独立用户main，复用自有入口与库。
-$(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h
-# 按配置建立目录。
-	@mkdir -p $(dir $@)
-# 同样禁止宿主库和浮点寄存器。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# 只链接这份工作负载的main。
-$(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
-# 独立低地址ELF由内核包装后装载。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/files.o -o $@
-
-# 存储工作负载有独立用户main，普通启动不自动追加正式记录。
-$(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h
-# 建立配置专属目录。
-	@mkdir -p $(dir $@)
-# 保持相同用户整数编译约束。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# storage与recover由同一ELF按明确argv分支。
-$(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/program.ld
-# 用户库没有宿主libc依赖。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/storage.o -o $@
-
-# 非阻塞管道有独立用户main，保持前面程序各自可运行。
-$(OUT)/user/pipes.o: labs/airios/pipes.c labs/airios/include/airi_libc.h
-# 当前配置目录单独建立。
-	@mkdir -p $(dir $@)
-# 不链接内核头或宿主运行时。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# 管道程序只复用自有用户入口与库。
-$(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
-# 保持相同低地址ELF布局。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/pipes.o -o $@
-
-# 阻塞和就绪等待工作负载独立于非阻塞管道程序。
-$(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h
-# 仍按配置隔离用户对象。
-	@mkdir -p $(dir $@)
-# 只使用自有用户库与整数寄存器。
-	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
-# ELF只选择waits的main。
-$(OUT)/user/waits.elf: $(USER_COMMON) $(OUT)/user/waits.o labs/airios/program.ld
-# 低地址静态链接，不借宿主入口。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 -z noexecstack -T labs/airios/program.ld $(USER_COMMON) $(OUT)/user/waits.o -o $@
 ```
 
-**更新启动顺序。** 正式日志scan后运行独立队列演示，再进入既有用户程序。
+正式日志 scan 完成后才执行独立队列演示，再进入原有用户程序。这样实验只使用单独扇区，不与恢复流程或旧程序同时借用硬件位置。
 
-<!-- write: kernel/main.c -->
+**更新 `kernel/main.c`，保留其余初始化与交互路径：**
+
+**异步接口头文件：第一块定位旧文本，用第二块完整替换。**
+
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+#include <airi/storage.h> // 正式日志区跨进程和QEMU重启保留。
+#include <airi/journal.h> // 追加记录恢复演示独立于RAM文件。
+```
+<!-- after -->
 ```c
 #include <airi/async.h> // 有界SQ/CQ先在真实设备演示，再接用户。
 #include <airi/storage.h> // 正式日志区跨进程和QEMU重启保留。
 #include <airi/journal.h> // 追加记录恢复演示独立于RAM文件。
-#include <airi/block.h> // 设备适配在内存、时钟之后初始化。
-#include <airi/user.h> // 验证ring3系统调用和故障隔离。
-#include <airi/task.h> // 两个独立栈内核任务主动交接并回收。
-#include <airi/timer.h> // 内存建立后开始真实设备中断。
-#include <airi/memory.h> // 通过内存服务建立页池、页表、堆并查询快照。
-#include <airi/trap.h> // 安装异常表并演示处理器现场。
-#include <airi/arch.h>     // 通过架构边界使用忙等提示。
-#include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
-#include <airi/console.h>  // 取得命令环、按键与视图类型。
+```
 
-static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
+**日志恢复后的队列演示调用：第一块定位旧文本，用第二块完整替换。**
 
-#ifndef AIRI_DEMO_MESSAGE  // 允许修改实验在编译时替换输出文本。
-#define AIRI_DEMO_MESSAGE "Hello from AiriOS P1"  // 普通配置默认输出的学习标记文字。
-#endif  // 结束默认演示文字的条件定义
-_Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交入稳定启动描述；_Noreturn 声明内核不返回加载器。
-    const char *error = airi_boot_validate(info);  // 校验必需启动字段，NULL 表示通过，字符串给出失败原因。
-    if (error)  // 有具体原因则不能继续读取未经验证的数据。
-        airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
-    airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
-    airi_trap_demo(); // 正常启动验证带与不带硬件错误码的返回路径。
-#ifdef AIRI_TEST_FATAL_TRAP // 只在作者故障镜像中执行未处理异常。
-    airi_trap_fatal_demo(); // 必须报告并停止，不能发布 READY。
-#endif // 普通镜像继续初始化。
-    airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
-             info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
-    airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 串口分别记录内核物理位置、虚拟地址和字节长度。
-             (unsigned long long)info->kernel_physical_base,  // 转换到 %llx 要求的无符号 long long。
-             (unsigned long long)info->kernel_virtual_base, (unsigned long long)info->kernel_size);  // 虚拟地址采用十六进制，内核大小按字节十进制输出。
-    airi_log("[HHDM] offset=0x%llx", (unsigned long long)info->direct_map_offset);  // 记录把物理地址换成直接映射虚拟地址的偏移量。
-    for (uint32_t i = 0; i < info->region_count; ++i) {  // 只遍历启动描述声明的有效区域，不读取固定数组剩余项。
-        const struct airi_memory_region *r = &info->regions[i];  // 借用第 i 条区域描述。
-        airi_log("[MEMORY] index=%u base=0x%llx length=0x%llx kind=%s", i,  // 逐项输出下标、物理起点、长度及用途。
-                 (unsigned long long)r->base, (unsigned long long)r->length,  // 地址和长度都是64位范围，按 long long 适配格式。
-                 airi_memory_name(r->kind));  // 将区域种类转成可读名称，不改变区域数据。
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+        airi_panic("storage recovery failed"); // 不继续提供错误前缀。
     }
-    uint64_t usable = airi_memory_bytes(info, AIRI_MEMORY_USABLE);  // 按实际种类累加可用区域字节数，不等同虚拟机总配置内存。
-    airi_log("[MEMORY_SUMMARY] usable_bytes=%llu boot_reclaim_bytes=%llu",  // 输出可用内存与暂由加载器占用的可回收内存两个值。
-             (unsigned long long)usable,  // 可用字节数转换匹配 %llu。
-             (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 另行累计加载器可回收区域，不混入 usable。
-    airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
-    airi_memory_init(info); // 只借出完整 usable 页，并在真实 RAM 演示写入与归还。
-    airi_timer_demo(); // 从PIT/PIC收到真实IRQ0，hlt后恢复到正常上下文。
-    airi_task_demo(); // 当前只在正常内核上下文主动切换，IRQ不抢占内核任务。
-    int block_error = airi_block_init(info); // 固定单队列设备，未连接时明确停止当前存储阶段。
-    if (block_error) { // 默认运行必须带独立实验盘。
-        airi_log("[BLOCK_INIT_ERROR] error=%d", block_error); // 先记录具体设备错误。
-        airi_panic("virtio block initialization failed"); // 不把缺设备当成功。
-    }
-    airi_block_demo(); // 真正DMA读写、FLUSH与范围拒绝。
-    airi_journal_demo(); // 固定实验扇区上提交、校验、坏尾截断与恢复。
-    int storage_error = airi_storage_init(); // 启动扫描，绝不自动追加正式记录。
-    if (storage_error) { // I/O错误不能当作空盘。
-        airi_log("[STORAGE_INIT_ERROR] error=%d", storage_error); // 保留具体失败。
+    airi_user_demo(); // 正常与非法用户程序结束后仍回到启动栈和串口。
+    airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
+```
+<!-- after -->
+```c
         airi_panic("storage recovery failed"); // 不继续提供错误前缀。
     }
     airi_async_demo(); // 三个真实设备操作和一个有界范围错误完成。
     airi_user_demo(); // 正常与非法用户程序结束后仍回到启动栈和串口。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
-    console.service = airi_user_command; // 系统程序服务独立于可选主题/窗口扩展。
-    console.read_memory = airi_memory_snapshot; // 文本查询只读取数值，不持有分配器内部对象。
-    bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
-    if (graphics) {  // 有效图形路径才输出图形参数。
-        const struct airi_framebuffer *fb = &info->framebuffer;  // 借用刚用于绘图的同一份帧缓冲描述。
-        airi_log("[FRAMEBUFFER] width=%llu height=%llu pitch=%llu bpp=%u",  // 记录尺寸、字节行距和每像素位数，供截图与日志比对。
-                 (unsigned long long)fb->width, (unsigned long long)fb->height,  // 宽高转为与 %llu 相同的参数类型。
-                 (unsigned long long)fb->pitch, (unsigned)fb->bpp);  // pitch 按字节输出，bpp 按位数输出。
-    } else  // 未完成图形时仍发送串口原因并继续启动。
-        airi_log("[DISPLAY_SERIAL] no frame produced; using serial output");  // 图形不适用时记录原因路径，后面仍进入串口命令循环。
-    /* Written AFTER all drawing, so tests can take a completed screenshot. */
-    airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
-             (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
-    airi_log("[AIRI_P2_READY] exceptions=1 pages=1 own_cr3=1 heap=1"); // 所有内存演示和控制台初始化结束后才发布阶段完成。
-    airi_log("[AIRI_P3_READY] user=ring3 elf=static fork=copy exec=transaction wait=blocked"); // 完整内核进程路径结束并恢复后才发布。
-    if (airi_storage_count() >= 0) // 超时隔离的故障镜像不宣称磁盘阶段可用。
-        airi_log("[AIRI_P4_READY] files=ram pipes=blocking block=virtio journal=crc writable=%u", !airi_block_readonly()); // Linux实测状态另记，不由guest标记证明。
-    airi_serial_write("airi> ");  // 输出首个串口提示符。
-    for (;;) {  // 没有退出条件，内核持续轮询输入。
-        int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
-        if (!key) {  // 没有新键时不处理命令和重画。
-            airi_arch_relax();  // 提示当前架构正在忙等；这不是睡眠或调度。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        }
-        uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。
-        bool changed = airi_console_key(&console, key);  // 按键改变命令或页面状态，返回是否需要刷新。
-        if (!changed)  // 被忽略的按键不产生新帧。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        if (key == '\n' || key == '\r') {  // 回车完成命令，才把新增输出回显到 UART。
-            uint64_t first = console.total_lines - console.line_count;  // 日志环只保留 line_count 行，first 是尚可读取的最早逻辑行。
-            if (before < first)  // 若本次命令挤掉旧行，先把读取起点限到仍存在的区域。
-                before = first;  // 不访问已经被覆盖的逻辑行。
-            for (uint64_t i = before; i < console.total_lines; ++i) {  // 逐行回显本次命令产生且仍保留的内容。
-                airi_serial_write(airi_console_line(&console, i));  // 逻辑行号由环接口转换为数组下标。
-                airi_serial_write("\n");  // 为该行补串口行结束。
-            }
-            airi_serial_write("airi> ");  // 输出首个串口提示符。
-        }
-        if (graphics)  // 只在启动时建立了图形路径的情况下重画。
-            airi_console_draw(&console);  // 把变更后的命令与页面状态写成完整画面。
-        /* Published after rendering: interaction tests observe completed frames. */
-        if (key == '\n' || key == '\r' || key >= AIRI_KEY_PAGE_UP)  // 命令提交与功能键在绘图后发布可观察完成记录。
-            airi_log("[CONSOLE_UPDATE] view=%u commands=%u page=%u", (unsigned)console.view,  // 输出当前页面、累计命令和内存页号，观察程序据此等待具体状态。
-                     console.commands, console.map_page);  // 这两个计数来自刚处理并重画的同一命令对象。
-    }
-}
 ```
 
-**更新验证。** 可写设备要求真实队列标记，受限设备要求明确SKIPPED。
+启动观察对可写设备要求真实队列成功标记，对受限设备要求明确 SKIPPED；只有探测文字或预期的错误码都不足以证明该路径执行过。
 
-<!-- write: scripts/boot.py -->
+**更新 `scripts/boot.py`，保留既有检查：**
+
+**按设备条件选择队列观察标记：第一块定位旧文本，用第二块完整替换。**
+
+<!-- replace: scripts/boot.py -->
+<!-- before -->
 ```python
-"""QEMU launch and bounded boot checks; success requires a kernel marker."""  # 固定虚拟机参数并按本轮内核标记判断启动结果
-import json  # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-from pathlib import Path  # Path 表示主机路径对象，/ 在这里拼接路径片段。
-import shutil      # 取得目录复制、文件复制与临时结果清理接口。
-import socket      # 取得主机通信连接接口，QMP/调试器通过独立连接交接。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import tempfile    # 创建互不冲突的临时路径，用完后显式回收。
-import time  # 单调时钟计算截止时间，sleep 给设备与进程处理时间。
-from tools import ROOT, tool  # ROOT 确定项目位置，tool 按已建立优先级寻找工具。
-
-def command(profile, work, gui=False, debug=False, debug_port=1234):  # 返回 QEMU 参数列表；profile 选镜像，work 保存本轮可写固件与日志。
-    work.mkdir(parents=True,exist_ok=True)  # 建立本轮输出目录，已有目录允许复用。
-    firmware=ROOT/'third_party/firmware'    # 定位固定固件目录。
-    variables=work/'ovmf-vars.fd'  # 本轮固件变量单独存放，避免改动锁定的原始模板。
-    shutil.copyfile(firmware/'edk2-i386-vars.fd',variables)  # 复制变量模板，QEMU 可写副本而保持外部依赖原件。
-    cmd=[tool('qemu-system-x86_64','qemu'),'-machine','q35','-accel','tcg',  # 先选 QEMU 路径与 q35/TCG，参数列表按元素边界传递。
-         '-cpu','qemu64','-smp','1','-m','256M','-vga','std',  # 固定CPU型号、单核、256MiB及标准VGA。
-         '-drive',f'if=pflash,format=raw,unit=0,readonly=on,file={firmware/"edk2-x86_64-code.fd"}',  # 只读代码固件是第0个 pflash 单元，f 字符串填入实际路径。
-         '-drive',f'if=pflash,format=raw,unit=1,file={variables}',  # 第1个 pflash 单元使用本轮可写变量副本。
-         '-monitor','none','-cdrom',str(ROOT/'build'/profile/'airios.iso'),'-boot','d','-no-reboot',  # 挂载对应配置镜像，从光盘启动，故障时不循环重启。
-         '-serial',f'file:{work/"serial.log"}']  # 默认 UART 输出保存到本轮 serial.log。
-    disk = work / 'disk.raw' # 每个运行目录只使用项目自己的独立实验盘。
-    if disk.is_symlink(): # 拒绝把实验写入重定向到外部文件。
-        raise RuntimeError('Experiment disk cannot be a symlink') # 不跟随未知目标。
-    if not disk.exists(): # 保留已有实验盘用于后续重启恢复观察。
-        with disk.open('xb') as stream: # 排他创建，不覆盖竞争产生的文件。
-            stream.truncate(8 * 1024 * 1024) # 稀疏零文件，固定8MiB。
-    if not disk.is_file() or disk.stat().st_size != 8 * 1024 * 1024: # 当前设备容量固定，未知文件不交给guest写。
-        raise RuntimeError('Expected an 8 MiB project experiment disk') # 要求显式处理错误，不自动truncate旧文件。
-    drive = f'if=none,id=airi-disk,format=raw,file={disk},cache=writeback' # QEMU后端可缓存，持久化需客体FLUSH。
-    if profile.removeprefix('desktop-') == 'block-readonly': # 故障演示使用真实只读设备特征。
-        drive += ',readonly=on' # 不修改宿主文件的权限设置。
-    if profile.removeprefix('desktop-') != 'block-missing': # 缺设备配置故意不接实验盘。
-        cmd += ['-drive', drive, '-device', 'virtio-blk-pci,drive=airi-disk,disable-modern=on,vectors=0'] # 固定legacy与无MSI-X布局，现代接口另行学习。
-    if not gui: cmd+=['-display','none']  # 无人操作时隐藏显示窗口，guest 仍可绘图并经 QMP 截帧。
-    if debug: cmd+=['-S','-gdb',f'tcp:127.0.0.1:{debug_port}']  # -S 暂停CPU，GDB只监听回环地址指定端口。
-    return cmd  # 仅返回参数列表，调用者决定何时启动与回收进程。
-def qmp_execute(sockpath, execute, arguments=None):  # 本机连接只执行本次指定的控制请求。
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:  # 外层拥有底层连接，最后关闭。
-        sock.settimeout(5)  # 连接、发送和读取最多阻塞五秒。
-        sock.connect(str(sockpath))  # 路径定位QEMU控制端点，不是普通输出文件。
-        with sock.makefile('rb') as stream:  # 内层包装按行读取字节，先关闭包装再关闭连接。
-            json.loads(stream.readline())  # 消费服务器问候，JSON库直接接受bytes。
-            result = None  # 尚未收到动作结果，不与空字典混淆。
-            request = {'execute': execute}  # 当前控制动作保存为请求字段。
-            if arguments is not None:  # 空字典也是显式参数，只有None表示不提供。
-                request['arguments'] = arguments  # 将本次参数加到同一请求。
-            for req in ({'execute': 'qmp_capabilities'}, request):  # 先协商能力再发实际动作。
-                sock.sendall((json.dumps(req) + '\n').encode())  # 直到全部消息字节交出或失败，不假设一次write写完。
-                while True:  # 跳过异步事件，等待当前请求的结果。
-                    reply = json.loads(stream.readline())  # 按消息换行取得完整JSON字节。
-                    if 'error' in reply:  # QEMU拒绝了当前请求。
-                        raise RuntimeError(str(reply['error']))  # 保留服务器的具体错误。
-                    if 'return' in reply:  # event不满足完成条件。
-                        result = reply['return']  # 取得当前请求结果。
-                        break  # 此请求已完成，进入下一个或返回。
-            return result  # 返回实际动作结果，两个with仍按由内到外关闭资源。
-
-def qmp_screenshot(sockpath, output):  # 把本轮截图目标路径交给QEMU控制端点。
-    qmp_execute(sockpath, 'screendump', {'filename': str(output)})  # 控制显示设备保存PPM，不向UART发送命令。
-def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条件由配置对应完成标记决定。
-    work=ROOT/'artifacts'/('boot-'+profile)  # 不同配置分开保存启动证据。
-    work.mkdir(parents=True,exist_ok=True)   # 建立本轮输出目录，已有目录允许复用。
-    (work/'result.json').unlink(missing_ok=True)  # 删除上次汇总，失败不能留下旧成功身份。
-    serial=work/'serial.log'  # 当前检查只读取这次启动的串口文件。
-    serial.unlink(missing_ok=True)  # 删去旧日志；不存在不报错，旧 READY 不会使新启动提前通过。
-    # AF_UNIX paths are capped at 104 bytes on macOS. Source exports can be deep.
-    endpoints=tempfile.TemporaryDirectory(prefix='airios-qmp-',dir='/tmp')  # 在短/tmp路径建立控制端点，避免 macOS UNIX socket 路径过长。
-    sockpath=Path(endpoints.name)/'qmp.sock'  # 临时目录中的 qmp.sock 命名本次控制连接。
-    cmd=command(profile,work)+['-qmp',f'unix:{sockpath},server=on,wait=off']  # 在固定启动参数后追加控制端点，QEMU不等待客户端才启动。
-    (work/'command.json').write_text(json.dumps(cmd,indent=2))  # 保存实际参数列表供本轮复现。
-    case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
-    graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
-    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P3_READY]' if case == 'block-timeout' else '[AIRI_P4_READY]' # 正常配置等完整存储阶段，隔离盘只保留进程可用标记。
-    if case == 'block-missing': # 缺盘是明确设备初始化失败，不能继续宣称存储可用。
-        expected = '[AIRI_PANIC] virtio block initialization failed' # 错误码另外核对。
-    if case in ('trap-fatal', 'stack-guard'): # 未处理异常镜像必须进入具体停止路径。
-        expected = '[AIRI_PANIC] unhandled CPU exception' # 不以 QEMU 存活推断故障已处理。
-    started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
-    with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
-        process=subprocess.Popen(cmd,stdout=errors,stderr=errors)  # 启动后立即取得进程句柄，轮询 guest 标记而非等待进程退出。
-        try:  # 受保护区域失败也必须进入后面的资源回收。
-            while time.monotonic()-started<timeout:  # 按实际经过秒数限制整次启动等待。
-                text=serial.read_text(errors='replace') if serial.exists() else ''  # 日志尚未创建时取空串；暂时不完整的字节以替代字符读取。
-                complete_lines = text.splitlines(keepends=True)  # 保留行结束符，完整记录与写到一半的标记可区分。
-                if any(line.endswith('\n') and line.startswith(expected) for line in complete_lines):  # 生成器逐行检查，至少一个完整且以预期标记开头才成立。
-                    if case in ('missing-memory', 'trap-fatal', 'stack-guard', 'block-missing'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
-                        if case == 'block-missing': # 必须确认真实枚举结果为缺设备。
-                            assert '[BLOCK_INIT_ERROR] error=-19' in text # 不能用其他初始化失败充数。
-                        if case == 'stack-guard': # 坏栈必须真的转到双重故障的独立栈。
-                            assert '[STACK_GUARD_PROBE]' in text and '[EXCEPTION] vector=8 error=0x0 ' in text # 不能把任意PANIC冒充保护页演示。
-                        assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
-                    else:  # 按当前profile的另一条完整验证路径处理。
-                        assert '[EXEC_FAILURE_OK]' in text and '[EXEC_WORKER_OK]' in text and '[EXEC_COMMIT]' in text # 坏映像保持与成功替换都须实际运行。
-                        block_marker = '[BLOCK_TIMEOUT_OK]' if case == 'block-timeout' else '[BLOCK_READONLY_OK]' if case == 'block-readonly' else '[BLOCK_DEMO_OK]' # 不同设备条件分别核对真实结果。
-                        assert '[BLOCK_READY]' in text and block_marker in text # 完成、拒绝或超时必须符合本配置。
-                        if case != 'block-timeout': # 隔离盘不再允许新提交。
-                            assert '[BLOCK_NONBLOCK_OK]' in text # begin接受、重叠拒绝和poll收集已运行。
+                        journal_marker = '[JOURNAL_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[JOURNAL_DEMO_OK]' # 没有可写设备时不冒充日志完成。
+                        assert journal_marker in text # 正常配置必须真实恢复并替换坏尾。
+                        storage_marker = '[STORAGE_SKIPPED]' if case == 'block-timeout' else '[STORAGE_RECOVERED]' # 只读仍可恢复，隔离盘不能提供空日志。
+                        assert storage_marker in text # 正式区必须实际扫描或明确未提供。
+```
+<!-- after -->
+```python
                         journal_marker = '[JOURNAL_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[JOURNAL_DEMO_OK]' # 没有可写设备时不冒充日志完成。
                         assert journal_marker in text # 正常配置必须真实恢复并替换坏尾。
                         async_marker = '[ASYNC_QUEUE_SKIPPED]' if case in ('block-timeout', 'block-readonly') else '[ASYNC_QUEUE_DEMO_OK]' # 受限设备不冒充可写队列演示。
                         assert async_marker in text # 接收、忙与完成身份须符合当前设备。
                         storage_marker = '[STORAGE_SKIPPED]' if case == 'block-timeout' else '[STORAGE_RECOVERED]' # 只读仍可恢复，隔离盘不能提供空日志。
                         assert storage_marker in text # 正式区必须实际扫描或明确未提供。
-                        assert '[WAIT_USER_OK]' in text and '[WAIT_IDLE_OK]' in text and '[WAIT_DEMO_OK]' in text # 真阻塞、超时与现场继续均已完成。
-                        assert text.index('[WAIT_TIMEOUT_OK]') < text.index('[WAIT_BUSY_DONE]') # 纯计算用户不能饿死等待超时。
-                        assert '[PIPE_USER_OK]' in text # 有界流、背压、关闭与fork共享均已实际运行。
-                        assert '[FILES_USER_OK]' in text and '[FD_EXEC_OK]' in text # RAM文件和成功exec继承均完成。
-                        assert '[PROCESS_FORK_WAIT_OK]' in text and '[PROCESS_DEMO_OK]' in text # 复制、真实阻塞、timer换身份和回收都须完成。
-                        assert '[ELF_LOAD]' in text and '[ELF_USER_OK]' in text # 独立ELF段、BSS与用户libc必须真正运行。
-                        assert '[USER_DEMO_OK]' in text # 用户输出、指针拒绝和用户故障后内核必须继续。
-                        assert '[TASK_DEMO_OK]' in text # 两个独立栈必须交错并全部回收。
-                        assert '[TIMER_DEMO_OK]' in text # 时钟必须在真实IRQ唤醒后完成。
-                        assert '[AIRI_P2_READY]' in text # 当前主线还必须完成页池、自有页表和堆。
-                        assert '[TRAP_DEMO_OK] ud=6 gp=13 resumed=2' in text # 正常启动必须真的从两种异常栈返回。
-                        assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
-                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。。
-                        assert '[MEMORY_SUMMARY]' in text  # 完成之前应已记录实际内存总计。
-                        if case=='edit-experiment':  # 修改实验额外核对替换后的文字。
-                            assert 'I changed the output and rebooted' in text  # 确认运行的是实验配置的输出行为。
-                        if graphics:  # 有图形的完成路径才请求显示面截图。
-                            qmp_screenshot(sockpath,work/'screen.ppm')  # 在完整 READY 之后读取对应已完成画面。
-                    result={'profile':profile,'passed':True,'expected_marker':expected,  # 记录配置、成功与本次实际等待的标记。
-                            'seconds':round(time.monotonic()-started,2)}  # 记录经过秒数，round(...,2) 保留两位小数。
-                    (work/'result.json').write_text(json.dumps(result,indent=2)+'\n')  # 结果编码为便于阅读的 JSON，并补文件末尾换行。
-                    print(f'PASS boot/{profile} ({result["seconds"]}s)')  # 打印本次配置和耗时，而非以QEMU仍运行判定通过。
-                    return result  # 当前配置标记与截图核对成功，返回这次启动记录。
-                if process.poll() is not None:  # poll 非 None 表示主机 QEMU 已退出，不能继续等 guest 标记。
-                    raise RuntimeError(f'QEMU exited before marker; see {work}')  # 提前退出时报告证据目录。
-                time.sleep(0.1)  # 给虚拟CPU和日志写入100毫秒处理时间，再检查。
-            raise RuntimeError(f'Boot timeout after {timeout}s; see {work}')  # 耗尽截止时间后明确失败，并保留该配置的日志。
-        finally:  # 成功返回与异常离开都进入收尾。
-            process.terminate()  # 先请求主机 QEMU 进程结束。
-            try:  # terminate只是结束请求，随后仍需收回子进程。
-                process.wait(timeout=5)  # 最多等待五秒，防止清理本身无限卡住。
-            except subprocess.TimeoutExpired:  # QEMU没有在正常终止期限内退出。
-                process.kill()  # 强制结束本轮仍存活的QEMU。
-                process.wait()  # 收回已结束子进程的退出状态和资源。
-            sockpath.unlink(missing_ok=True)  # 删除本轮控制端点，端点已消失时允许继续。
-            endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
+
+## 对照实际完成与资源归还
+
+下面仍使用已有入口运行模型、启动和输入回归，再进入 normal 镜像观察队列标记：
 
 ```sh
 ./airios test # 八组主机观察、九种启动、三条输入及双启动恢复。
 ./airios run # 观察ASYNC_QUEUE_DEMO_OK，原run storage和run waits仍可用。
 ```
 
-正常标记为sq=4、cq=4、inflight=1、cookie=matched、buffer_until_pop=busy、error=−22、restored=1。它证明真实设备接收、收集和内容往返；晚完成对新owner的影响由主机模型单独验证。当前用户还没有注册/提交接口，P5完整READY尚未发布，下一节将这些资源接到进程生命周期和同一次CQ等待之后。
+正常标记为 `sq=4 cq=4 inflight=1 cookie=matched buffer_until_pop=busy error=−22 restored=1`：软件同时接住四项，设备一次一项，完成按 cookie 与 buffer 对上，直到 pop 才解除 BUSY，越界请求交回错误，实验扇区最终恢复。它记录真实设备接收、完成和内容往返；owner 撤销后的晚完成由前面的主机模型另行验证。
+
+当前用户还不能直接注册或提交，也尚未发布完整 P5 READY。下一节需要把同一轮资源绑定到进程，并让等待 CQ 的那一次系统调用在结果到来后继续；本章已经区分的接受、设备结束和收取，届时仍要分别保留。

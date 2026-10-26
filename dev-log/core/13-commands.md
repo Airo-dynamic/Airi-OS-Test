@@ -1,20 +1,20 @@
 # K13 · 把已有构建、运行与观察收拢为统一入口
 
-前面已经能构建镜像、启动 QEMU 并提交 mem。现在用 `./airios run` 串起依赖准备、构建和交互运行，用 `./airios test` 串起主机检查、四种启动及真实输入观察。命令入口只负责选择并调用这些已有动作，默认仍使用串口目标。
+构建镜像、启动机器与送入 mem 都已有独立实现。现在让 `./airios run` 依次准备材料、构建并交互运行，让 `./airios test` 组织主机算法、四种启动和输入观察。入口只编排已有动作，不把打印一条总成功文字当成替代验证。
 
-本章新建 scripts/manage.py 和工程根目录的 airios，原来的 Makefile、boot.py 与 console_test.py 继续提供实现。最后先运行 doctor，取得所选工具的版本和当前 ELF 报告，再从终端运行内核。
+新增 manage.py 与根目录 airios；Makefile、boot.py、console_test.py 继续负责实际工作。doctor 将先检查工具并真正编译、检查 ELF，再由 run 取得终端交互。默认仍是串口目标。
 
 <a id="command-entry"></a>
 
-## 构建并检查当前ELF
+## 构建参数既给编译器，也给编辑器
 
-脚本中的 run 接收参数列表，用 subprocess.run 启动外部程序，`cwd=ROOT` 把工作目录固定到当前工程。它和命令行动作 run 名称相同，但前者只是这里的 Python 辅助函数。build 将 profile 交给已有 Make 规则，normal 还会生成一份编译数据库，供编辑器使用相同的目标、头文件和宏理解源码。
+辅助 run(cmd) 固定 cwd=ROOT 并等待外部命令，和命令行动作 run 只是同名。build 把 profile 交 Make，normal 还生成 compile_commands.json：每条记录保存 directory、源码绝对 file 与 arguments，供 clangd 按相同目标、头路径与宏分析代码，避免误用主机默认环境。
 
-clangd 是编辑器调用的 C/C++ 代码分析程序。若它误用主机默认参数，可能把内核代码当成普通 Mac 应用。编译数据库因此为每份源码保存一条记录：directory 是工作目录，file 是源码绝对路径，arguments 是包含编译器和各项参数的列表。
+参数不另抄一份。compilation_database 从 make_command 取 normal/kernel，insert(1,'-Bn') 放到可执行文件之后；-B 强制列全部规则，-n 只打印，收集时不会再执行编译。shlex.split 根据 Shell 引号恢复 argv 边界，找到 -c 后的源路径后写记录。构建规则变化因而同步进入编辑器数据库。
 
-`compilation_database` 先取得 normal/kernel 的 Make 参数，再用 `insert(1, '-Bn')` 把选项放到可执行文件之后。`-B` 强制列出全部需要的构建动作，`-n` 要求只打印命令；这里收集的是这些命令文字，不再执行一遍编译。shlex.split 按 shell 引号恢复每个参数的边界，随后找到 `-c` 后的源码路径，保存到条目列表中。Make 的选项变化会进入新数据库，避免另维护一套编辑器参数。
+## 链接完成以后，检查是否仍依赖外部运行时
 
-doctor 和 test 还会调用 inspect_elf，检查当前 ELF 的机器类型、装载方式和未解析符号。普通主机程序可以由动态链接器补入共享库，当前内核则必须在装载前解决自己的全部引用。readelf 报告中的 INTERP 表示解释器段，NEEDED 表示动态依赖，`nm -u` 列出尚未定义的符号；出现任一项便停止。通过后才保存 artifacts/kernel-elf.txt，入口和设备的实际行为仍由启动与输入观察核对。
+inspect_elf 消费当前 profile 的 ELF，不看另一目录的旧产物。readelf 的 INTERP 说明需要解释器，NEEDED 说明动态库，nm -u 列未定义符号；当前独立内核不能等主机动态链接器来补它们，还必须是 x86-64 ET_EXEC。任一不符都停止，通过后才保存 kernel-elf.txt。文件检查没有执行入口，实际行为仍交启动和输入观察。
 
 **新建 `scripts/manage.py`：**
 
@@ -70,13 +70,13 @@ def inspect_elf(profile='normal'):  # 核对独立内核目标，不接受宿主
 
 ```
 
-## 让doctor实际编译一次
+## doctor 把工具存在接到真实构建
 
 <a id="toolchain-doctor"></a>
 
-doctor 沿第 00 章的版本探测继续往前走：先记录选中的可执行路径与版本，再准备锁定的引导材料，实际构建 kernel 并检查 ELF。GNU Make 的路径直接取 make_command 返回列表的第零项，继续使用第 01 章的 gmake、make 回退顺序。
+从 00 章版本探测继续：doctor 记录所选工具路径与版本，再 prepare 锁定材料、执行 kernel 构建、生成编译数据库并 inspect_elf。GNU Make 沿用 make_command 第零项，因此仍有 gmake/make 的既定选择，不另建环境规则。
 
-版本命令用 `capture_output=True` 分别收集标准输出和标准错误，`text=True` 将它们解码为字符串。工具可能把版本写到任一通路，合并后取第一行，再把路径与版本保存到 record[name]。后续构建成功，才会写出 toolchain.json；字体与窗口不参与这次环境检查。
+版本可能在 stdout 或 stderr，capture_output 分别收集，text=True 解码，合并取首行放入 record[name]。最后构建与 ELF 检查通过，才写 toolchain.json。该记录说明本次环境实际形成了目标产物，字体与窗口不参与。
 
 **追加到 `scripts/manage.py` 末尾：**
 
@@ -99,17 +99,17 @@ def doctor():  # 查工具与版本，再实际准备和构建内核以验证环
     (ROOT/'artifacts/toolchain.json').write_text(json.dumps(record,indent=2)+'\n')  # 保存本次实际工具路径和版本。
 ```
 
-## 根据实际动作延迟导入可选模块
+## 一个动作只导入和执行自己需要的组件
 
 <a id="cli-arguments"></a>
 
-`./airios run` 的 run 是位置参数，argparse 把它保存到 `args.action`。`--profile no-framebuffer` 这样的选项带一个值，`--graphics` 则使用 `action='store_true'`：没有写这个开关时为 False，写了便为 True，不再接另一个布尔字符串。parse_args 默认读取 sys.argv 中程序名之后的参数，结果 Namespace 是一份可用 args.action、args.profile 等属性读取的记录；choices 限定可接受的值，拼写错误会给出用法并结束。
+`./airios run --profile normal` 经 argparse 成为 Namespace，args.action 为 run、args.profile 为 normal。action 是位置参数，profile 带值，graphics 的 store_true 是开关，省略为 False、出现为 True；choices 在分派前拒绝拼写错误。parse_args 默认从 sys.argv 去掉程序名后读取。
 
-普通 run 取得 normal 配置，先 prepare，再 build，最后取得 QEMU 参数并启动。图形模块的 import 放在相应条件分支里，只有选择那条动作才会执行。图形 run 需要 G24 提供的资产校验，完整 ui-test 需要 G26 的模型与截图工具；当前默认分支不会读取它们。
+run 先 prepare，再 build，最后形成 QEMU 参数并启动。图形 import 留在实际分支中：图形 run 需 G24 资产校验，完整 ui-test 需 G26 模型与截图工具；默认不打开它们。Linux 在 L01、learn/snapshots 在工具附录才有实现，当前使用已经闭合的 doctor/build/run/test，docs-check 为独立动作。
 
-test 先运行基础库与文本模型检查，再分别构建四种场景，等待启动记录，最后执行三次 UART/PS/2 输入观察。启动结果与输入结果各自保存在 artifacts 的 JSON 数组中，任一步失败都会中止。全项目 docs-check 是独立动作；Linux 脚本在 L01 加入，learn 与 snapshots 在工具附录加入，当前先使用已经有实现的 doctor、build、run 和 test。
+test 先运行主机检查，再构建四个配置并等启动，最后三次 UART/PS/2；启动与输入结果分别保存在 JSON 数组，任一异常终止。它们各自仍用上章的完成条件，总入口不弱化判断。
 
-run 把 `-serial` 的参数替换为 `mon:stdio`，将 UART 接到当前主机终端。QEMU 在这条主机连接上识别 Ctrl-A 后按 X 的退出序列；普通 mem 字节则进入虚拟 UART，内核生成的结果按原通路回来。交互输出直接显示在终端，自动检查继续使用独立文件或 socket 保存记录。debug 则额外加 -S 暂停 CPU，并打开只接受本机连接的 GDB 调试端点，具体操作在 Linux 集合中展开。
+交互 run 将 -serial 改为 mon:stdio，普通 mem 字节进入虚拟 UART，结果原路回来；Ctrl-A 后 X 由 QEMU 主机连接识别并退出。自动检查则继续用独立文件/socket。debug 额外 -S 暂停 CPU、开启回环 GDB 端点，后面的 Linux 对照解释停点，不把“等待调试”当启动失败。
 
 **追加到 `scripts/manage.py` 末尾：**
 
@@ -203,9 +203,11 @@ if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义�
 
 <a id="command-shell"></a>
 
-在根目录提供一个短 shell 入口，才能直接执行 `./airios run`。`$0` 是入口路径，dirname 取它所在的目录，`$(...)` 执行括号内的命令并收集结果；先 cd 成功，再用 pwd 得到绝对路径。`CDPATH=` 只为这次 cd 清空目录搜索设置，避免额外输出混进 task_root。
+## Shell 入口只定位工程并转交参数
 
-`exec` 用 Python 替换当前 shell 进程。`"$@"` 逐项转交原参数，所以 `./airios run --profile normal` 最终让 manage.py 收到三个独立字符串 run、--profile、normal，Python 的退出状态也直接交回最初的终端。
+根目录 airios 先由 `$0` 取得自身路径，dirname 取目录，命令替换 `$(...)` 收集 cd 成功后的 pwd。CDPATH= 仅为该次 cd 清空搜索设置，避免额外输出混入 task_root；`&&` 保证失败时不继续取路径。
+
+exec 用 Python 替换当前 Shell，`"$@"` 保留每个原参数的独立边界。因此 run、--profile、normal 仍是三个字符串，Python 的退出状态也直接回到启动它的终端，没有另一层成功包装。
 
 **新建根目录的 `airios`：**
 
@@ -217,7 +219,7 @@ task_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)  # $0是入口路径；di
 exec python3 "$task_root/scripts/manage.py" "$@"  # 替换shell；双引号$@逐项保留原参数，退出状态直接来自Python。
 ```
 
-构建已经会生成 normal 的编译数据库，还要让 clangd 找到它。配置中的路径相对于工程根目录，编辑器会从 build/normal 读取 compile_commands.json。
+normal 构建已输出编译数据库，再让 clangd 从 build/normal 找它。配置路径相对工程解释，只改变编辑器如何理解代码，不替代构建中的目标选项。
 
 **新建 `.clangd`：**
 
@@ -227,7 +229,7 @@ CompileFlags:  # clangd编译参数设置对象。
   CompilationDatabase: build/normal  # 读取manage导出的普通配置命令数据库。
 ```
 
-格式化工具可以使用同一份缩进和括号规则。该配置只约定源码外观，编译与启动不读取它。
+另给格式化工具固定缩进和括号规则，避免日常编辑产生无关外观差异。该文件不参与编译或启动，也不改变 clangd 的参数来源。
 
 **新建 `.clang-format`：**
 
@@ -244,7 +246,7 @@ BreakBeforeBraces: Attach  # 左花括号接在声明或条件末尾。
 SortIncludes: Never  # 保留作者安排的头文件顺序。
 ```
 
-构建会产生对象、镜像、日志和 Python 缓存。`.gitignore` 告诉 Git 不把这些未跟踪文件默认作为待加入的源码；它不会删除文件，也不会让已跟踪文件失去跟踪。HISTORY 下保存的阶段对照同样由工具生成，源码仍在日常工程中修改。
+构建和观察会留下对象、镜像、日志、Python 缓存与生成的 HISTORY。gitignore 只告诉 Git 默认不收这些未跟踪产物，不删除它们，也不取消已有跟踪。日常源码仍在当前工程修改，阶段副本不能反过来成为实现来源。
 
 **新建 `.gitignore`：**
 
@@ -278,7 +280,7 @@ HISTORY/
 .agents/skills/
 ```
 
-本次镜像仍由 Limine 装载。独立引导器 AiriBoot 还只有共享合同，因此给它的 build 动作保留明确失败状态：打印原因并以 2 退出，调用方就会停止。status 则只说明当前状态，可以成功返回。
+当前装载者仍是 Limine。AiriBoot 只有共享合同，尚无 EFI 产物，所以它的 status 可说明边界并成功，build 则必须打印原因、退出 2，让调用方停止。明确失败比生成一个不存在能力的成功标记更符合真实状态。
 
 **新建 `boot/AiriBoot/Makefile`：**
 
@@ -298,7 +300,7 @@ build:
 	@exit 2 # 失败状态交给调用Make的进程。
 ```
 
-为 shell 文件添加执行权限，再从根目录调用 doctor。它会执行刚接好的工具探测、依赖准备、内核构建和 ELF 检查。
+给 shell 入口执行权限，再从工程根目录运行 doctor。它将真正探测、准备、编译并检查文件；工具存在但材料缺失或链接失败，都不能留下完成结论。
 
 **在学习目录根目录运行：**
 
@@ -308,6 +310,6 @@ chmod +x airios  # 为已写出的shell入口添加执行位。
 ./airios doctor  # 实际校验工具、依赖和独立ELF。
 ```
 
-doctor 完成后，终端会显示所选工具的版本和 PASS ELF，artifacts 保存工具记录与 ELF 报告。随后运行 `./airios run`，看到 READY 和 airi> 后输入 `mem` 并按回车，内核会返回同一启动地图的分类总量；按 Ctrl-A 后按 X 退出 QEMU。运行 `./airios test` 则自动完成主机检查、四次启动和三次输入观察。
+doctor 应显示所选版本与 PASS ELF，artifacts 保存路径、版本和 ELF 报告。接着 `./airios run` 在 READY/airi> 后接受 mem，回车再返回本次地图总量，Ctrl-A 后 X 退出；`./airios test` 则自动执行主机检查、四种启动和三次输入观察。
 
-接着进入必修的 Linux 集合 L01，观察普通程序怎样从 `_start` 进入 main，以及系统调用怎样把请求交给 Linux 内核。后续自制内核从异常报告继续；图形课程在独立分支推进，guest 接入使用 K11 接口，完成 G24 后才使用 --graphics。
+现在自制内核在特权环境直接访问 UART。接下来的 L01 用普通 Linux 程序对照：它如何进入 main，又如何通过系统调用请求输出。随后内核主线从异常报告继续；图形路线仍独立，完成 G24 的 guest 接入后才使用 --graphics。

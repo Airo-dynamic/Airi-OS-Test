@@ -17,3 +17,8 @@ not_assumed:
 - AiriOS已有TCP或Linux实验本轮已运行
 limits:
 - SSH255，Linux分支未编译与运行；单连接示例不承诺生产公平性
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/06-epoll.md#epoll-pair
+  establishes: 以 abc 剩余 bc 区分 LT/ET，再由 send 接受前缀引出应用后缀、订阅和半关闭；epoll 条件与 CQ 操作结果分开，保留真实背压和未验证边界。

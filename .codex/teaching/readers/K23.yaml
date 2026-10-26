@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 当前exec只有目录名与单项argv，stdout走UART，图形只显示命令结果摘要
 - Linux远端实测另记，运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 沿旧名称副本、局部 next、提交与原内核栈转移解释 exec，再把退出结果副本交给 console service，保留失败后继续和 PID 不变。

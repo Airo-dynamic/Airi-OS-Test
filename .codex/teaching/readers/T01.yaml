@@ -36,3 +36,8 @@ feedback:
   observation: 原画像笼统承接Python容器和异常，未指明本次递归与文件状态的数据形状。
   revision: 正文沿02排序和K13重建建立具体记录、共享容器、编辑动作、前态及失败输出，画像分别指向这些解释。
 not_inferred: 已解释、敲完或运行成功不证明理解；不设置答题门槛。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/tools/01-reconstruction.md#route-reconstruction
+  establishes: 02 的导出目标贯穿声明、前置排序、累计 state、整章事务和独立输出；区分重复前置与循环、编辑围栏与展示、源码核对与真实命令。

@@ -20,3 +20,8 @@ not_assumed:
 - Linux实际运行通过、io_uring必然更快、TCP等于存储持久化
 limits:
 - SSH255，Linux分支未编译与运行；Mac只验证拒绝分支
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/08-comparison.md#compare-workload
+  establishes: 固定同一消息与 done 前缀后比较三个等待位置；CQ 结果不需再补读写，缓冲寿命相同，补明固定 CQ 等待与循环预算不是严格总两秒。

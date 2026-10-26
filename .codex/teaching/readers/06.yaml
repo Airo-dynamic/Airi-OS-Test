@@ -54,3 +54,8 @@ source_reading:
   at: ../../../dev-log/core/06-entry.md#port-registers
   establishes: serial.c中的static限制out8/in8仅由当前单元按名字引用；放入头文件时才由每个包含者取得内部定义，inline不保证机器码一定展开
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/06-entry.md#serial-path
+  establishes: 先给出实际运行顺序，再将 UART 参数、寄存器约束、栈准备、ELF 链接与 Make 消费接回同一标记。保留所有端口、ABI、构建选项和失败限制。

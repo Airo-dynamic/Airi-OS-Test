@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - guest验证受控位损坏，主机验证16个明确缓存模型边界
 - 用户系统调用和跨QEMU重启接续下一节
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/26-journal.md#journal-format
+  establishes: 以 alpha 后追加和旧坏尾引出介质提交证据、三段同步和连续前缀；错误返回的副作用不确定性接到 poisoned，真实位损坏与 live/durable 模型分开。
