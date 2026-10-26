@@ -1,6 +1,8 @@
 # G17 · 把一次按键变成可回退的文档修改
 
-Editor 已经能显示 main.lua。现在在同一桌面对象中全选，将文字替换为 `print(42)` 加换行，撤销一次并恢复替换结果，再保存和请求运行。替换改变前端文字，保存改变服务记录，Run 则请求尚未连接的执行服务；观察程序依次打印这三个动作的结果。为让修改可回退，桌面新增修改前的独立副本 undo 和文字剪贴板 clipboard，saved 仍只在读取或保存成功时改变。
+Editor 已经从服务读入 main.lua：editor 是当前工作文字，saved 是这次完整读取留下的保存点，服务仍持有自己的正文。现在在同一 desktop 中全选，把工作文字替换为 print(42) 加换行，再撤销、恢复替换、保存和请求运行。按键先决定交给哪个输入对象，Editor 接到粘贴后才修改 editor；保存键再通过回调改变服务，Run 仍会得到执行未连接的错误。
+
+替换前要另存原文，否则覆盖后就无法撤销。因此新增独立的 undo 数组；clipboard 则持有拟粘贴的文字。它们都不代替 saved：撤销只交换工作文字与上次快照，保存成功才更新保存点。下面先加入按键、反馈与副本字段，随后依次接服务、可见反馈和输入操作。
 
 **完整写入 `frontend/include/ui.h`：**
 
@@ -146,9 +148,11 @@ void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应�
 
 <a id="edit-save-run"></a>
 
-观察程序送入 `"print(42)\n"`，含九个可见字符和一个换行，共十字节。字符串末尾另有 NUL，占存储但不计入文档长度。全选将 cursor/anchor 设到文档两端，粘贴替换整份选区；完成后 cursor=10、dirty=true。保存成功才令saved与editor相同，dirty=false；容量或服务状态失败时，两块数组及其差异都保留。Run 失败仍保留这十字节，因为运行是否可用不影响已经提交的文字。
+观察程序送入 print(42) 加换行，含九个可见字符和一个换行，共十字节；末尾 NUL 另占存储，不计入长度。全选后粘贴会把原 main.lua 存进 undo，再令 editor 成为十字节新文，cursor=10。此时 saved 与服务正文仍是原文，所以 dirty=true。
 
-前端稍后会发出保存、重命名、复制、移动和删除等动作。参考服务先补齐这些动作的校验与写入路径；保存仍复制到原记录的正文数组，执行请求则返回未连接原因。这样键盘分派只需传递动作和文件身份，错误也有确定来源。
+第一次 Undo 将 editor 换回原文、undo 换成十字节新文，editor 又与 saved 相同，dirty=false。第二次 Undo 再交换回来，dirty=true。只有之后 Save 成功，服务正文和 saved 才一同成为十字节，dirty=false。最后 Run 失败只产生反馈，已经保存的文字继续保留。容量检查或服务失败也不能留下半次文字修改；下面把这些条件放到各自改变状态的位置。
+
+先让服务能接收当前编辑结果。保存请求带现有 editor_id=1、名称 main.lua 和 editor 的十字节正文；参考服务通过 id-1 找到原槽，在普通文档上更新 text 与 bytes。UI_EXECUTE 则在改变任何记录之前返回未连接原因。创建、重命名、复制、移动与删除也使用这一个 action 入口，下面按这些分支的实际参数给出实现。
 
 **完整写入 `frontend/backends/reference.c`：**
 
@@ -222,6 +226,12 @@ static bool valid_name(const char *name) {  // 检查文件名非空、长度与
             return false;  // 名称含非法形状或字节，阻止后续服务修改
     return true;  // 所有名称约束均通过，可继续生成目标路径
 }
+```
+
+上面的记录容器、目录查询和完整读取仍遵守 G14 的合同。接下来更新动作处理：执行请求直接拒绝；创建和 editor_id<0 的新文档保存先验证名称、完整路径与重名，再占一个空槽。新建保存使用 data 填正文，普通创建仍为空。这段尚未闭合 action，已有 id 的动作随后接上。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 static bool action(void *unused, const char *directory, enum ui_action act, int id, const char *name, const char *data,  // 校验请求后改变服务记录，错误留在输出缓冲
                    char *out, size_t cap) {  // 错误正文写到调用者out数组，cap是该数组的字节容量，服务不保留此地址
     (void)unused;  // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
@@ -246,6 +256,12 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
             }
         return error(out, cap, "Reference workspace capacity reached (32 items).");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached (32 items)
     }
+```
+
+创建分支结束后，其余动作必须指向一个仍占用的服务 id。复制、移动把 name 解释为目标目录，保留源文件名；目录复制被拒绝，普通复制另占槽并取得新 id，移动只改原槽路径而保留 id。保存当前 main.lua 会越过它们，进入后面的 UI_SAVE。继续追加这些分支。
+
+<!-- append: frontend/backends/reference.c -->
+```c
     if (id < 1 || id > UI_FILES || !entries[id - 1].used)  // 拒绝1到32之外或已删除的服务id，检查完成前不访问id-1槽
         return error(out, cap, "The item no longer exists. Refresh the directory.");  // 拒绝本次服务修改并向调用者报告：The item no longer exists. Refresh the directory
     struct reference_file *f = &entries[id - 1];  // id已验证，减1找到对应服务槽
@@ -270,6 +286,12 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
             }
         return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
     }
+```
+
+现在接到本轮 Save 真正经过的分支。id 已通过检查，普通文档才接受 data，目录不能当正文覆盖；文本复制完成后，bytes 依据服务实际存下的内容重新计算，再返回 true。随后删除与重命名也先验证再改记录：非空目录拒绝删除，目录重命名尚不支持，普通文件的新名称不覆盖其他已有目标。继续追加到 action 结束。
+
+<!-- append: frontend/backends/reference.c -->
+```c
     if (act == UI_SAVE) {  // 保存请求只修改这个服务记录的文字与长度
         if (f->entry.directory)  // 目录没有普通文档内容，此操作需要拒绝
             return error(out, cap, "Cannot write a directory as a document.");  // 拒绝本次服务修改并向调用者报告：Cannot write a directory as a document
@@ -315,6 +337,12 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
     }
     return error(out, cap, "Unsupported workspace operation.");  // 拒绝本次服务修改并向调用者报告：Unsupported workspace operation
 }
+```
+
+动作处理已有定义，最后追加本章完整初始化。它仍重置参考文件和示例 boot，再把当前 action 的函数地址放进 backend。下面的 main.lua、CSV 和 C 文件字符串是服务保存的数据，不作为本次主机程序执行。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服务并填入回调表
     airi_memset(entries, 0, sizeof(entries));  // 把服务拥有的32个槽清空，再填本会话初始参考文件
     add(0, "/home/airi/projects/telemetry", "main.lua", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
@@ -392,7 +420,7 @@ void ui_system_draw(struct ui_desktop *, struct ui_rect);    // 按当前页显�
 #endif  // 结束当前应用接口的重复包含保护
 ```
 
-**完整写入 `frontend/apps/common.c`：**
+common.c 继续提供原有文字、字段、工具栏、状态栏与图标；此次新增 ui_app_dialog，保存反馈所需的独立文案。下面按本检查点完整内容更新，先写已有文字和匹配函数，再接对话框状态。
 
 <a id="code-frontend-apps-common-c-1"></a>
 
@@ -425,9 +453,15 @@ bool ui_app_match(const char *s, const char *q) {  // 按字节判断字符串s�
     return false;  // 字符串s的所有起点都没有匹配子串q，返回false
 }
 
+```
+
+追加 ui_app_dialog 时只复制状态，不写像素。kind 决定下一帧画哪一种框，target 固定确认动作的身份；title、body、value 分别复制进 64、256、128 字节数组。field_all=true 表示名称初值被整体选中。调用返回后，原来的临时 error 即使失效，桌面副本仍可继续使用。
+
+<!-- append: frontend/apps/common.c -->
+```c
 void ui_app_dialog(struct ui_desktop *s, int kind, int target, const char *title, const char *body,  // 把种类、目标身份和文案保存到桌面对话框状态
                    const char *value) {  // value提供确认输入的初值，按字段容量复制
-    s->dialog = kind;  // 保存对话框种类，让桌面在普通窗口之后绘制；事件优先级在后续输入阶段实现
+    s->dialog = kind;  // 保存对话框种类，在普通窗口之后绘制；输入分派优先检查此状态
     s->dialog_target = target;  // 保存本次确认将使用的文件id或任务pid
     s->field_all = true;  // 输入字段内容设为整体选中，下一次键入可以替换
     airi_snprintf(s->dialog_title, 64, "%s", title);   // 复制此次对话框标题到桌面独立64字节数组，不借用调用者临时指针
@@ -435,6 +469,12 @@ void ui_app_dialog(struct ui_desktop *s, int kind, int target, const char *title
     airi_snprintf(s->dialog_input, 128, "%s", value);  // 复制名称框初值到128字节独立数组，之后键入只改此数组
 }
 
+```
+
+继续追加既有服务提示、工具栏、状态栏和图标。它们仍只按当前状态画外观；新的对话框文案已由 desktop 保存，接下来在整帧结尾消费。
+
+<!-- append: frontend/apps/common.c -->
+```c
 void ui_app_unavailable(struct ui_desktop *s, struct ui_rect r, const char *service) {  // 按服务状态绘制加载、空或不可用提示
     const char *title = s->service_state == UI_LOADING ? "Loading data"  // 按当前服务状态选择不可用提示标题，先处理正在加载
                         : s->service_state == UI_ERROR ? "Unable to load data"  // 加载失败选择明确错误标题，正常正文不会借此假装已经取得数据
@@ -514,124 +554,47 @@ void u_icon(int x, int y, int id, uint32_t c) {  // 按应用编号绘制20像�
 
 ```
 
-错误已经复制进桌面，还需要让下一帧显示出来。窗口绘完后检查 dialog，在整屏范围覆盖提示框；普通窗口仍保留原状态，关闭提示后可以继续编辑。
+提示状态有了保存位置，还需要让下一帧显示出来。窗口绘完后检查 dialog，在整屏范围覆盖提示框；普通窗口仍保留原状态，关闭提示后可以继续编辑。
 
-**完整写入 `frontend/core/paint.c`：**
+paint.c 的窗口遍历、标题和应用内容沿用 G16。依次更新下面三处：函数开头的说明、顶栏图标这一行，以及文件末尾从 tx 增量到函数闭合的窗口。新增的提示与对话框绘制接在底栏之后。顶栏资源图标本章仍只画外观，资源栏展开状态在 G18 才加入。每处旧块用于唯一定位，只把新块写回对应位置。
 
 <a id="code-frontend-core-paint-c-1"></a>
 
-<!-- write: frontend/core/paint.c -->
+<!-- replace: frontend/core/paint.c -->
+<!-- before -->
 ```c
-#include "internal.h"  // 引入当前目录内部共享接口和基础函数
-static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
-                               "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
+void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按当前窗口次序绘制整帧
+    if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
+        return;  // 画布验证未通过，本帧不写像素
+```
+<!-- after -->
+```c
 void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按窗口层次画整帧，并将对话框留在最后
     if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
-        return;  // 当前按窗口层次画整帧，并将对话框留在最后在本分支结束，后续语句不执行
-    s->width = (int)f->width;    // 当前帧画布宽度按像素保存，绘图已检查帧缓冲能用且宽度可转int
-    s->height = (int)f->height;  // 当前帧画布高度按像素保存，窗口收窄和坐标布局使用这个尺寸
-    u_begin(f);  // 借用本次画布描述，建立颜色布局与整屏裁剪
-    u_theme(s->theme);  // 按会话模式选整套调色板，颜色角色与业务状态分离
-    u_rect(0, 0, s->width, s->height, U_BG);  // 用画布背景色写矩形，起点(0,0)，尺寸s->width×s->height像素
-    u_text(86, s->height - 117, "AiriOS", U_TITLE, U_MUTED);  // 空桌面仅保留轻量产品标识
-    u_rect(0, 0, s->width, UI_TOP, U_PANEL);  // 系统顶栏先铺满36像素高度，身份片随后覆盖左端
-    u_plate((struct ui_rect){0, 0, 140, UI_TOP}, U_CHROME);  // 系统入口使用唯一品牌身份片
-    u_rect(0, 35, s->width, 1, U_EDGE);  // 用分隔线色写矩形，起点(0,35)，尺寸s->width×1像素
-    u_brand(16, 7);  // 系统入口的原创品牌符号
-    u_label(52, 8, "AIRI", U_INK);  // 在整屏(52,8)写系统品牌文字，与左侧A形图标共同构成身份区
-    u_label(156, 9, "WORKSPACE", U_MUTED);  // 在整屏(156,9)写WORKSPACE，位于140像素身份片右侧
-    u_text(288, 9, s->active < 0 ? "Desktop" : titles[s->active], U_MEDIUM, U_TEXT);  // 在整屏(288,9)写当前活动应用名；无活动窗口时显示Desktop
-    u_text(s->width - 263, 10,  // 顶栏右侧说明当前画面来自主机参考还是内核控制台
-           s->backend.mode == UI_REFERENCE ? "Local session" : "Local console",  // 顶栏用实际后端模式标明主机参考工作区或guest内核控制台
-           U_SMALL, U_MUTED);  // 系统状态保持次要前景
-    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);      // 顶栏右侧画资源入口图标，是否展开由桌面monitor状态决定
-    u_rect(0, UI_TOP, UI_DOCK, s->height - 66, U_PANEL);  // 用工具栏底色写矩形，起点(0,36)，尺寸56×s->height - 66像素
-    u_rect(55, 36, 1, s->height - 66, U_EDGE);     // 用分隔线色写矩形，起点(55,36)，尺寸1×s->height - 66像素
-    for (unsigned i = 0; i < UI_APP_COUNT; ++i) {  // 逐个检查7个有效应用编号
-        int y = 58 + (int)i * 54;   // 侧栏第i个应用图标从第58行起每54像素排列
-        if (s->active == (int)i) {  // 当前应用是活动窗口时给侧栏对应项铺选中背景
-            u_round((struct ui_rect){7, y - 8, 42, 38}, 2, U_RAISED);  // 用选中背景色写矩形，起点(7,y - 8)，尺寸42×38像素
-            u_round((struct ui_rect){2, y, 3, 22}, 1, U_ACCENT);  // 活动应用旁写三像素宽、22像素高的强调色竖标，起点(2,y)
+        return;  // 画布验证未通过，本帧不写像素
+```
+
+<!-- replace: frontend/core/paint.c -->
+<!-- before -->
+```c
+    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);  // 顶栏右侧画资源入口图标，当前只绘制图标，资源栏状态将在18章加入
+```
+<!-- after -->
+```c
+    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);      // 顶栏右侧当前只画资源图标，资源栏状态在 G18 加入
+```
+
+前两处更新后，继续替换文件末尾。toast 非空便画短提示，dialog 非零则在所有窗口和底栏之后画居中框。对话框正文借用 desktop.dialog_text，局部 row 只装当前显示行：每加入字节就测 U_BODY 宽度，遇到 432 像素或 63 字节边界时优先退回最后空格；没有可用空格也至少消费一字节，避免停在原地。每行下移 22 像素，原说明不被截断修改。名称框再使用自己的局部裁剪，画完恢复整屏；按钮在这里仍只输出外观。
+
+<!-- replace: frontend/core/paint.c -->
+<!-- before -->
+```c
+            tx += 88;  // 任务栏下一应用标题右移88像素
         }
-        u_icon(18, y, (int)i, s->active == (int)i ? U_TEXT : U_MUTED);  // 按应用编号画左侧图标，活动项使用主要色
-        if (s->windows[i].open)  // 已打开应用即使最小化也保留侧栏打开标记
-            u_rect(25, y + 25, 6, 2, U_ACCENT);  // 用会话强调色写矩形，起点(25,y + 25)，尺寸6×2像素
-    }
-    int right = 0;  // 本阶段还没有资源侧栏，窗口可用区不需预留右侧宽度
-    unsigned first = 0;  // 默认从最底层窗口开始绘制，后面找可遮挡底层的最大化窗口
-    for (unsigned n = 0; n < s->order_count; ++n) {  // 按有效窗口层次遍历，数组后部不作窗口身份
-        struct ui_window *w = &s->windows[s->order[n]];  // 先由绘图次序取得应用编号，再借用对应窗口，不把层次n当应用id
-        if (w->open && !w->minimized && w->maximized)    // 只选已打开、可见且最大化的窗口作为底层跳过起点
-            first = n;  // 记录目前找到的最高最大化窗口层次，它下方窗口无需输出被覆盖像素
-    }
-    for (unsigned n = first; n < s->order_count; ++n) {  // 按有效窗口层次遍历，数组后部不作窗口身份
-        unsigned app = s->order[n];  // 当前层次n保存的是应用id，后续按该id取窗口和标题
-        struct ui_window *w = &s->windows[app];  // 借用当前应用的窗口状态，app已经通过范围检查
-        if (!w->open || w->minimized)  // 关闭或最小化窗口不画正文，但其其他会话状态仍保留
-            continue;  // 本项不参与当前结果，跳过本轮剩余操作进入下一项
-        if (w->maximized)  // 最大化窗口按当前画布扣系统栏和资源栏重新计算矩形
-            w->rect = (struct ui_rect){68, 48, s->width - 80 - right, s->height - 90};  // 最大化窗口从侧栏右边和顶栏下开始，扣右资源栏及上下固定栏得到可用尺寸
-        if (w->rect.w > s->width - 80 - right)  // 普通窗口宽度不能占到左侧系统栏和右侧资源栏
-            w->rect.w = s->width - 80 - right;  // 把过宽窗口收窄到侧栏与资源栏之间，避免正文侵入系统栏
-        if (w->rect.h > s->height - 88)  // 窗口高度超过上下保留区时缩短
-            w->rect.h = s->height - 88;  // 把过高窗口收窄到整屏高度扣上下栏，保留任务栏空间
-        if (w->rect.x + w->rect.w > s->width - right - 10)  // 窗口右边侵入资源栏或右边距时左移回可用区
-            w->rect.x = s->width - right - w->rect.w - 10;  // 右边越界时重新算左缘，使窗口右边落在资源栏左侧10像素处
-        if (w->rect.y + w->rect.h > s->height - 40)  // 窗口底边侵入任务栏时上移回可用区
-            w->rect.y = s->height - w->rect.h - 40;  // 底边越界时重新算顶缘，使窗口底边停在屏幕底40像素之上
-        if (w->rect.x < 68)  // 窗口左缘越过侧栏后的最小位置时向右收回
-            w->rect.x = 68;  // 左缘最小保留68像素，确保窗口不会盖住56像素侧栏
-        if (w->rect.y < 46)  // 窗口顶缘越过顶栏后的最小位置时向下收回
-            w->rect.y = 46;  // 顶缘最小46像素，确保标题栏位于系统顶栏之下
-        struct ui_rect r = w->rect;  // 复制已收窄的当前窗口矩形，后面从它计算边框、标题与body
-        u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
-        bool focused = s->active == (int)app;  // 标题和局部边界共同指出当前窗口
-        u_round((struct ui_rect){r.x + 3, r.y + 5, r.w, r.h}, UI_WINDOW_RADIUS + 1, U_SHADOW);  // 有限偏移阴影
-        u_round(r, UI_WINDOW_RADIUS, focused ? U_CONTROL : U_EDGE);  // 窗口外轮廓
-        u_round((struct ui_rect){r.x + 1, r.y + 1, r.w - 2, r.h - 2}, UI_WINDOW_RADIUS - 1, U_PANEL);  // 标题与框架表面
-        u_rect(r.x + 1, r.y + UI_TITLE_H + 1, r.w - 2, r.h - UI_TITLE_H - 6, U_SURFACE);  // 正文保留底部圆角
-        u_rect(r.x + 1, r.y + 1, r.w - 2, 1, focused ? U_ACCENT : U_CONTROL);  // 连续细轨统一窗口基线
-        static const char *heads[] = {"TERMINAL", "FILES", "EDITOR", "TASKS", "SYSTEM", "SETTINGS", "DATA VIEWER"};  // 窗口身份标签独立于文件名
-        int plate_width = 54 + u_label_width(heads[app]) + 12;  // 标签左缘距片左缘54像素，斜切右端再留12像素。
-        if (plate_width < 174)  // 短标签保留当前身份片的统一最小宽度。
-            plate_width = 174;  // 长标签才扩大片面，普通窗口外观保持相同度量。
-        int available = r.w - 116;    // 片从外框左8像素开始，右界留在系统按钮前108像素。
-        if (plate_width > available)  // 窄窗口的标题可用范围优先于理想字宽。
-            plate_width = available;  // 不把身份片铺进最小化、最大化和关闭按钮区。
-        u_plate((struct ui_rect){r.x + 8, r.y + 7, plate_width, UI_TITLE_H - 14}, U_CHROME);  // 用实际字体推进量承载完整应用身份。
-        u_icon(r.x + 18, r.y + 14, (int)app, U_INK);   // 应用图标处于独立身份栏
-        u_rect(r.x + 53, r.y + 12, 1, 24, U_CONTROL);  // 图标与标题使用一致的分隔尺度
-        u_clip((struct ui_rect){r.x + 62, r.y + 1, r.w - 170, UI_TITLE_H - 2});  // 长文件名不会覆盖系统按钮
-        u_label(r.x + 62, r.y + 14, heads[app], U_INK);  // 身份标签使用14像素Medium字形和额外字距，与普通正文区别
-        if (app == UI_EDITOR && r.w > 500) {  // 宽编辑器在标题后保留当前对象
-            u_text(r.x + 196, r.y + 14, "/", U_BODY, U_MUTED);  // 应用与文档层次分明
-            u_text(r.x + 220, r.y + 14, s->editor_name, U_MEDIUM, U_TEXT);  // 文件名保持正常大小写
-        }
-        if (app == UI_TERMINAL && r.w > 600)  // 连接身份位于标题里，避免占用一整行工具栏
-            u_text(r.x + 200, r.y + 15, s->backend.mode == UI_REFERENCE ? "/  Local console" : (s->backend.label ? s->backend.label : "Kernel console"), U_BODY, U_MUTED);  // 只报告实际接入类型
-        u_reset_clip();  // 窗口操作区独立于标题裁剪
-        u_line(r.x + r.w - 88, r.y + 28, r.x + r.w - 78, r.y + 28, U_MUTED);  // 最小化
-        u_frame((struct ui_rect){r.x + r.w - 60, r.y + 19, 10, 10}, U_MUTED);  // 最大化
-        u_line(r.x + r.w - 30, r.y + 19, r.x + r.w - 20, r.y + 29, U_MUTED);  // 关闭的第一条对角线
-        u_line(r.x + r.w - 20, r.y + 19, r.x + r.w - 30, r.y + 29, U_MUTED);  // 关闭的第二条对角线
-        struct ui_rect body = u_window_body(r);  // 左右边框各1像素、标题48像素及顶边1像素，body从外框顶下49像素开始
-        u_rect(body.x, body.y, body.w, body.h - 5, U_SURFACE);  // 内容底色明确分离标题
-        u_clip(body);  // 应用绘图仅写扣除窗口标题和边框的body，避免覆盖框外像素
-        ui_apps_draw(s, (enum ui_app)app, body);  // 按应用编号选择已接入的内容绘图函数，本次实参取自当前桌面状态
-        u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
-        u_line(r.x + r.w - 10, r.y + r.h - 4, r.x + r.w - 4, r.y + r.h - 10, U_EDGE);  // 用分隔线色连接像素端点(r.x + r.w - 10,r.y + r.h - 4)到(r.x + r.w - 4,r.y + r.h - 10)
-    }
-    u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
-    u_rect(0, s->height - UI_BOTTOM, s->width, 30, U_PANEL);  // 用工具栏底色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×30像素
-    u_rect(0, s->height - UI_BOTTOM, s->width, 1, U_EDGE);  // 用分隔线色写矩形，起点(0,s->height - UI_BOTTOM)，尺寸s->width×1像素
-    u_text(14, s->height - 23,  // 底栏明确写当前帧来自参考内存还是实际内核启动数据
-           s->backend.mode == UI_REFERENCE ? "Session storage"  // 底栏明确标明本进程内存参考工作区，和真实guest启动数据区分
-                                           : "AiriOS / x86-64",  // 底栏将当前真实启动数据来源写明
-           U_SMALL, U_MUTED);  // 底栏保持中性次文字
-    int tx = 330;  // 任务栏的首个已打开应用标题从整屏第330列开始
-    for (unsigned i = 0; i < UI_APP_COUNT; ++i)  // 逐个检查7个有效应用编号
-        if (s->windows[i].open) {  // 仅已打开的应用进入底栏标题列表
-            u_text(tx, s->height - 23, titles[i], U_SMALL, s->active == (int)i ? U_ACCENT : U_MUTED);  // 在整屏x=tx、整屏y=s->height - 23显示titles[i]
+}
+```
+<!-- after -->
+```c
             tx += 88;  // 任务栏下一应用标题右移88像素
         }
     if (s->toast[0]) {  // 短提示非空时在普通窗口之后覆盖绘制
@@ -704,102 +667,34 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
 
 <a id="save-transition"></a>
 
-保存时ui_command把当前目录、editor_id、名称和editor正文交给服务。服务先验证id属于普通文档，再更新自己的正文与bytes。只有回调返回true，前端才刷新快照并把editor复制到saved、清dirty；失败只报告错误，仍保留当前文字。pending_close表示“这次保存完成后关闭”，成功和失败出口都消耗它，避免后续普通保存沿用旧关闭请求。
+服务返回 true 以后，ui_command 才能把前端也推进到新的保存点。本轮它以当前 telemetry 目录、UI_SAVE、editor_id=1、main.lua、editor 及局部 error[160] 调用 action。服务接受十字节正文后，ui_refresh 取得更新后的元信息，saved 再复制当前 editor，dirty 清为 false；undo 仍保留原 main.lua，保存不会顺带清空撤销槽。
+
+失败则不刷新保存点，不清空当前 editor，而是把 error 复制到桌面对话框。pending_close 另表示“这次保存完成后关闭”：保存成功才关闭 Editor，失败则继续保留窗口；两个出口都消耗这项关闭请求，避免下一次普通保存意外关闭文档。
 
 `ui_command(s,action,id,name,data)` 接收当前桌面、动作、目标身份、名称参数与正文。保存使用当前文件名，创建使用新名称，复制和移动则把 name 用作目标目录；新建记录的 id 传 0，未绑定文档的保存传 -1。回调只在此次调用内借用这些字符串。
 
 保存反馈同时区分当前参考服务的会话内存与真实后端：参考成功显示Saved to session storage。失败标题为Save failed，正文追加Your edits are still open；同一工作数组继续保存输入。
 
-**完整写入 `frontend/core/state.c`：**
+state.c 只增加所需 include 和动作入口，appearance、refresh、init、open 均保留。先用新块替换原来的文件首行，再追加动作函数。
 
 <a id="code-frontend-core-state-c-1"></a>
 
-<!-- write: frontend/core/state.c -->
+<!-- replace: frontend/core/state.c -->
+<!-- before -->
 ```c
-#include "internal.h"  // 引入当前目录内部共享接口和基础函数
+#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
+```
+<!-- after -->
+```c
+#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
 #include "ui.h"  // 引入前端服务合同与桌面状态
 #include <airi/base.h>  // 引入自有字节操作和有界格式化函数
-static bool appearance(struct airi_console *console, const char *command, void *context) {  // 本扩展只消费完整的主题命令。
-    struct ui_desktop *desktop = context;  // 原样取回 ui_init 绑定的桌面，数据由调用平台拥有。
-    if (airi_strlen(command) == 9 && !airi_memcmp(command, "theme day", 9))  // 比较长度后再比较字节，不接受附带尾部参数。
-        desktop->theme = UI_DAY;  // 只修改呈现状态，文档和窗口保留。
-    else if (airi_strlen(command) == 11 && !airi_memcmp(command, "theme night", 11))  // 夜间命令具有自己的完整长度。
-        desktop->theme = UI_NIGHT;  // 将下一帧使用的调色板切回夜间。
-    else if (airi_strlen(command) != 5 || airi_memcmp(command, "theme", 5))  // 无参数 theme 是查询，其余文字不归本扩展。
-        return false;  // 让文本解释器生成原有未知命令错误。
-    airi_console_print(console, "Appearance: %s / theme day | theme night", desktop->theme ? "Day" : "Night");  // 查询和设置都报告实际呈现状态。
-    return true;  // 表示本条命令已经同步处理。
-}
-void ui_refresh(struct ui_desktop *s) {  // 重新查询当前目录元信息，并重新建立文件快照的有效前缀
-    s->file_count = 0;  // 刷新前清有效文件条数，失败时不显示旧成功快照
-    if (s->service_state != UI_NORMAL)  // 服务未正常时停止复制或显示成功快照
-        return;  // 服务状态不是NORMAL，保持有效文件计数为0，不调用文件查询回调
-    if (s->backend.files)  // 文件查询回调存在时才调用
-        s->file_count = s->backend.files(s->backend.context, s->directory, s->files, UI_FILES);  // 查询当前目录并复制最多32项元信息到桌面数组，返回值标出此次有效前缀
-    if (s->file_count > UI_FILES)  // 服务条数超过本地32槽容量时收窄
-        s->file_count = UI_FILES;  // 把服务返回条数限制到本地文件快照容量
-    if (s->selection_file >= s->file_count)  // 旧选择不在新文件快照有效范围时归零
-        s->selection_file = 0;  // 旧选中下标失效时回到新快照第一项
-}
+```
 
-void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) {  // 清桌面状态，绑定服务和console并打开默认应用
-    airi_memset(s, 0, sizeof(*s));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
-    s->backend = b;  // 把回调表和上下文复制进桌面，服务数据仍归服务拥有
-    c->extension = appearance;  // 安装同步命令扩展；console 不包含主题或窗口类型。
-    c->extension_context = s;   // 桌面和 console 都由平台持有，须覆盖后续输入调用。
-    s->console = c;     // 桌面借用同一console状态，Terminal不另复制日志
-    s->active = -1;     // 没有活动窗口，-1哨兵不能拿去索引应用数组
-    s->editor_id = -1;  // 编辑器尚未绑定任何服务文件身份
-    s->file_clipboard = -1;  // 文件剪贴板没有服务id，不能发起复制或移动
-    s->width = 1280;  // 绘图前暂用1280像素默认画布宽度
-    s->height = 800;  // 绘图前暂用800像素默认画布高度
-    copy(s->directory, sizeof(s->directory), "/home/airi/projects/telemetry");  // 把文字"/home/airi/projects/telemetry"复制到当前目录路径，sizeof(s->directory)是包含NUL的数组容量
-    copy(s->editor_name, sizeof(s->editor_name), "Untitled");  // 把文字"Untitled"复制到当前文档名，sizeof(s->editor_name)是包含NUL的数组容量
-    ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
-    ui_open(s, b.mode == UI_REFERENCE ? UI_EDITOR : UI_TERMINAL);  // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
-    if (b.mode == UI_REFERENCE && s->file_count && b.read) {  // 参考服务有文件且提供read时，才尝试读取一份初始普通文档
-        for (unsigned i = 0; i < s->file_count; ++i)  // 只遍历本次目录快照有效前缀，未用槽不参与
-            if (!s->files[i].directory) {  // 跳过目录元信息，首个普通文件才可能作为Editor初始文档
-                if (b.read(b.context, s->files[i].id, s->editor, sizeof(s->editor))) {  // 按服务id完整读入成功后才绑定编辑身份、名称和保存副本
-                    s->editor_id = s->files[i].id;  // 读取或保存成功后绑定该快照项的服务id，后续保存用此身份而不用显示下标
-                    copy(s->editor_name, sizeof(s->editor_name), s->files[i].name);  // 把s->files[i].name复制到当前文档名，sizeof(s->editor_name)是包含NUL的数组容量
-                    copy(s->saved, sizeof(s->saved), s->editor);  // 把服务已接受的文字记录为独立保存点
-                }
-                break;  // 结束当前最近一层循环或应用分派，不执行其剩余候选
-            }
-    }
-}
+现有初始化仍按 G16 读取 main.lua，并建立 editor 与 saved 两份副本。下面在 state.c 末尾追加 ui_command，把服务结果接回这份桌面。
 
-void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个应用，更新窗口次序和活动编号
-    if (app >= UI_APP_COUNT)  // 应用编号超出窗口数组范围时拒绝打开
-        return;  // 当前打开或置顶一个应用，更新窗口次序和活动编号在本分支结束，后续语句不执行
-    struct ui_window *w = &s->windows[app];  // 借用当前应用的窗口状态，app已经通过范围检查
-    if (!w->open) {  // 只在首次打开或关闭后重新设置窗口初始几何
-        int offset = (int)s->order_count * 24;  // 每个已排入次序的窗口错开24像素，新窗口避免完全重合
-        w->rect = (struct ui_rect){92 + offset, 72 + offset, s->width - 152, s->height - 144};  // 新窗口从屏幕左上留92和72像素并按已有数量错开，宽高先扣固定边距
-        if (w->rect.w < 720)  // 初始窗口宽度至少720像素，画布尺寸后续再约束
-            w->rect.w = 720;  // 初次打开宽度至少720像素；这里建立初始布局，ui_draw再按实际画布收窄
-        if (w->rect.h < 480)  // 初始窗口高度至少480像素，画布尺寸后续再约束
-            w->rect.h = 480;  // 初次打开高度至少480像素；当前画布不足时ui_draw再收窄可见矩形
-        w->restore = w->rect;  // 保留当前普通窗口几何，退出最大化时可恢复
-        w->open = true;  // 该应用窗口现在进入已打开状态
-    }
-    w->minimized = false;  // 重新打开或激活窗口时取消最小化
-    s->active = (int)app;  // 令本次打开的应用成为按键与窗口操作接收者
-    unsigned n = 0;  // 去重后的窗口次序从空前缀开始，n计保留的应用编号条数
-    for (unsigned i = 0; i < s->order_count; ++i)  // 按有效窗口层次遍历，数组后部不作窗口身份
-        if (s->order[i] != (unsigned)app)  // 重排时保留其他应用，当前应用将另放到末尾
-            s->order[n++] = s->order[i];  // 保留其他应用次序并压紧前缀，当前应用稍后追加
-    s->order[n++] = (unsigned)app;  // 把当前应用放到绘图顺序末尾，使它成为顶层
-    s->order_count = n;  // 记录去重后绘图顺序的有效长度
-    s->focus = UI_FOCUS_NONE;  // 当前字段结束接收，后续按键回到活动应用
-}
-
-void ui_service_state(struct ui_desktop *s, enum ui_state state) {  // 切换服务显示状态并刷新相应快照
-    s->service_state = state;  // 用调用者指定状态切换服务反馈，随后刷新决定是否继续查询快照
-    ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
-}
-
+<!-- append: frontend/core/state.c -->
+```c
 void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char *name,  // 调用服务操作，成功后刷新，失败形成错误对话框
                 const char *data) {  // data借用本次请求正文，回调返回前按合同复制或读取
     char error[160] = "This operation is unavailable.";  // 先给160字节错误缓冲设置未连接原因，服务失败时可覆盖
@@ -842,7 +737,7 @@ void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char 
 
 ## 读入文档后再切换当前文件
 
-打开目录只更新 directory 并刷新。打开普通文档前先检查 dirty，未保存修改会阻止切换；读取成功后才更新 id、名称、saved、光标与撤销状态。read 的成功结果必须是缓冲容量内完整的 NUL 字符串，当前 reference 回调在失败时尚未复制内容。
+按键还可从 Files 打开别的对象。ui_open_document 接收原快照下标，先检查有效范围；若是目录，只更新 directory 并刷新，Editor 中的文档继续保留。普通文件才检查 dirty：有未保存修改就提示并停止，避免另一份正文覆盖工作数组。完整 read 成功以后，才一起切换 id、名称与 saved，重置光标、滚动、选区和撤销状态，再打开 Editor。当前 reference 在 read 失败前不复制内容，因此失败也保留原文。
 
 **完整写入 `frontend/apps/documents.c`：**
 
@@ -854,23 +749,23 @@ void ui_command(struct ui_desktop *s, enum ui_action action, int id, const char 
 
 void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下标打开目录或读取文档，成功才切换编辑身份
     if (index >= s->file_count)  // 快照下标必须落在这次查询的有效前缀
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 快照下标越界，不读取条目或改变当前文档
     struct ui_file *f = &s->files[index];  // 借用快照第index项，后面用其服务id而非下标读取
     if (f->directory) {  // 目录项改变当前目录，不当成文字文档读取
         airi_snprintf(s->directory, 128, "%s", f->path);  // 用目录记录的完整路径替换当前查询目录
         ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 已切换查询目录并刷新快照，Editor 文档保持原样
     }
     if (s->dirty) {  // 当前文档未保存时先阻止另一个文档覆盖编辑数组
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unsaved changes",  // 保存文字"Unsaved changes"的种类、目标和说明，最后绘图且优先接收后续事件
                       "Save or discard the current document before opening another file.", "");  // 说明未保存正文阻止新文档覆盖，最后空串表示此错误框没有名称初值
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 当前文档未保存，显示提示并保留工作数组
     }
     if (!s->backend.read ||  // 先检查读取函数地址是否存在，短路或保证缺回调时不调用空函数指针
         !s->backend.read(s->backend.context, f->id, s->editor, sizeof(s->editor))) {  // 按服务id读取文档，缺回调或失败时保留原文并显示原因
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unable to open file",  // 保存文字"Unable to open file"的种类、目标和说明，最后绘图且优先接收后续事件
                       "The file service did not return the document.", "");  // 说明读取服务失败，错误框无需名称字段，原编辑正文保持完整
-        return;  // 当前按快照下标打开目录或读取文档，成功才切换编辑身份在本分支结束，后续语句不执行
+        return;  // 读取回调缺失或读取失败，保留原文与编辑身份
     }
     s->editor_id = f->id;  // 读取成功后才让编辑器绑定新文件的服务身份
     airi_snprintf(s->editor_name, 64, "%s", f->name);  // 完整读取成功后复制文件名作为Editor身份说明，服务id另存于editor_id
@@ -885,7 +780,7 @@ void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下�
 }
 ```
 
-保存或删除需要确认时，ui_confirm 取得 dialog 种类并清显示状态，再按种类转成 ui_command。关闭时选择保存会设置 pending_close；已有 id 直接 Save，新文档则进入 Save As。
+错误框只需关闭，有名称或危险动作的确认框则还要继续操作。ui_confirm 先把当前 dialog 种类保存到局部 kind，再清掉显示状态，随后按 kind 生成 ui_command。关闭前选择保存会设置 pending_close；已有 id 直接 Save，新文档先进入 Save As 等待名称。这里建立可由输入调用的确认入口，标题栏鼠标操作尚未接入。
 
 保存路径只有在服务返回 true 后才能更新 saved 并清 dirty。撤销等编辑动作则仍按 editor 与 saved 是否相同计算 dirty。取消操作会清 pending_close，避免将关闭请求留给之后普通保存。
 
@@ -929,7 +824,7 @@ void ui_confirm(struct ui_desktop *s) {  // 把当前对话框确认转换成明
 
 一次粘贴可能替换选区、移动尾部并更新撤销副本。任何步骤开始后才发现容量不足，都会留下半次修改。因此 insert 先计算全部输入是否合法、最终长度是否能容纳 NUL；通过后才改变数组。这里“整次修改或保留原值”的范围是一份内存文档，没有涉及磁盘事务。
 
-8192 是数组容量，最大内容长度为 8191。全选长文再粘贴短文时，应先扣除被替换的长度再判断，不能因为当前数组已满就拒绝所有输入。
+本轮全选 main.lua 后，selected 等于原长度 len，拟插入 n=10；最终长度按 len-selected+n 得到 10，而不是把十字节叠在原文长度上。8192 是数组容量，最大内容长度为 8191，末尾必须另留 NUL。即使原文已满，完整选区被短文替换仍可以通过检查。
 
 insert 先检查输入所有字节。任一字节 >=128 就拒绝整次插入，当前文字、选区和 undo 保持原值。然后计算原长度 len、输入长度 n 和选区长度，结果达到 8192 则仅给提示。
 
@@ -968,6 +863,12 @@ static void insert(struct ui_desktop *s, const char *text) {  // 整份检查输
         copy(s->toast, sizeof(s->toast), "Document limit: 8191 bytes.");  // 把文字"Document limit: 8191 bytes."复制到本次操作短提示，sizeof(s->toast)是包含NUL的数组容量
         return;  // 提示写好后立即退出，当前文字、选区和撤销副本尚未修改
     }
+```
+
+到这里，输入字节与最终容量都已通过检查，当前文字、选区和 undo 仍未改变。下面才记录旧文、删除选区并腾出新字节的位置。本轮全选会把旧正文删到只剩 NUL，写入十字节后 cursor=10；最后 changed 通过与 saved 比较得出 dirty，而不是见到一次按键就固定设为 true。继续追加 insert 的提交部分。
+
+<!-- append: frontend/core/editing.c -->
+```c
     copy(s->undo, sizeof(s->undo), s->editor);  // 在修改前保存完整旧文档，供一次撤销切回
     s->undo_valid = true;  // 旧文档已存好，允许下一次Undo使用它
     delete_selection(s);   // 先删除当前选区并把光标放到左端，再执行插入或剪切
@@ -990,7 +891,7 @@ static void insert(struct ui_desktop *s, const char *text) {  // 整份检查输
 static void field_key(struct ui_desktop *s, char *field, size_t cap, int key) {  // 让一个事件只修改当前短字段和字段级选择
     if (key == UI_SELECT_ALL) {  // 当前接收者内全选：短字段标记整字段，文档分支则设置两端字节间隙
         s->field_all = true;  // 输入字段内容设为整体选中，下一次键入可以替换
-        return;  // 当前让一个事件只修改当前短字段和字段级选择在本分支结束，后续语句不执行
+        return;  // 已标记整字段选中，此键不再作为普通字符插入
     }
     if (key == UI_COPY || key == UI_CUT) {  // 复制保留当前文字，剪切还会删除；具体范围由此接收者的选中状态决定
         if (s->field_all) {  // 只有短字段整体选中时才复制其正文，文档选区不参与此字段操作
@@ -998,7 +899,7 @@ static void field_key(struct ui_desktop *s, char *field, size_t cap, int key) { 
             if (key == UI_CUT)  // 短字段剪切复制完成后清空字段，普通复制保留输入
                 field[0] = 0;  // 清空当前短输入字段，文档编辑数组不受影响
         }
-        return;  // 当前让一个事件只修改当前短字段和字段级选择在本分支结束，后续语句不执行
+        return;  // 复制或剪切分支已结束；未全选时也不把快捷键插入字段
     }
     if (s->field_all && (key == 8 || key == UI_PASTE || (key >= 32 && key <= 126))) {  // 整字段选中后首次退格、粘贴或字符输入替换整份字段，其余快捷键不清空
         field[0] = 0;  // 清空当前短输入字段，文档编辑数组不受影响
@@ -1107,6 +1008,12 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
             field_key(s, s->dialog_input, sizeof(s->dialog_input), key);  // 当前事件仅修改对话框输入字段，Editor不再次消费它
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }
+```
+
+弹框未接收这个事件时，再检查短字段。receiver 在回车清除 focus 之前记住本次来自 FILTER 还是 FIND；只有 FIND 才搜索文档、设置选区。Editor 的查找栏可以仍然显示，Files 筛选回车却不能因此触发 Editor 搜索：find 保存可见状态，receiver 保存本次事件去向。继续追加字段处理。
+
+<!-- append: frontend/core/editing.c -->
+```c
     if (s->focus == UI_FOCUS_FILTER || s->focus == UI_FOCUS_FIND) {  // 焦点在短字段时，该字段独占文字事件，当前文档不再次插入同一个字符
         enum ui_focus receiver = s->focus;  // 保存本次实际接收者，回车清焦点后仍能区分筛选与查找。
         char *field = s->focus == UI_FOCUS_FILTER ? s->filter[s->active] : s->find_text;  // 筛选焦点选当前应用的独立数组，查找焦点选Editor查找数组，两者均为64字节
@@ -1132,6 +1039,12 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
         }
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }
+```
+
+对话框与字段分支都已提前返回，下面才按 active 进入应用。Terminal 把输入交给同一个 console，粘贴逐字节过滤为可打印字符，换行不会自动提交。Files 则把复制、剪切记成文件 id；粘贴是向当前目录请求复制或移动，不使用文字 clipboard。接着追加这些应用分支。
+
+<!-- append: frontend/core/editing.c -->
+```c
     if (s->active == UI_TERMINAL) {  // Terminal独占当前应用事件，正文输入进入console命令数组
         if (key == UI_PASTE) {  // Terminal粘贴逐字节交给console，只接收可打印ASCII；粘贴换行不提交命令
             for (const char *p = s->clipboard; *p; ++p)  // 逐字节扫描Terminal文字剪贴板，下一条件排除不可打印字节与换行
@@ -1190,7 +1103,7 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
     }
 ```
 
-路由到 Editor 后再处理文档操作。新文档 Save 打开名称框，已有 id 直接调用服务；Run 交给 UI_EXECUTE，reference 返回未连接错误。全选设 `[0,len)`，复制将选区写剪贴板并补 NUL，剪切先保存 undo 再删除；粘贴复用 insert 的检查与移动次序。
+前面的接收者都未消费事件时，只有 active=UI_EDITOR 才继续处理正文。本轮 UI_SELECT_ALL 将 anchor=0、cursor=len；UI_PASTE 再把 clipboard 交给已实现的 insert。复制将选区写进独立 clipboard 并补 NUL，剪切还先留 undo 再删除。保存键不进入 insert：有 id 就提交服务，无 id 才打开名称框；Run 同样走 ui_command，由 reference 返回未连接错误。
 
 **追加到 `frontend/core/editing.c` 末尾：**
 
@@ -1249,7 +1162,7 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
     }
 ```
 
-当前只有一个 undo 副本。编辑前复制旧文档，撤销时交换两个副本，于是再按撤销会切回刚才内容。它没有保存多步历史；saved 仍单独记录提交点，切回 saved 对应的文字时 dirty 应自动变为 false。
+现在补 Undo。本轮第一次替换后，editor 是十字节新文、undo 是原 main.lua、saved 还是原文。第一次 Undo 用 temp 暂存 editor，交换后 editor 恢复原文、undo 留住新文，changed 比较 saved 得到 dirty=false。第二次 Undo 再交换回来，dirty=true。当前只有这一个可交换槽，没有多步历史；保存点始终由 saved 单独保存。
 
 交换后光标移到文尾，清选区，再比较 saved。左右移动一个 ASCII 字节间隙，Home/End 找本行边界，上下移动保留原列并限制在目标行长度内。
 
@@ -1356,9 +1269,7 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
 }
 ```
 
-短字段的接收者还必须跨过回车保留：focus随后清为NONE，局部receiver仍记录本次来自FILTER还是FIND。Editor的查找栏可以继续保持打开，Files筛选回车也不能因此触发Editor搜索；界面可见状态find和本次事件接收者不是同一个判断。
-
-输入实现已经完成。观察程序逐步打印同一个 desktop 的 cursor、dirty、dialog 和字节数。保存后再 backend.read 核对服务副本，请求运行后检查错误文本与内容保留，分别观察替换、保存和失败。
+输入入口已接好，观察程序现在按章首的顺序驱动同一个 desktop，打印 cursor、dirty、dialog 和字节数。它不先画界面，而是先核对替换、撤销、保存和执行失败的对象状态；后面再另设窗口尺寸检查光标像素，最后重置服务检查字段路由。先写初始化与全选替换。
 
 **新建 `labs/host/frontend/editor_transaction.c`：**
 
@@ -1389,6 +1300,12 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
     observe("replace");  // 记录全选替换后的10字节正文、文尾光标与dirty=true
     if (!desktop.dirty || strcmp(desktop.editor, "print(42)\n"))  // 要求替换正文完全相同且已标为未保存，任一条件失败即停止观察
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
+```
+
+此时服务与 saved 仍留原文，editor 已替换为十字节，undo 已存原文。继续追加两次 Undo：第一次要求 dirty=false 且 editor 不再等于新文，第二次要求十字节新文恢复且 dirty=true。这两步只交换前端副本，没有调用保存服务。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     ui_key(&desktop, UI_UNDO, false);  // 恢复全选替换之前的main.lua，它与读取时保存点相同
     observe("undo");  // 观察恢复原文后dirty=false，撤销不改服务正文
     if (desktop.dirty || !strcmp(desktop.editor, "print(42)\n"))  // 要求恢复原文且不再未保存，不能仍停留在替换文字
@@ -1397,18 +1314,36 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
     observe("restore replacement");    // 此时dirty再次为true，下一步保存这份替换结果
     if (!desktop.dirty || strcmp(desktop.editor, "print(42)\n"))  // 要求替换正文完全相同且已标为未保存，任一条件失败即停止观察
         return 1;  // 副本交换没有恢复替换结果时停止
+```
+
+现在 editor 又是十字节替换结果，saved 仍是原文。接着发 Save，要求 dirty 清零，并用独立 readback[64] 再按 editor_id 从服务完整读取。这里传 NULL 与初始化表中的 context 一致，当前静态参考服务不使用上下文；readback 的结果还须逐字等于新文，才能说明保存已改变服务记录。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     ui_key(&desktop, UI_SAVE_KEY, false);  // 请求将当前编辑文字提交给已绑定服务id，成功后才更新saved
     observe("save");    // 记录提交服务之后的dirty=false，下一步还要重新read核对服务正文
     char readback[64];  // 64字节局部数组承接服务重新读出的正文，和Editor副本互相独立
     if (desktop.dirty || !backend.read(NULL, desktop.editor_id, readback, sizeof(readback)) ||  // 要求保存点已更新且服务读取完整成功，短路或避免失败后使用未写入的readback
         strcmp(readback, "print(42)\n"))  // 保存成功之外还要求服务重新读出的文字完全等于十字节输入
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
+```
+
+保存完成后，editor、saved 和服务正文都已是十字节；undo 仍是原文。继续请求运行，它应得到 UI_DIALOG_ERROR 及 not connected 原因。这个失败不撤回保存，也不启动主机或 guest 程序。随后 Escape 只关闭错误反馈，下一次输入回到这份 Editor。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     ui_key(&desktop, UI_RUN_KEY, false);  // 以当前文档发起运行请求，观察参考服务真实未连接错误
     observe("request execution");  // 记录Run返回错误框后的同一文档状态，保存成功不等于执行可用
     printf("error: %s\n", desktop.dialog_text);  // 向主机终端报告本次观察的实际状态或输出位置
     if (desktop.dialog != UI_DIALOG_ERROR || !strstr(desktop.dialog_text, "not connected"))  // 要求反馈确实是执行未连接错误，不能把失败请求伪装成成功
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
     ui_key(&desktop, UI_ESCAPE, false);  // 关闭Run错误，下一次输入回到同一Editor
+```
+
+下面进入同一进程里的光标观察。先把普通外框固定成 800×400，正文按当前标题、起点和底部裁剪只容纳九条完整 24 像素行；十行文字将光标放在第十行末尾。粘贴触发 reveal_cursor 后再 ui_draw，程序逐个检查光标竖线的 19 个蓝色像素，而不只检查滚动数值。继续追加纵向观察。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     desktop.windows[UI_EDITOR].rect = (struct ui_rect){100, 80, 800, 400};  // 当前48px标题下只容纳九条完整24px文本行
     desktop.windows[UI_EDITOR].maximized = false;  // 固定普通外框，避免最大化替换这份几何
     ui_key(&desktop, UI_SELECT_ALL, false);  // 全选已有十字节，使以下输入替换同一文档
@@ -1428,6 +1363,12 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
         if (pixels[(cursor_y + i) * 1280 + cursor_x] != u_color(U_BLUE))  // 对照渲染器当前蓝色角色的实际RGB
             return 1;  // 任一像素被底部裁剪说明光标尚未完整显露
     puts("cursor: all 19 pixels visible after the tenth line");  // 报告跨过当前正文末行后的实际绘图结果
+```
+
+纵向观察完成后，把外框宽度改为 400，重新替换成 31 个 A。body 宽 398，扣去行号与边距的 72 后，可容纳 32 列；文尾间隙在第 31 列，仍应可见，所以 editor_column_scroll 须保持零。绘图后重新取得 body，再核对这一位置的完整光标，不能沿用上一幅窗口的几何。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     desktop.windows[UI_EDITOR].rect = (struct ui_rect){100, 80, 400, 400};  // 398像素body扣72像素行号与边距后，仍能显示32列
     ui_key(&desktop, UI_SELECT_ALL, false);  // 新观察继续替换同一文档，释放前一个选区
     strcpy(desktop.clipboard, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");  // 31个ASCII字符，文尾间隙仍在当前32列可见范围
@@ -1442,6 +1383,12 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
         if (pixels[(cursor_y + i) * 1280 + cursor_x] != u_color(U_BLUE))  // 状态值正确之外还要满足最终可见像素
             return 1;  // 行尾光标被右边界或其他绘图覆盖时停止观察
     puts("cursor: column 31 visible without horizontal scroll");  // 报告宽度改变后无需提前滚动的实际行为
+```
+
+最后重置服务和 desktop，恢复含 local 的原 main.lua。这是新一轮路由观察，不延续前面 31 个 A。Editor 保留打开的查找栏及一段选区后切到 Files，让 m 与回车只进入 Files 筛选。程序要求原来的 cursor=2、anchor=1、selection=true 全部保留，确认同一事件没有越过接收者边界。继续追加至 main 结束。
+
+<!-- append: labs/host/frontend/editor_transaction.c -->
+```c
     ui_fixture_backend(&backend);  // 恢复原main.lua，下面local查找确实能匹配。
     ui_init(&desktop, backend, &console);  // 为字段路由观察建立新的桌面，绑定现有服务。
     ui_open_document(&desktop, 0);  // 打开main.lua，作为查找可能匹配的文档。
@@ -1468,21 +1415,19 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
 
 输入路由会在对话框回车时调用 `ui_confirm`。把它的声明加入核心内部头文件，使 `editing.c` 使用的函数与 `commands.c` 的定义一致，再将这些文件一起链接到观察程序。
 
-**完整写入 `frontend/core/internal.h`：**
+在 core/internal.h 中定位 copy 的函数首行，用新块替换它，把 ui_confirm 声明放在 copy 之前。copy 的函数体与包含保护继续保留。
 
 <a id="code-frontend-core-internal-h-1"></a>
 
-<!-- write: frontend/core/internal.h -->
+<!-- replace: frontend/core/internal.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_CORE_INTERNAL_H  // 防止桌面内部接口重复包含
-#define AIRI_CORE_INTERNAL_H  // 标记桌面内部接口已经包含
-#include "ui.h"  // 引入前端服务合同与桌面状态
-#include <airi/base.h>  // 引入自有字节操作和有界格式化函数
+static inline void copy(char *out, size_t n, const char *text) {  // 按调用者数组容量复制NUL文字
+```
+<!-- after -->
+```c
 void ui_confirm(struct ui_desktop *s);  // 把当前对话框确认转换成明确服务动作
 static inline void copy(char *out, size_t n, const char *text) {  // 按调用者数组容量复制NUL文字
-    airi_snprintf(out, n, "%s", text);  // 按调用者容量复制NUL文字；n为0时不写内存，过长文字截到n-1字节
-}
-#endif  // 结束当前条件编译范围
 ```
 
 **在学习目录根目录运行：**

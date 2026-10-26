@@ -8,40 +8,17 @@
 
 `0xRRGGBB`的最大值是`0xffffff`。颜色用途从更大的`0x1000000`开始编号，因此`U_BG`表示“当前主题背景”而不是某个像素数值。`u_color`将用途映射为24位RGB；真正RGB仍可直接传入，例如`0x123456`在两个主题中都保持原值。字形混合后的RGB也在24位范围内，不会被再次误认成颜色用途。
 
-完整替换 `frontend/include/render.h`。新增的颜色角色供矩形和文字共用，状态位则告诉按钮怎样呈现当前选择、焦点与可用性。
+同一个按钮会把 U_PANEL 交给底面，把 U_TEXT 交给文字，再把状态位交给控件函数。前两者说明颜色的用途，状态位说明此刻怎样画按钮；它们不保存文件，也不触发操作。先在 render.h 末尾，用下面的新块替换原有 endif，把这些声明加入已有包含保护。旧块只用于定位。
 
 <a id="code-frontend-include-render-h-1"></a>
 
-<!-- write: frontend/include/render.h -->
+<!-- replace: frontend/include/render.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_RENDER_H   // 同一编译单元只展开一次绘图接口
-#define AIRI_RENDER_H   // 记住本头文件已经处理
-#include <airi/boot.h>  // 借用前文的帧缓冲描述、固定宽整数和bool
-struct ui_rect {  // 用像素数描述半开矩形，右下边界不属于矩形
-    int x;  // 左边所在的整屏列号，可为负以表示部分在屏外
-    int y;  // 顶边所在的整屏行号，向下增加
-    int w;  // 横向像素数，不是右边坐标
-    int h;  // 纵向像素数，不是底边坐标
-};
-void u_begin(const struct airi_framebuffer *);  // 借用已验证的描述与可写像素数组，直到本次绘图结束
-void u_clip(struct ui_rect);  // 请求矩形与整幅画布求交，替换当前裁剪区
-void u_reset_clip(void);      // 恢复整幅画布的可写范围
-void u_rect(int, int, int, int, uint32_t);  // 按左上、宽高及0xRRGGBB填充裁剪内像素
-void u_line(int, int, int, int, uint32_t);  // 用整数误差将含两端点的线段变成像素
-void u_frame(struct ui_rect, uint32_t);     // 用四条一像素宽矩形绘制边框
-bool u_inside(struct ui_rect, int, int);    // 判断整屏坐标是否在半开矩形内
-enum ui_font {  // 枚举下标与生成器faces的顺序一一对应
-    U_SMALL,  // Plex Sans 12px、字重400，用于次要信息
-    U_BODY,   // Plex Sans 14px、字重400，用于正文
-    U_LABEL,  // Plex Sans 16px、字重500，用于标签
-    U_TITLE,  // Plex Sans 22px、字重500，用于标题
-    U_MONO,   // Plex Mono 14px常规字重，用于终端
-    U_CODE,   // Plex Mono 16px常规字重，用于代码
-    U_MEDIUM,  // Plex Sans 14px、字重500，用于紧凑按钮
-    U_DISPLAY  // Plex Sans 32px、字重300，用于大读数
-};
-void u_text(int, int, const char *, enum ui_font, uint32_t);  // 用度量与覆盖率绘制可打印ASCII文字
-int u_text_width(const char *, enum ui_font);  // 累加单行字形advance供文字布局
+#endif  // 结束包含保护
+```
+<!-- after -->
+```c
 enum ui_color {  // 数值从24位RGB范围之外开始，名字表示用途而非固定像素
     U_BG = 0x1000000,  // 整幅画布背景，第一个角色的编号
     U_PANEL,    // 标题、工具栏和普通按钮的底面
@@ -88,11 +65,20 @@ void u_button(struct ui_rect, const char *, bool, bool);  // 将selected与disab
 
 渲染器的 `theme` 只保存绘图期间使用的调色板下标。观察程序直接调用 `u_theme` 选择两轮呈现；以后桌面会保存自己的选择，并在每帧开始时传给这个函数。传入非Day的值会退回Night，不用任意整数索引二维数组。非法颜色角色范围外的值原样返回；调用者应传已声明角色或合法24位RGB，范围检查保证错误值不会越界读调色板。
 
-完整替换`frontend/render/draw.c`，先写入下面部分。已有矩形、裁剪、线段实现保持相同用途，新增调色板，并让`native`在设备编码之前解析角色。
+现在让已有绘图路径消费这些角色。矩形经 native 编码成设备像素，字形和后面的圆角经 blend 混入背景；两条入口都须先把角色变成 RGB。先定位 draw.c 从第一条 include 到 native 函数开头的一小段，替换为调色板及解析入口。native 中原有的 standard 判断和通道编码继续接在新块之后。
 
 <a id="code-frontend-render-draw-c-1"></a>
 
-<!-- write: frontend/render/draw.c -->
+<!-- replace: frontend/render/draw.c -->
+<!-- before -->
+```c
+#include "render.h"  // 取得矩形、画布描述与本文件提供的接口
+static const struct airi_framebuffer *fb;  // 借用本次调用者持有的描述，不拥有像素内存
+static bool standard;  // 三个8位通道是否恰好组成0xRRGGBB
+static struct ui_rect clip;  // 所有图元共同使用的当前可写范围
+static uint32_t native(uint32_t rgb) {  // 把八位RGB数值转换为设备的实际通道布局
+```
+<!-- after -->
 ```c
 #include "render.h"  // 取得矩形、画布描述与本文件提供的接口
 #include "../assets/font-atlas.h"  // 借用主机生成的八套字形度量和覆盖率
@@ -118,191 +104,32 @@ uint32_t u_color(uint32_t value) {  // 字形和图元共用同一套颜色解�
 }
 static uint32_t native(uint32_t rgb) {  // 把颜色角色或八位RGB转换成设备布局
     rgb = u_color(rgb);  // 先解析角色，之后的位域计算只处理真实RGB
-    if (standard)  // 常见布局不需要逐通道缩放和移位
-        return rgb;  // 直接写入已有0xRRGGBB数值
-    const unsigned shifts[] = {fb->red_shift, fb->green_shift, fb->blue_shift};  // 通道在设备像素中的最低位
-    const unsigned sizes[] = {fb->red_size, fb->green_size, fb->blue_size};  // 同下标保存该通道的1至8位宽度
-    uint32_t result = 0;  // 三个不重叠的通道从零组合
-    for (unsigned k = 0; k < 3; ++k) {  // 按红、绿、蓝顺序逐个转换
-        unsigned channel = (rgb >> ((2 - k) * 8)) & 255u;  // 右移16、8、0位取得当前八位颜色
-        unsigned maximum = (1u << sizes[k]) - 1;     // 例如5位通道最大值为31
-        unsigned scaled = channel * maximum / 255u;  // 将0至255映射为设备通道范围，整数除法向下取整
-        result |= scaled << shifts[k];  // 移到设备位域后按位或加入结果
-    }
-    return result;  // 返回可按小端字节次序写入的设备像素值
-}
-void u_begin(const struct airi_framebuffer *f) {  // 调用者必须保证描述及整幅像素内存有效
-    fb = f;  // 保存借用，之后的图元通过它定位像素
-    standard = f->red_size == 8 && f->green_size == 8 && f->blue_size == 8 &&  // 先确认三色都占八位
-               f->red_shift == 16 && f->green_shift == 8 && f->blue_shift == 0;  // 再确认各通道恰好位于RGB数值的位置
-    u_reset_clip();  // 新画布从整屏范围开始，不继承此前裁剪
-}
-void u_reset_clip(void) {  // 恢复当前画布的整屏半开范围
-    clip = (struct ui_rect){0, 0, (int)fb->width, (int)fb->height};  // 复合字面量按x、y、w、h构造矩形
-}
-void u_clip(struct ui_rect r) {  // 将请求限制到当前画布，不与上一次裁剪叠加
-    int64_t right = (int64_t)r.x + r.w;   // 先提升为64位再相加，避免两个int的边界和溢出
-    int64_t bottom = (int64_t)r.y + r.h;  // 保存请求底边，负起点仍能保留原来的终点
-    int left = r.x < 0 ? 0 : r.x;    // 左边至少是画布第0列
-    int top = r.y < 0 ? 0 : r.y;     // 顶边至少是画布第0行
-    if (right > (int64_t)fb->width)  // 超出整屏右边时收窄终点
-        right = (int64_t)fb->width;  // width是最后一列之后的半开边界
-    if (bottom > (int64_t)fb->height)  // 超出整屏底边时收窄终点
-        bottom = (int64_t)fb->height;  // height是最后一行之后的半开边界
-    if (r.w <= 0 || r.h <= 0 || right <= left || bottom <= top) {  // 空请求或完全在屏外的请求没有可写交集
-        clip = (struct ui_rect){0, 0, 0, 0};  // 保存空范围，随后图元直接返回
-        return;  // 不把负尺寸转换成巨大的无符号范围
-    }
-    clip = (struct ui_rect){left, top, (int)(right - left), (int)(bottom - top)};  // 交集在已验证的屏幕尺寸内，可转回int
-}
-bool u_inside(struct ui_rect r, int x, int y) {  // 绘图与后续命中测试共用边界规则
-    return r.w > 0 && r.h > 0 && x >= r.x && y >= r.y &&  // 左顶包含，空或负尺寸永不命中
-           (int64_t)x < (int64_t)r.x + r.w && (int64_t)y < (int64_t)r.y + r.h;  // 右下排除，加法先提升以免int回绕
-}
-void u_rect(int x, int y, int w, int h, uint32_t rgb) {  // 写绘制矩形与当前裁剪区的交集
-    if (w <= 0 || h <= 0)  // 非正尺寸没有任何像素
-        return;  // 在计算地址前结束空绘制
-    int a = x > clip.x ? x : clip.x;  // 交集左边取两者较大值
-    int b = y > clip.y ? y : clip.y;  // 交集顶边取两者较大值
-    int64_t right = (int64_t)x + w;   // 绘制右边在64位中计算
-    int64_t bottom = (int64_t)y + h;  // 绘制底边在64位中计算
-    int64_t clip_right = (int64_t)clip.x + clip.w;   // 当前裁剪的半开右边
-    int64_t clip_bottom = (int64_t)clip.y + clip.h;  // 当前裁剪的半开底边
-    if (right > clip_right)  // 写入不能越过裁剪右边
-        right = clip_right;  // 交集右边取较小终点
-    if (bottom > clip_bottom)  // 写入不能越过裁剪底边
-        bottom = clip_bottom;  // 交集底边取较小终点
-    if (right <= a || bottom <= b)  // 求交后没有行或列需要写入
-        return;  // 不形成任何像素地址
-    int c = (int)right;   // 有效交集受画布限制，转换为循环半开列终点
-    int d = (int)bottom;  // 同样取得半开行终点
-    uint32_t color = native(rgb);  // 将输入RGB编码为当前设备像素值
-    unsigned bytes = fb->bpp / 8;  // 24位像素用3字节，32位用4字节
-    for (int row = b; row < d; ++row) {  // 从交集顶行逐行写到d之前
-        volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)fb->virtual_address +  // 将数值地址还原成可读写的像素字节指针
-                              (uint64_t)row * fb->pitch + (uint64_t)a * bytes;  // 行距用字节计算，再加入首列的像素字节偏移
-        if (bytes == 4 && !((uintptr_t)p & 3u)) {  // 四字节像素且地址低两位为零时采用对齐写入
-            volatile uint32_t *q = (volatile uint32_t *)p;  // 当前行首可按一个uint32_t一个像素访问
-            for (int col = a; col < c; ++col) {  // 写交集中的每一列，不碰行尾填充
-                *q = color;  // 将一个完整设备像素值写入当前位置
-                ++q;  // uint32_t指针推进一个元素，跨过四字节
-            }
-        } else {  // 三字节或非对齐像素使用字节访问
-            for (int col = a; col < c; ++col) {  // 仍只写同一交集列范围
-                for (unsigned k = 0; k < bytes; ++k)  // 每次写像素内的一个字节
-                    p[k] = (uint8_t)(color >> (k * 8));  // 先写低八位，按x86-64的小端次序保存数值
-                p += bytes;  // 跨过当前像素，到本行的下一列
-            }
-        }
-    }
-}
-void u_line(int x0, int y0, int x1, int y1, uint32_t color) {  // 包含起终点的整数栅格线段
-    int64_t dx = x1 > x0 ? (int64_t)x1 - x0 : (int64_t)x0 - x1;  // 横向距离的绝对值，先提升避免差值溢出
-    int64_t dy = y1 > y0 ? (int64_t)y0 - y1 : (int64_t)y1 - y0;  // 纵向距离的相反数，进入同一误差式
-    int sx = x0 < x1 ? 1 : -1;  // 当前列向终点每次移动一格的方向
-    int sy = y0 < y1 ? 1 : -1;  // 当前行向终点每次移动一格的方向
-    int64_t error = dx + dy;    // 以横距减纵距作为初始整数误差
-    for (;;) {  // 只有绘制完终点才退出
-        u_rect(x0, y0, 1, 1, color);  // 每个候选点仍经过矩形裁剪，不直接访问数组
-        if (x0 == x1 && y0 == y1)     // 当前写入的点已经是终点
-            break;  // 保留终点像素后结束线段
-        int64_t twice = error * 2;  // 两轴判断共享同一轮的旧误差
-        if (twice >= dy) {  // 误差达到横向前进条件
-            error += dy;  // 横向前进累计负纵距
-            x0 += sx;     // 当前列向终点移动一格
-        }
-        if (twice <= dx) {  // 此判断独立，同一轮可以同时沿两轴走
-            error += dx;  // 纵向前进累计横距
-            y0 += sy;     // 当前行向终点移动一格
-        }
-    }
-}
-void u_frame(struct ui_rect r, uint32_t color) {  // 以一像素厚边围住传入矩形
-    if (r.w <= 0 || r.h <= 0)  // 空矩形不计算底边和右边
-        return;  // 保留当前画布
-    u_rect(r.x, r.y, r.w, 1, color);  // 顶边覆盖r.w个像素
-    u_rect(r.x, r.y + r.h - 1, r.w, 1, color);  // 底边位于半开底边前一行
-    u_rect(r.x, r.y, 1, r.h, color);  // 左边覆盖r.h个像素
-    u_rect(r.x + r.w - 1, r.y, 1, r.h, color);  // 右边位于半开右边前一列
-}
 ```
 
 
 原始RGB和语义角色在进入设备布局之前统一成24位颜色。矩形直接覆盖不读取旧背景；文字混合则必须先解析前景角色，之后再用每通道权重计算新RGB。两条路径最终都通过`native`编码，所以主机标准32位数组和guest实际24/32位设备继续使用同一接口。
 
-`draw.c` 还缺文字路径。追加字形混合和文字函数，在混合前先用 `rgb=u_color(rgb)` 得到真实前景色。字体选择、间距和覆盖率沿用 G12；超出裁剪右界仍只跳过当前行，显式换行继续回到起始列。
+文字路径已经由 G12 建立。现在定位原来紧邻 blend 的图集 include 和函数开头，用下方新块替换：图集 include 已移到文件顶部，这里移除旧位置，并在混合前加入 `rgb=u_color(rgb)`。字体选择、间距和覆盖率循环继续保留；超出裁剪右界仍只跳过当前行，显式换行继续回到起始列。
 
 <a id="code-frontend-render-draw-c-2"></a>
 
-<!-- append: frontend/render/draw.c -->
+<!-- replace: frontend/render/draw.c -->
+<!-- before -->
+```c
+#include "../assets/font-atlas.h"  // 读取主机生成的八套字形度量和覆盖率
+static void blend(int x, int y, uint32_t rgb, unsigned alpha) {  // 将0至255覆盖率的前景混入原像素
+    if (!alpha || !u_inside(clip, x, y))  // 零覆盖率和裁剪外像素不需要读背景
+        return;  // 保持原像素不变
+```
+<!-- after -->
 ```c
 static void blend(int x, int y, uint32_t rgb, unsigned alpha) {  // 将0至255覆盖率的前景混入原像素
     if (!alpha || !u_inside(clip, x, y))  // 零覆盖率和裁剪外像素不需要读背景
         return;  // 保持原像素不变
     rgb = u_color(rgb);  // 混合前把角色变成真实RGB，混合结果不会重新成为角色
-    if (alpha == 255) {  // 完整覆盖可以直接使用既有写入路径
-        u_rect(x, y, 1, 1, rgb);  // 写前景而不读取背景
-        return;  // 当前像素已经处理完
-    }
-    unsigned bytes = fb->bpp / 8;  // 与矩形相同，24位用三字节，32位用四字节
-    volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)fb->virtual_address +  // 将借用的数值地址还原成字节指针
-                          (uint64_t)y * fb->pitch + (uint64_t)x * bytes;  // 按实际行距定位待混合像素
-    uint32_t old = 0;  // 从零开始恢复设备布局中的原像素数值
-    for (unsigned k = 0; k < bytes; ++k)  // 读取当前像素各字节，不读取行尾填充
-        old |= (uint32_t)p[k] << (k * 8);  // 提升到32位后按小端位置组合字节
-    const unsigned shifts[] = {fb->red_shift, fb->green_shift, fb->blue_shift};  // 当前设备的红绿蓝最低位
-    const unsigned sizes[] = {fb->red_size, fb->green_size, fb->blue_size};  // 与最低位按同下标对应的位宽
-    unsigned channels[3];  // 保存混合后的三个八位通道
-    for (unsigned k = 0; k < 3; ++k) {  // 每个通道独立混合，避免颜色位之间串入
-        unsigned maximum = (1u << sizes[k]) - 1;  // 当前设备通道的最大值，例如五位为31
-        unsigned before = ((old >> shifts[k]) & maximum) * 255u / maximum;  // 从设备位域还原成背景八位通道
-        unsigned after = (rgb >> ((2 - k) * 8)) & 255u;  // 从0xRRGGBB取得前景八位通道
-        channels[k] = (after * alpha + before * (255 - alpha) + 127) / 255;  // 覆盖率加权，加127使结果就近取整
-    }
-    uint32_t mixed = (channels[0] << 16) | (channels[1] << 8) | channels[2];  // 把三个八位结果组回RGB数值
-    uint32_t color = native(mixed);  // 再编码成当前设备真正的位域排列
-    for (unsigned k = 0; k < bytes; ++k)  // 将完整混合结果写回同一个像素
-        p[k] = (uint8_t)(color >> (k * 8));  // 保持与矩形写入相同的小端字节次序
-}
-void u_text(int x, int y, const char *s, enum ui_font font, uint32_t color) {  // 将字符串叠到已经铺好的背景
-    int origin = x;  // 换行时回到此次文字的起始列
-    while (*s) {     // 遇到NUL结束，不读取字符串之后的内存
-        unsigned char code = (unsigned char)*s;  // 按0至255读取当前字节，避免有符号char成为负下标
-        ++s;  // 当前字节已经取出，指向下一个字符
-        if (code == '\n') {  // 换行只改变下一字形的原点
-            x = origin;  // 回到本段文字起始列
-            y += font == U_CODE ? 24 : 20;  // 代码文字用24像素行距，其余用20像素
-            continue;  // 换行不取覆盖率数组
-        }
-        if (code < 32 || code > 126)  // 固定图集只有可打印ASCII
-            code = '?';  // 对未收录的字节使用同一问号字形
-        const struct u_glyph *g = &u_glyphs[font][code - 32];  // 二维下标先选字体，再将ASCII32映到第0项
-        if ((int64_t)x > (int64_t)clip.x + clip.w) {  // 当前行原点已超过右界，64位计算避免坐标相加溢出
-            while (*s && *s != '\n')  // 只跳过本行余下字节，遇NUL或换行停止
-                ++s;  // 当前行余下字符仍向右，无需继续读取字形覆盖率
-            continue;  // 保留换行给外层下一轮处理，下一行仍回到origin
-        }
-        for (unsigned row = 0; row < g->h; ++row)  // 按字形局部行遍历包围盒
-            for (unsigned col = 0; col < g->w; ++col) {  // 按字形局部列遍历覆盖率
-                unsigned alpha = u_coverage[g->offset + row * g->w + col];  // 大数组偏移加局部行列位置
-                blend(x + g->x + (int)col, y + g->y + (int)row, color, alpha);  // 原点加字形偏移才是屏幕位置
-            }
-        x += g->advance;  // 下一字符按推进间距开始，不按包围盒宽度开始
-    }
-}
-int u_text_width(const char *s, enum ui_font font) {  // 返回单行字符串的推进距离，单位为软件像素
-    int width = 0;     // 尚未处理任何字形时宽度为零
-    for (; *s; ++s) {  // 初始指针已由调用者给出，每轮走到下一字节
-        unsigned char code = (unsigned char)*s;  // 与绘制保持相同的无符号编码范围
-        if (code < 32 || code > 126)  // 宽度计算也只能访问已收录字形
-            code = '?';  // 替代规则与绘制一致，避免布局和外观不符
-        width += u_glyphs[font][code - 32].advance;  // 累加原点之间的距离，空格也有advance
-    }
-    return width;  // 调用者用总推进距离进行居中或对齐
-}
 ```
 
-背景必须先铺好，字形和圆角边缘都将读取它。若前景角色还未解析就参与移位，会把角色编号当作RGB通道；解析放在混合入口正好在颜色表示变化处完成。混合结果最大仍是`0xffffff`，传回native时直接通过颜色解析，不再换成另一项调色板颜色。
+混合仍读取已经铺好的背景。比如按钮传入 U_ACCENT，blend 先取得当前主题的粉色，再从这个 RGB 中拆出通道与背景混合；若跳过解析，就会把角色编号的各位误当成颜色。混合结果最大仍是 `0xffffff`，交给 native 时原样通过 u_color，不会再取一次调色板。原有文字循环与推进距离计算无需重写。
 
 ## 用十六个样本得到圆角边缘
 
@@ -314,11 +141,7 @@ int u_text_width(const char *s, enum ui_font font) {  // 返回单行字符串�
 
 圆角将半径先收窄到两边的一半，零或负半径走直角路径。左右和上下角通过镜像复用同一个覆盖率，中部不用逐像素读取背景。当前按钮半径2、观察样本半径8，画布和控件都是有限屏幕尺寸；这一算法的工作量随角半径平方增加，后面窗口也使用小半径。
 
-<a id="control-state"></a>
-
-控件状态需要组合：选中是二进制第0位1，焦点是第3位8，`U_SELECTED|U_FOCUSED`得到9。按位或组合后，`state&U_SELECTED`与`state&U_FOCUSED`仍能各自识别。U_NORMAL=0表示没有附加位；禁用16可以与按下4同时存在，但绘图规则让禁用覆盖按下强调。
-
-追加圆角和控件函数。
+先在 draw.c 末尾追加圆角填充。它将上面的采样计数交给既有 blend，因而仍受当前裁剪约束，并与文字使用相同的背景读写路径。
 
 <a id="code-frontend-render-draw-c-3"></a>
 
@@ -356,6 +179,18 @@ void u_round(struct ui_rect r, int radius, uint32_t color) {  // 中间填实色
         }
     }
 }
+```
+
+<a id="control-state"></a>
+
+控件状态需要组合：选中是二进制第0位1，焦点是第3位8，`U_SELECTED|U_FOCUSED`得到9。按位或组合后，`state&U_SELECTED`与`state&U_FOCUSED`仍能各自识别。U_NORMAL=0表示没有附加位；禁用16可以与按下4同时存在，但绘图规则让禁用覆盖按下强调。
+
+按钮底面的优先级为按下、悬停、选中、普通；禁用随后将底面与边界改回较弱的角色。选中状态还写一条内部粉色底线；普通选中的底面也是粉色，此时底线与底面重合。选中与悬停或按下组合时，底面换色，底线才成为可见的选择标记。焦点独立画外围蓝框。文字使用14px中等字重，水平位置按推进总量居中；代码中的18是纵向占位高度，不是字体字号。按下时文字向下移动一像素，按钮的几何范围保持不变。禁用分支不会显示焦点框，也不会下移文字。
+
+接着追加控件外观函数。u_control 接收已确定的状态，u_button 则把应用手里的 selected、disabled 两个布尔值转换成状态位，再调用它。
+
+<!-- append: frontend/render/draw.c -->
+```c
 void u_control(struct ui_rect r, const char *label, unsigned state) {  // 一个状态值决定当前按钮的像素外观
     bool disabled = (state & U_INACTIVE) != 0;  // 按位与只取禁用位，非零转换为true
     uint32_t fill = U_PANEL;  // 没有其他状态时使用普通按钮底面
@@ -396,13 +231,11 @@ void u_button(struct ui_rect r, const char *label, bool selected, bool disabled)
 }
 ```
 
-按钮底面的优先级为按下、悬停、选中、普通；禁用随后将底面与边界改回较弱的角色。选中状态还写一条内部粉色底线；普通选中的底面也是粉色，此时底线与底面重合。选中与悬停或按下组合时，底面换色，底线才成为可见的选择标记。焦点独立画外围蓝框。文字使用14px中等字重，水平位置按推进总量居中；代码中的18是纵向占位高度，不是字体字号。按下时文字向下移动一像素，按钮的几何范围保持不变。禁用分支不会显示焦点框，也不会下移文字。
-
 `u_control`只决定像素外观，不执行保存、打开等动作。`u_button`将应用提供的selected和disabled转换为共同位表，尚不读取鼠标。以后输入分派可以产生这些状态，现在观察程序明确枚举它们，使两种调色板先有稳定的比较输入。
 
 ## 同一内容分别绘制两种主题
 
-新建`labs/tutorial/controls.c`。六个按钮依次是普通、悬停、按下、选中、焦点和禁用；最后一项同时带禁用与按下，观察禁用覆盖。下方再展示状态值9与半径8样本。
+新建 `labs/tutorial/controls.c`，先写数组和图片输出函数。它沿用前两章的 PPM 写入方式：本轮画完后读取同一 pixels 数组，保存成独立文件。两轮绘图之间数组继续有效。
 
 <a id="code-labs-tutorial-controls-c-1"></a>
 
@@ -430,6 +263,14 @@ static bool save_image(const char *path) {  // 将本程序的32位RGB数组输�
         ok = false;  // 关闭失败同样不算完整文件
     return ok;  // 只有所有写入和关闭成功才报告完成
 }
+```
+
+观察内容由 names 和 states 两个等长数组共同给出：下标相同的标签与状态组成一个按钮。六项依次为普通、悬停、按下、选中、焦点、禁用；最后一项同时有禁用和按下位。main 先借用数组建立画布，再在 Night、Day 两轮中依次选主题、清背景、绘制同样内容并输出当前文件。下方另画状态值 9 和半径 8 样本，分别观察组合状态与更明显的圆角。
+
+继续追加 main。
+
+<!-- append: labs/tutorial/controls.c -->
+```c
 int main(void) {  // 使用同一组内容分别绘制Night与Day
     struct airi_framebuffer canvas = {  // 描述本进程持有的数组，未指定字段按C规则置零
         .virtual_address = (uintptr_t)pixels,  // 地址属于主机进程，绘图借用而不释放
@@ -465,7 +306,7 @@ int main(void) {  // 使用同一组内容分别绘制Night与Day
 }
 ```
 
-主机数组与画布描述在两次绘制间复用。每轮先选调色板，再铺背景、画文字与按钮，最后写当前路径。`paths[0]`和`paths[1]`与主题枚举一一对应；两张图片具有同样尺寸、标签和状态组合，区别来自颜色角色的解析。该程序没有保存用户文档，后面接入应用时，主题偏好将改变这套呈现，而不重新建立文件与窗口对象。
+`paths[0]`、`paths[1]`分别接收 Night、Day 的结果。第二轮会覆盖数组里的第一轮像素，但第一张文件已在前一轮写完，因此两张图都留下来。两图的尺寸、标签、状态组合相同，颜色差异来自 u_color 的调色板选择。以后桌面也会把主题选择传给绘图；文件与窗口对象由桌面另外保存。
 
 运行：
 

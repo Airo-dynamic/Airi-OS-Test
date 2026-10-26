@@ -63,8 +63,8 @@ struct ui_task {  // 当前服务提供的一条任务记录。
 };
 struct ui_stats {  // 一次任务查询同时返回的汇总状态。
     bool available;  // false表示当前没有真实汇总数据，不能绘制伪装的零值。
-    unsigned cpu, memory_kib, total_kib, read_kib, write_kib;  // CPU百分数、内存/总量/读写KiB分别保存。
-    unsigned samples[60];  // 最多60个固定窗口采样值，图表逐项消费。
+    unsigned cpu, memory_kib, total_kib, read_kib, write_kib;  // CPU 按百分数，内存/总量按 KiB，读写速率按 KiB/s 分别保存。
+    unsigned samples[60];  // 固定 60 个百分数采样值，图表逐项消费。
 };
 /* Providers own service data. A backend error is an interface state, never fake success. */
 struct ui_backend {  // 桌面复制这份服务回调表，服务数据继续由提供方持有。

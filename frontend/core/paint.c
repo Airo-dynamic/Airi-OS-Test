@@ -1,4 +1,4 @@
-#include "internal.h"  // 引入当前目录内部共享接口和基础函数
+#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
 static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  // 窗口标题按应用枚举顺序排，应用编号可直接索引
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
 static const char *icons[] = {"Terminal", "Files",    "Editor", "Tasks",  // 侧栏悬停名称按相同应用顺序排
@@ -67,7 +67,7 @@ static void monitor(struct ui_desktop *s) {  // 共享资源仪表，全部数�
 }
 void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按窗口层次画整帧，并将对话框留在最后
     if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
-        return;  // 当前按窗口层次画整帧，并将对话框留在最后在本分支结束，后续语句不执行
+        return;  // 画布验证未通过，本帧不写像素
     s->width = (int)f->width;    // 当前帧画布宽度按像素保存，绘图已检查帧缓冲能用且宽度可转int
     s->height = (int)f->height;  // 当前帧画布高度按像素保存，窗口收窄和坐标布局使用这个尺寸
     u_begin(f);  // 借用本次画布描述，建立颜色布局与整屏裁剪
@@ -85,7 +85,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
     u_text(s->width - 263, 10,  // 顶栏右侧说明当前画面来自主机参考还是内核控制台
            s->backend.mode == UI_REFERENCE ? "Local session" : "Local console",  // 顶栏用实际后端模式标明主机参考工作区或guest内核控制台
            U_SMALL, U_MUTED);  // 系统状态保持次要前景
-    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);      // 顶栏右侧画资源入口图标，是否展开由桌面monitor状态决定
+    u_icon(s->width - 37, 8, UI_TASKS_APP, U_MUTED);      // 顶栏右侧画资源入口图标，是否展开由桌面 monitor 状态决定
     u_rect(0, UI_TOP, UI_DOCK, s->height - 66, U_PANEL);  // 用工具栏底色写矩形，起点(0,36)，尺寸56×s->height - 66像素
     u_rect(55, 36, 1, s->height - 66, U_EDGE);     // 用分隔线色写矩形，起点(55,36)，尺寸1×s->height - 66像素
     for (unsigned i = 0; i < UI_APP_COUNT; ++i) {  // 逐个检查7个有效应用编号
@@ -144,7 +144,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         if (plate_width > available)  // 窄窗口的标题可用范围优先于理想字宽。
             plate_width = available;  // 不把身份片铺进最小化、最大化和关闭按钮区。
         u_plate((struct ui_rect){r.x + 8, r.y + 7, plate_width, UI_TITLE_H - 14}, U_CHROME);  // 用实际字体推进量承载完整应用身份。
-        u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, focused && !s->dialog && !s->launcher);  // 只有最前窗口可响应悬停
+        u_interaction(s->mouse_x, s->mouse_y, s->pointer_down, focused && !s->dialog && !s->launcher);  // 活动窗口且无 dialog/launcher 时才允许悬停反馈
         u_icon(r.x + 18, r.y + 14, (int)app, U_INK);   // 应用图标处于独立身份栏
         u_rect(r.x + 53, r.y + 12, 1, 24, U_CONTROL);  // 图标与标题使用一致的分隔尺度
         u_clip((struct ui_rect){r.x + 62, r.y + 1, r.w - 170, UI_TITLE_H - 2});  // 长文件名不会覆盖系统按钮
@@ -197,7 +197,7 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
         u_rect(s->width - 382, s->height - 78, 360, 34, U_RAISED);  // 用选中背景色写矩形，起点(s->width - 382,s->height - 78)，尺寸360×34像素
         u_text(s->width - 368, s->height - 70, s->toast, U_SMALL, U_TEXT);  // 在整屏x=s->width - 368、整屏y=s->height - 70显示本次操作短提示
     }
-    if (s->launcher) {  // 启动菜单打开时，最后绘制应用选择列表
+    if (s->launcher) {  // 普通窗口与提示后画应用菜单，对话框随后覆盖
         u_rect(8, 43, 244, UI_APP_COUNT * 42 + 48, U_PANEL);  // 用工具栏底色写矩形，起点(8,43)，尺寸244×UI_APP_COUNT * 42 + 48像素
         u_frame((struct ui_rect){8, 43, 244, UI_APP_COUNT * 42 + 48}, U_EDGE);  // 沿当前显式矩形的四边画一像素边框
         u_text(24, 54, "Applications", U_LABEL, U_TEXT);  // 在整屏列24、整屏行54显示文字"Applications"

@@ -45,28 +45,19 @@ TTF字体保存笔画轮廓及布局度量。一个字符的具体形状称为�
 
 Sans字体文件带字重和字宽两条可变轴。同一轮廓可以按轴值取不同形态；该文件的轴顺序为Weight、Width，所以生成器传`[weight,100]`，100是标准字宽。Plex Mono输入是固定常规字体，不调用轴接口。字号是请求的像素字号，不保证每个字形包围盒都恰好有同样高度。
 
-字体枚举顺序同时决定生成二维数组的第一下标，不能只改变其中一边。完整替换`frontend/include/render.h`，保留已有绘图接口并加入八个名字及文字接口。
+C 调用用字体枚举选择这一轮的字形：U_BODY 对应第二套 14 像素正文，U_CODE 对应第六套等宽代码。生成器也按同样顺序排列八套度量，枚举值因而可以直接成为二维数组的第一下标。顺序需要两边一起保持。
+
+已有像素接口继续保留。在 render.h 文件末尾定位原来的 endif，用下方新块替换这一行，把字体枚举和文字接口放到包含保护之内。旧块用于定位，只写入新块。
 
 <a id="code-frontend-include-render-h-1"></a>
 
-<!-- write: frontend/include/render.h -->
+<!-- replace: frontend/include/render.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_RENDER_H   // 同一编译单元只展开一次绘图接口
-#define AIRI_RENDER_H   // 记住本头文件已经处理
-#include <airi/boot.h>  // 借用前文的帧缓冲描述、固定宽整数和bool
-struct ui_rect {  // 用像素数描述半开矩形，右下边界不属于矩形
-    int x;  // 左边所在的整屏列号，可为负以表示部分在屏外
-    int y;  // 顶边所在的整屏行号，向下增加
-    int w;  // 横向像素数，不是右边坐标
-    int h;  // 纵向像素数，不是底边坐标
-};
-void u_begin(const struct airi_framebuffer *);  // 借用已验证的描述与可写像素数组，直到本次绘图结束
-void u_clip(struct ui_rect);  // 请求矩形与整幅画布求交，替换当前裁剪区
-void u_reset_clip(void);      // 恢复整幅画布的可写范围
-void u_rect(int, int, int, int, uint32_t);  // 按左上、宽高及0xRRGGBB填充裁剪内像素
-void u_line(int, int, int, int, uint32_t);  // 用整数误差将含两端点的线段变成像素
-void u_frame(struct ui_rect, uint32_t);     // 用四条一像素宽矩形绘制边框
-bool u_inside(struct ui_rect, int, int);    // 判断整屏坐标是否在半开矩形内
+#endif  // 结束包含保护
+```
+<!-- after -->
+```c
 enum ui_font {  // 枚举下标与生成器faces的顺序一一对应
     U_SMALL,  // Plex Sans 12px、字重400，用于次要信息
     U_BODY,   // Plex Sans 14px、字重400，用于正文
@@ -114,6 +105,16 @@ faces = [('ibmplexsans.ttf', 12), ('ibmplexsans.ttf', 14), ('ibmplexsans.ttf', 1
          ('ibmplexsans.ttf', 22), ('ibmplexmono.ttf', 14), ('ibmplexmono.ttf', 16), ('ibmplexsans.ttf', 14), ('ibmplexsans.ttf', 32)]  # 补标题和两套等宽字体，再补14px中等字重与32px轻字重，共八项
 data = []     # 大覆盖率数组起初为空，后续逐字节追加0到255整数
 metrics = []  # 八套字体的度量列表起初为空，每项将是一整套glyphs
+```
+
+四份输入先逐项核对摘要，任一字体或许可不符都会在写输出前抛异常。现在 faces 已保存八个文件名与字号二元组，data 和 metrics 都还是空列表。`enumerate(faces)` 每轮交出下标与一个二元组：下标决定字重，元组解包给出本轮字体文件和字号。
+
+Pillow 对每个字符返回 getbbox 的四个坐标，左右、上下相减得到包围盒宽高。灰度模式 L 用一字节保存一个覆盖率，画字时传 `(-x0,-y0)` 抵消偏移，让临时图片只留下本字形有效范围。advance 来自 getlength，round 取最近整数，恰好半整数时取偶数；这个距离会和包围盒一起进入六元组。
+
+**追加到 `scripts/font_atlas.py`，收集八套字形：**
+
+<!-- append: scripts/font_atlas.py -->
+```python
 for index, (filename, size) in enumerate(faces):  # enumerate给出下标index与一项元组，内层括号再解包成文件名和字号
     font = ImageFont.truetype(str(assets / filename), size)  # 将Path转字符串交给Pillow，按当前字号读取TTF轮廓
     if filename.startswith('ibmplexsans'):  # 可变Sans保存同一套轮廓的字重与字宽轴
@@ -135,6 +136,16 @@ for index, (filename, size) in enumerate(faces):  # enumerate给出下标index�
             data.extend(bitmap.tobytes())  # bytes逐项迭代得到整数，extend逐字节加入而非嵌套一块bytes
     metrics.append(glyphs)  # append把整套字符度量列表作为八套字体列表的一项
 
+```
+
+字形收集完成后，metrics 的八份列表写成 C 的 `u_glyphs[8][95]`，data 中的整数写成 `u_coverage[]`。一条六元组仍对应一条 u_glyph：offset 选 unsigned，尺寸和推进选 unsigned char，相对 x/y 偏移选 signed char；本次固定字体的值都在这些范围内。
+
+输出器先把元组里的整数逐个转成字符串，再用逗号连接成 C 初始化文本。覆盖率每 32 项换行仅用于文件排版，字形自己的宽高仍由记录决定。全部源码行放在 lines 中，最后一次连接并写出 font-atlas.h；这些 Python 容器到生成进程结束便不再需要。
+
+**继续追加到 `scripts/font_atlas.py`，生成 C 头文件：**
+
+<!-- append: scripts/font_atlas.py -->
+```python
 lines = ['/* Generated from locked OFL fonts by scripts/font_atlas.py. */',  # 开始收集生成C文件的源码行，第一行说明固定字体来源
          'struct u_glyph { unsigned offset; unsigned char w,h; signed char x,y; unsigned char advance; };',  # 输出一条字形记录类型：覆盖率偏移、尺寸、文字偏移和推进间距
          'static const struct u_glyph u_glyphs[8][95] = {']  # 八套字体各95字符的二维度量数组开始
@@ -152,10 +163,6 @@ lines.append('};')  # 结束覆盖率C数组
 (assets / 'font-atlas.h').write_text('\n'.join(lines) + '\n')  # 按换行连接源码各行，再加末尾换行写生成头文件
 print('Atlas:', len(data), 'bytes /', len(faces), 'faces')     # 报告真实生成覆盖率字节数和八套字体数量
 ```
-
-生成器先核对全部输入摘要，任何TTF或许可不符都会在写输出前抛异常。`enumerate(faces)`同时给下标与当前二元组，下标选字重，二元组解包为文件名与字号。`getbbox`返回左上/右下四元组，差值给宽高；Pillow灰度模式L以一字节保存覆盖率。画字时传`(-x0,-y0)`抵消包围盒偏移，使临时图片只保存这一个字形的有效范围。advance来自`getlength`，Python的`round`取最近整数，恰好半整数时选择偶数。
-
-C输出中的八行各保存95个可打印ASCII字形。六元组中的偏移用unsigned，尺寸和推进用unsigned char，相对偏移用signed char；这些固定字体的数值落在对应范围内。覆盖率每32项换一行只是输出排版，不是图集每字形的宽度。生成器不做整段文字的字偶距或复杂文字塑形，绘图按单字符取整后的advance推进，范围外的字节会显示问号。
 
 在学习目录根目录下载已锁定的输入并生成数组。这里沿用[依赖下载](https://github.com/Airo-dynamic/Airi-OS-Test/blob/main/dev-log/02-dependencies.md#config-values)中实现的 `deps.download`：按锁文件取得字体与许可，再由本章生成器写出 `font-atlas.h`。
 
@@ -191,7 +198,7 @@ Atlas: 94785 bytes / 8 faces
 
 读取背景与写回仍使用 G11 的实际 pitch 与位域布局；设备里的五位红先缩放为八位，再混合，再编码回设备位置。alpha为0时既不读也不写，255时直接走矩形写入。文字因此必须在背景铺好之后绘制，否则后来铺背景会把笔画盖掉。
 
-追加到`frontend/render/draw.c`末尾。头文件在这里包含是合法C预处理：字形类型和数组只需在下面首次使用之前出现，前面的矩形函数不依赖它们。
+图集文件已经生成，现在把它交给 C 消费。追加到 draw.c 末尾，先包含字形类型与两个只读数组，再实现一个像素的混合。头文件在此包含是合法 C 预处理：这些声明出现在下面首次使用之前，前面的矩形函数继续使用已有接口。
 
 <a id="code-frontend-render-draw-c-1"></a>
 
@@ -225,6 +232,16 @@ static void blend(int x, int y, uint32_t rgb, unsigned alpha) {  // 将0至255�
     for (unsigned k = 0; k < bytes; ++k)  // 将完整混合结果写回同一个像素
         p[k] = (uint8_t)(color >> (k * 8));  // 保持与矩形写入相同的小端字节次序
 }
+```
+
+混合函数已能处理一个屏幕位置。文字函数接着把字符串变成这些位置：例如用 U_BODY 画字符 A，字体下标为 1，字符编码 65 减 32 得到 33，因而取得 `u_glyphs[1][33]`。这条记录的 offset 定位 u_coverage 中本字形的首字节，局部 row/col 再选出当前覆盖率。
+
+文字原点加上记录的 x/y 偏移和局部行列，才是交给 blend 的屏幕坐标。一个字形画完以后，原点按 advance 前移；空格即使没有笔画像素，也会凭这项距离留下空白。生成器未做整段文字的字偶距或复杂文字塑形，当前按单字符取整后的 advance 排列。
+
+**继续追加到 `frontend/render/draw.c`，让字符串消费图集：**
+
+<!-- append: frontend/render/draw.c -->
+```c
 void u_text(int x, int y, const char *s, enum ui_font font, uint32_t color) {  // 将字符串叠到已经铺好的背景
     int origin = x;  // 换行时回到此次文字的起始列
     while (*s) {     // 遇到NUL结束，不读取字符串之后的内存
@@ -251,6 +268,16 @@ void u_text(int x, int y, const char *s, enum ui_font font, uint32_t color) {  /
         x += g->advance;  // 下一字符按推进间距开始，不按包围盒宽度开始
     }
 }
+```
+
+遇到换行，文字原点回到起始 x 并增加行距。原点超过裁剪右界只说明本行后面的字形不可见，不能结束整个字符串：例如窄区域中的`WWWWWWWWW\nO`，第一行虽然超宽，第二行O仍应回到起始列。内层while把s推进到换行或NUL，保留换行给外层处理；因此裁剪不等于自动换行，也不会丢掉后面的显式新行。
+
+宽度计算继续取同一套字形的 advance，只累加单行推进量；它不测笔画的最左、最右包围盒，也不计算多行最大宽度。范围外字节与绘制一样改用问号。观察程序随后用这项总推进量画粉线，字符笔画仍可能从原点之后开始，或略微伸到推进范围之外。
+
+**继续追加到 `frontend/render/draw.c`：**
+
+<!-- append: frontend/render/draw.c -->
+```c
 int u_text_width(const char *s, enum ui_font font) {  // 返回单行字符串的推进距离，单位为软件像素
     int width = 0;     // 尚未处理任何字形时宽度为零
     for (; *s; ++s) {  // 初始指针已由调用者给出，每轮走到下一字节
@@ -263,11 +290,7 @@ int u_text_width(const char *s, enum ui_font font) {  // 返回单行字符串�
 }
 ```
 
-文字函数以字体下标和`code-32`定位字形，局部行列经offset取得覆盖率；文字原点加记录的x/y偏移才是要混合的屏幕位置。字形完成后按advance移动原点，换行回到起始x并增加行距。原点超过裁剪右界只说明本行后面的字形不可见，不能结束整个字符串：例如窄区域中的`WWWWWWWWW\nO`，第一行虽然超宽，第二行O仍应回到起始列。内层while把s推进到换行或NUL，保留换行给外层处理；因此裁剪不等于自动换行，也不会丢掉后面的显式新行。
-
 当前 U_CODE 用 24 像素行距，其余字体用 20 像素；大字体观察单独为每套留50像素，不能依赖默认行距排32像素多行文本。
-
-宽度函数用于单行布局，累加与绘制相同的advance。它不测量笔画最左/右的包围盒，也不计算多行最大宽度。下面粉线长度表示原点推进总量，字符实际笔画可能在原点之后才开始或略微伸出。
 
 ## 比较同一输入的字号、字重和推进距离
 
@@ -300,6 +323,16 @@ static bool save_image(const char *path) {  // 将本程序的32位RGB数组输�
         ok = false;  // 关闭失败同样不算完整文件
     return ok;  // 只有所有写入和关闭成功才报告完成
 }
+```
+
+保存函数沿用 G11 的三通道输出与失败检查。现在先观察刚才的超宽行：clipped_lines 让画布从 guarded+1 开始，首尾两个 uint32_t 留作哨兵，裁剪只允许列 8 至 27、行 8 至 49 改变。U_BODY 的 20 像素行距使第二行 O 从 (8,28) 开始。
+
+程序逐像素检查裁剪外不变，再统计第二行确实改变的像素；零覆盖率的空白不计入 visible，所以它并非包围盒面积。函数返回后这块栈数组结束，main 紧接着重新 u_begin，绘图借用随之换到主画布。
+
+**追加到 `labs/tutorial/fonts.c`，观察裁剪和显式换行：**
+
+<!-- append: labs/tutorial/fonts.c -->
+```c
 static bool clipped_lines(void) {  // 超宽第一行不能阻止第二行显式换行后的O出现
     enum { TEST_WIDTH = 64, TEST_HEIGHT = 64 };      // 小画布只用于这一项裁剪观察，尺寸单位为像素
     uint32_t guarded[TEST_WIDTH * TEST_HEIGHT + 2];  // 可见像素两端各预留一个四字节哨兵
@@ -330,6 +363,14 @@ static bool clipped_lines(void) {  // 超宽第一行不能阻止第二行显式
     printf("clipped newline: second-line pixels=%u; guards=unchanged\n", visible);  // 保存真正绘出的第二行像素数量
     return visible > 0;  // 零像素说明超宽第一行仍阻断了第二行
 }
+```
+
+裁剪观察通过以后，main 用自己的 800×420 数组接着画八套字体。每轮把相同 sample 交给宽度与文字函数：右侧文字使用本轮 face，左侧名称始终用 U_SMALL。随后从同一套图集读取 A 的宽高、advance 与部分覆盖率计数，读数和画面来自相同数组。
+
+**继续追加到 `labs/tutorial/fonts.c`：**
+
+<!-- append: labs/tutorial/fonts.c -->
+```c
 int main(void) {  // 每套字体显示同一字符串以比较间距和字形
     if (!clipped_lines())  // 先观察超宽行、显式换行和裁剪边界
         return 1;  // 图元行为不同于声明合同时不继续报告字体观察完成
@@ -369,8 +410,6 @@ int main(void) {  // 每套字体显示同一字符串以比较间距和字形
     return 0;  // 主机字体观察完成
 }
 ```
-
-clipped_lines把图元地址指向guarded+1，首尾两个uint32_t只用作哨兵。裁剪矩形是半开范围，列8到27、行8到49；U_BODY行距20，使第二行原点从(8,8)回到(8,28)。先确认全部裁剪外像素不变，再统计第二行实际改变的像素。visible不是字形包围盒面积，零覆盖率的空白位置不会改变背景。
 
 每套字体都有同样的样本，左侧名称使用U_SMALL，右侧才使用正在比较的face。字形A的ASCII值65，数组下标65−32=33；`partial`遍历它自己的宽×高覆盖率范围，只计部分覆盖像素。U_MONO和U_CODE采用等宽字体，`iii`与`WWW`每个字符的advance一致；比例字体会为不同字符保留不同距离。
 

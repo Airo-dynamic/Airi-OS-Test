@@ -26,7 +26,7 @@ void ui_tasks_draw(struct ui_desktop *s, struct ui_rect r) {  // 绘制任务快
     if (s->service_state != UI_NORMAL || !s->backend.tasks) {  // 参考服务未正常提供任务查询时不绘旧任务快照，明确显示不可用
         ui_app_unavailable(s, r, "Process and scheduler service");  // 按当前服务状态显示文字"Process and scheduler service"的缺失或失败信息
         ui_app_status(r, "No process snapshot", NULL);  // 在内容底部显示文字"No process snapshot"；右侧说明按测得的文字宽度对齐
-        return;  // 当前绘制任务快照、CPU曲线和内存条在本分支结束，后续语句不执行
+        return;  // 任务服务状态不可用或缺查询回调，保留提示且不读任务条目
     }
     int graphheight = r.h >= 540 ? 160 : 100;  // 较高窗口给CPU图区160像素，否则100像素，后面的任务列表起点随之移动
     char label[80];  // 80字节局部数组保存CPU或内存标题数值，绘完当前标题后可复用

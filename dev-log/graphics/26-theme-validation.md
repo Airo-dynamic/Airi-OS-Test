@@ -14,48 +14,44 @@ Editor中尚未保存的输入、选择和窗口位置已经可以通过真实�
 
 `dump_palette` 输出本次编译的角色值，`draw_controls` 生成固定状态的控件表；`main` 再把页签、服务状态和场景参数交给对应状态入口。平台数组、CoreGraphics借用和事件回调继续按同一寿命运行；主题变化仍写desktop.theme，不重建文档。PPM头、像素写入及fclose刷新都必须成功才返回零。文字粘贴先检查平台对象与完整字节容量，没有字符串或超过8191字节时只留下短提示，不截断输入或改变文档；Files正文仍沿内部文件id粘贴。
 
-**完整替换 `frontend/platform/macos/preview.m`：**
+`--state normal|empty|loading|error|offline` 把所选服务状态交给 `ui_service_state`；`--scenario dialog|dirty|workspace|save-error|system-tasks|controls` 在进入事件循环前布置窗口或发出失败动作，省略它时采用 none。`--tab` 接收从零开始的当前应用页签下标，应用名、尺寸、主题与输出路径沿用 G23 的参数。CLI演示参数采用固定合法值；未知应用名不覆盖已有app选择，默认值为Editor；未知初始主题仍采用Night，与控制台明确报错的theme invalid不同。
+
+保留 G23 的画布、CoreGraphics 包装、输入回调和事件循环。依次更新 preview.m 的下列唯一旧窗口：加入控件表开关与两个输出 helper，让 dump 可覆盖成控件场景，最后扩充 main 的参数和场景布置。旧块只用于定位，只写回新块；窗口输入不重新实现。
 
 <a id="code-frontend-platform-macos-preview-m-1"></a>
 
-<!-- write: frontend/platform/macos/preview.m -->
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
 ```objective-c
-#import <Cocoa/Cocoa.h>  // 导入 AppKit 与 Foundation 声明；#import 防止重复导入同一头文件。
-#include "ui.h"      // 取得共享桌面状态和输入事件接口。
-#include <stdio.h>   // 取得主机 printf、文件输出与错误报告接口。
-#include <stdlib.h>  // 取得主机分配、释放、退出与数值转换接口。
-#include <string.h>  // 取得宿主字符串比较、复制和查找接口。
-static struct ui_desktop desktop;    // 静态存储整份桌面；事件回调结束后状态仍保留。
-static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
+static AiriBootInfo boot;  // 平台保存启动描述副本，backend.boot 只借用这个稳定地址。
+static struct airi_framebuffer framebuffer;  // 保存软件画布的地址、尺寸、行距和颜色位布局。
+static uint32_t *pixels;  // 指向平台拥有的32位像素数组，静态初值为 NULL。
+static void size_buffer(int w, int h) {  // w/h 为画布宽高；尺寸变化时重建数组并更新描述。
+    if (w < 640)  // 软件画布最小宽度640像素，防止布局缺少空间。
+```
+<!-- after -->
+```objective-c
 static AiriBootInfo boot;  // 平台保存启动描述副本，backend.boot 只借用这个稳定地址。
 static struct airi_framebuffer framebuffer;  // 保存软件画布的地址、尺寸、行距和颜色位布局。
 static bool control_sheet;  // 快照专用控件表使用共享绘图，不伪装成已接入的应用。
 static uint32_t *pixels;    // 指向平台拥有的32位像素数组，静态初值为 NULL。
 static void size_buffer(int w, int h) {  // w/h 为画布宽高；尺寸变化时重建数组并更新描述。
     if (w < 640)  // 软件画布最小宽度640像素，防止布局缺少空间。
-        w = 640;  // 把过小宽度提高到下限。
-    if (h < 480)  // 软件画布最小高度480像素。
-        h = 480;  // 把过小高度提高到下限。
-    if (w > 1800)  // 最大宽度限制控制单帧内存和重画工作量。
-        w = 1800;  // 把过大宽度截到当前演示上限。
-    if (h > 1100)  // 同样限制画布最大高度。
-        h = 1100;  // 把过大高度截到1100像素。
-    free(pixels);  // 旧图像包装对象已在前次绘制释放，此时释放旧画布；free(NULL) 合法。
-    pixels = calloc((size_t)w * h, 4);  // 先转 size_t 再相乘，分配 w*h 个四字节且清零的像素。
-    if (!pixels) {  // 分配失败返回NULL，不能交给绘图继续写像素。
-        fputs("AiriOS preview: pixel allocation failed\n", stderr);  // 标准错误报告明确的画布分配失败原因。
-        exit(1);  // 以失败状态结束快照进程。
-    }
-    framebuffer = (struct airi_framebuffer){.virtual_address = (uintptr_t)pixels,  // 复合字面量整体更新描述，uintptr_t 保存主机进程中的数组地址。
-                                            .width = (uint64_t)w,      // 把画布宽度保存为接口规定的64位无符号像素数。
-                                            .height = (uint64_t)h,     // 保存画布高度，单位是软件像素。
-                                            .pitch = (uint64_t)w * 4,  // 每行 w 个四字节像素，因此字节行距为 w*4。
-                                            .bpp = 32,      // 每像素总位数32，最高八位当前不用于颜色。
-                                            .red_size = 8,  // 红通道占八位。
-                                            .red_shift = 16,   // 红通道放在位16..23，读写需平移16位。
-                                            .green_size = 8,   // 绿通道占八位。
-                                            .green_shift = 8,  // 绿通道放在位8..15。
-                                            .blue_size = 8};   // 蓝通道占八位，未指定 blue_shift 时默认零。
+```
+
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
+```objective-c
+    boot.framebuffer = framebuffer;  // 启动描述副本取得同一画布参数，窗口中的设备信息可以读取。
+}
+static void dump(const char *name) {  // name 是输出文件路径，快照直接使用同一共享绘图。
+    ui_draw(&desktop, &framebuffer);  // 共享 C 渲染将当前桌面状态写进平台像素数组。
+    FILE *f = fopen(name, "wb");      // 以二进制写模式创建 PPM，失败返回 NULL。
+    if (!f) {  // 路径不可写或打开失败时不继续往空文件指针写入。
+        perror(name);  // 把当前 errno 原因连同输出路径写到标准错误。
+```
+<!-- after -->
+```objective-c
     boot.framebuffer = framebuffer;  // 启动描述副本取得同一画布参数，窗口中的设备信息可以读取。
 }
 static void dump_palette(unsigned mode) {  // 输出实际 C 调色板，检查程序不复制一份颜色常量。
@@ -94,206 +90,27 @@ static void dump(const char *name) {  // name 是输出文件路径，快照直�
     FILE *f = fopen(name, "wb");  // 以二进制写模式创建 PPM，失败返回 NULL。
     if (!f) {  // 路径不可写或打开失败时不继续往空文件指针写入。
         perror(name);  // 把当前 errno 原因连同输出路径写到标准错误。
-        exit(1);  // 以失败状态结束快照进程。
-    }
-    bool complete = fprintf(f, "P6\n%llu %llu\n255\n",  // 先写二进制PPM头；返回负数表示输出失败。
-                            (unsigned long long)framebuffer.width,  // 宽度转成与%llu对应的无符号整数。
-                            (unsigned long long)framebuffer.height) > 0;  // 高度后声明通道上限255；只有完整头才继续输出像素。
-    for (unsigned y = 0; complete && y < framebuffer.height; ++y)  // 从上到下逐行输出，首个写入错误后停止。
-        for (unsigned x = 0; complete && x < framebuffer.width; ++x) {  // 当前行逐像素输出，同样不在失败后继续写。
-            uint32_t p = pixels[y * framebuffer.width + x];  // 当前数组每行恰为width个32位像素，行号乘宽度再加列号定位。
-            unsigned char rgb[] = {(p >> 16) & 255, (p >> 8) & 255, p & 255};  // 取出红、绿、蓝三个八位通道，PPM不保存原像素的第四字节。
-            complete = fwrite(rgb, 1, sizeof(rgb), f) == sizeof(rgb);  // 返回实际写出的单字节项数，少于三个也属于失败。
-        }
-    if (fclose(f) != 0)  // 即使前面失败也关闭流；关闭时刷新缓冲仍可能遇到写入错误。
-        complete = false;  // 不把只进入stdio缓冲、未完成输出的快照记为成功。
-    if (!complete) {  // 头、像素或关闭任一失败，都不能让快照进程返回零。
-        perror(name);  // 将当前文件输出错误连同路径写到标准错误。
-        exit(1);  // 保留可能存在的部分文件，但以非零状态拒绝这次快照。
-    }
-}
-@interface AiriView : NSView  // 声明 AiriView 继承 NSView，接收窗口绘制与输入回调。
-@end  // 结束 AiriView 的类接口声明
-@implementation AiriView  // 接下来定义该视图类的实例方法。
-- (BOOL)isFlipped {  // 实例方法返回视图是否采用左上角坐标原点。
-    return YES;  // 该回调返回真，接受对应框架约定。
-}
-- (BOOL)acceptsFirstResponder {  // 允许这个视图成为首先接收键盘事件的对象。
-    return YES;  // 该回调返回真，接受对应框架约定。
-}
-- (void)drawRect:(NSRect)dirty {  // 框架请求重画时传入脏矩形；当前实现重画整帧。
-    (void)dirty;  // NSView 规定有该参数；全帧重画无需按其范围裁剪。
-    int w = (int)self.bounds.size.width;   // 将当前视图逻辑宽度转为软件画布的整数像素数。
-    int h = (int)self.bounds.size.height;  // 高度同样取逻辑点；当前没有另建 Retina 物理像素画布。
-    if (w != (int)framebuffer.width || h != (int)framebuffer.height)  // 视图尺寸不同才重建像素，普通重画复用原数组。
-        size_buffer(w, h);  // 按新尺寸更新平台画布及启动描述。
-    ui_draw(&desktop, &framebuffer);  // 共享 C 渲染将当前桌面状态写进平台像素数组。
-    CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();      // 创建 RGB 颜色空间，当前函数负责最终 Release。
-    CGDataProviderRef provider = CGDataProviderCreateWithData(  // 建立只借用 pixels 的数据提供者，包装对象不拥有数组。
-        NULL, pixels, (size_t)framebuffer.pitch * framebuffer.height, NULL);  // 无额外上下文，提供完整画布字节数；无释放回调，数组仍由平台释放。
-    CGImageRef image =  // image 保存图像包装对象，实际字节仍由 provider 读取。
-        CGImageCreate(framebuffer.width, framebuffer.height, 8, 32, framebuffer.pitch, color,  // 指定宽高、每通道八位、每像素32位及真实字节行距。
-                      kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little, provider, NULL,  // 组合无 alpha 与32位小端布局；provider 交付像素，NULL 使用默认解码。
-                      false, kCGRenderingIntentDefault);  // 不进行插值，采用默认颜色呈现意图。
-    CGContextRef context = NSGraphicsContext.currentContext.CGContext;  // 借用框架本次绘制的图形上下文，不对它 Release。
-    CGContextSaveGState(context);  // 保存坐标变换，避免影响框架后续绘制。
-    CGContextTranslateCTM(context, 0, self.bounds.size.height);  // 先平移纵轴，为接下来的上下反转留出画布高度。
-    CGContextScaleCTM(context, 1, -1);  // 保持横轴、反转纵轴，将软件首行显示到上边。
-    CGContextDrawImage(context, self.bounds, image);  // 把图像画到整个视图范围；这里实际进行图像读取。
-    CGContextRestoreGState(context);  // 恢复原图形状态，撤销本次平移与缩放。
-    CGImageRelease(image);  // 图像已经绘完，释放其包装对象。
-    CGDataProviderRelease(provider);  // 释放提供者包装，借用的 pixels 继续有效。
-    CGColorSpaceRelease(color);  // 释放本次创建的颜色空间，配对 Create。
-}
-- (void)mouseDown:(NSEvent *)e {  // e 是框架交来的鼠标按下事件，本方法只在回调期间借用。
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];  // 把窗口坐标换到当前视图；nil 特指输入来自窗口坐标系。
-    ui_pointer(&desktop, (int)p.x, (int)p.y, e.clickCount > 1 ? 3 : 1);  // 逻辑点转整数画布坐标，多次点击送3，首次按下送1。
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-- (void)mouseUp:(NSEvent *)e {  // 接收释放事件，结束共享核心中的拖动。
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];  // 把窗口坐标换到当前视图；nil 特指输入来自窗口坐标系。
-    ui_pointer(&desktop, (int)p.x, (int)p.y, 2);  // phase=2 释放，保留光标与选区但结束 drag。
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-- (void)mouseDragged:(NSEvent *)e {  // 按住鼠标移动时框架调用此方法。
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];  // 把窗口坐标换到当前视图；nil 特指输入来自窗口坐标系。
-    ui_pointer(&desktop, (int)p.x, (int)p.y, 0);  // phase=0 表示位置更新，核心按已有拖动状态决定动作。
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-- (void)mouseMoved:(NSEvent *)e {  // 未按下的鼠标移动更新指针位置。
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];  // 把窗口坐标换到当前视图；nil 特指输入来自窗口坐标系。
-    ui_pointer(&desktop, (int)p.x, (int)p.y, 0);  // phase=0 表示位置更新，核心按已有拖动状态决定动作。
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-- (void)scrollWheel:(NSEvent *)e {  // 滚轮增量是平台浮点值，需换成共享核心的整数行数。
-    if (e.scrollingDeltaY == 0)  // 平台可能交入零增量，此时无需改变滚动状态。
-        return;  // 零滚动量不应被补成向下一行。
-    int delta = (int)(-e.scrollingDeltaY / 3);  // 反转平台方向并按三单位一行换算，强转向零截断。
-    if (!delta)  // 小数换算后为零时仍保留非零滚动方向。
-        delta = e.scrollingDeltaY > 0 ? -1 : 1;  // 正平台增量对应向上-1行，负增量对应向下1行。
-    ui_scroll(&desktop, delta);  // 共享核心按活动视图更新其行滚动量。
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-- (void)keyDown:(NSEvent *)e {  // 按键回调把平台修饰键和字符换成共享整数事件。
-    BOOL command =  // command 同时接受 Command 与 Control 快捷键。
-             (e.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) != 0,  // | 合并两种掩码，& 提取位，!=0 判断至少一种被按下。
-         shift = (e.modifierFlags & NSEventModifierFlagShift) != 0;  // 同样取得 Shift 状态，供共享核心扩展选区。
-    NSString *chars = e.charactersIgnoringModifiers;  // 借用忽略部分修饰影响的字符对象，用于识别快捷键。
-    unichar c = chars.length ? [chars characterAtIndex:0] : 0;  // 有字符才读取首个 UTF-16 码元；空对象或空串使用零。
-    int key = 0;    // 零表示尚未识别功能事件，后续可转为普通字符。
-    if (command) {  // 修饰键路径先匹配保存、查找与剪贴板动作。
-        switch (c) {  // 首个码元决定本次快捷或功能键分支。
-        case 's':     // 此平台码元对应保存当前文档。
-            key = UI_SAVE_KEY;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'f':  // 此平台码元对应打开查找字段。
-            key = UI_FIND_KEY;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'a':  // 此平台码元对应选择全部文本。
-            key = UI_SELECT_ALL;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'c':  // 此平台码元对应复制当前选区。
-            key = UI_COPY;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'x':  // 此平台码元对应剪切当前选区。
-            key = UI_CUT;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'v':  // 此平台码元对应插入剪贴板内容。
-            key = UI_PASTE;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'z':  // 此平台码元对应切换撤销前后的文本。
-            key = UI_UNDO;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 'l':  // 此平台码元对应清空终端日志。
-            key = AIRI_KEY_CLEAR;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        default:  // 当前码元不匹配此组快捷键，保持 key 为零。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        }
-    } else if (c == NSTabCharacter && (e.modifierFlags & NSEventModifierFlagOption))  // 没有 Command/Ctrl 时，Option-Tab 对应窗口切换。
-        key = UI_NEXT_WINDOW;  // 登记共享核心的切换窗口事件。
-    else  // 未匹配组合快捷键时，继续识别普通功能键
-        switch (c) {  // 首个码元决定本次快捷或功能键分支。
-        case NSLeftArrowFunctionKey:  // 此平台码元对应光标向左移动。
-            key = UI_LEFT;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSRightArrowFunctionKey:  // 此平台码元对应光标向右移动。
-            key = UI_RIGHT;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSUpArrowFunctionKey:  // 此平台码元对应向上移动或选择上一行。
-            key = AIRI_KEY_UP;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSDownArrowFunctionKey:  // 此平台码元对应向下移动或选择下一行。
-            key = AIRI_KEY_DOWN;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSHomeFunctionKey:  // 此平台码元对应移到当前行开头。
-            key = UI_HOME;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSEndFunctionKey:  // 此平台码元对应移到当前行末尾。
-            key = UI_END;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSDeleteFunctionKey:  // 此平台码元对应删除光标后字节。
-            key = UI_DELETE_KEY;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSPageUpFunctionKey:  // 平台PageUp没有文本输入，直接滚动视图。
-            ui_scroll(&desktop, -10);  // PageUp 把当前视图向上滚动十行。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSPageDownFunctionKey:  // 平台PageDown直接向下滚动视图。
-            ui_scroll(&desktop, 10);  // PageDown 把当前视图向下滚动十行。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case NSF5FunctionKey:  // 此平台码元对应提交当前文档执行请求。
-            key = UI_RUN_KEY;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 27:  // 此平台码元对应取消当前框或字段。
-            key = UI_ESCAPE;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        case 127:  // 此平台码元对应平台退格转为共享ASCII退格值8。
-            key = 8;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;    // 当前匹配已完成，停止这一层循环或分支。
-        case '\t':  // 平台制表符映射到UI_TAB；当前Editor正文将它插为四个空格。
-            key = UI_TAB;  // 保存共享事件值，稍后统一交给 ui_key。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        default:  // 当前码元不匹配此组快捷键，保持 key 为零。
-            break;  // 当前匹配已完成，停止这一层循环或分支。
-        }
-    bool file_paste = desktop.active == UI_FILES_APP &&  // Files正文粘贴使用前文保存的文件id，不读取系统文字剪贴板。
-                      desktop.dialog == UI_DIALOG_NONE && desktop.focus == UI_FOCUS_NONE;  // 名称对话框和筛选字段仍是文字接收者，不能走文件动作。
-    if (key == UI_PASTE && !file_paste) {  // 只有文字粘贴才需要从平台字符串交接完整字节。
-        NSString *p = [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString];  // 无字符串类型时返回nil，本回调只借用这个对象。
-        const char *text = p ? p.UTF8String : NULL;  // 只在对象有效时取得UTF-8视图，不保存其指针到桌面。
-        if (!text) {  // 没有平台文字或无法得到字节视图，不能重用上次clipboard。
-            snprintf(desktop.toast, sizeof(desktop.toast), "Clipboard has no text.");  // 使用已有的短提示数组报告拒绝原因，不建立新文档状态。
-            key = 0;  // 不分派UI_PASTE，避免空插入删除选区或粘贴旧内容。
-        } else if (strlen(text) >= sizeof(desktop.clipboard)) {  // 先按完整UTF-8字节数检查，容量还必须容纳末尾NUL。
-            snprintf(desktop.toast, sizeof(desktop.toast), "Clipboard limit: 8191 bytes.");  // 超限整体拒绝，不把截断后的前缀伪装成完整输入。
-            key = 0;  // 文档、保存点和撤销快照都还未被核心修改。
-        } else  // 完整平台文字及终止零都能装入共享数组。
-            memcpy(desktop.clipboard, text, strlen(text) + 1);  // 连同NUL复制到桌面自有数组，核心之后不借用NSString字节。
-    }
-    if (key)  // 识别出非零功能事件后走共享键规则。
-        ui_key(&desktop, key, shift);  // 传递事件与 Shift 状态，改变同一文档或窗口状态。
-    else if (!command && e.characters.length) {  // 没有快捷键修饰且有普通字符时才进行文本键入。
-        const char *p = e.characters.UTF8String;  // 借用当前事件字符串的 UTF-8 字节视图，不保存这个指针。
-        for (; *p; ++p)  // 无初始化子句；逐字节读到 NUL，p 每次前移一字节。
-            if ((unsigned char)*p < 128)  // 转成无符号后只接收 ASCII 字节，避免 signed char 负值误入。
-                ui_key(&desktop, *p, shift);  // 把该 ASCII 字节作为共享文本事件。
-    }
-    if (key == UI_COPY || key == UI_CUT) {  // 核心已经更新自身剪贴板后，再同步给 macOS。
-        [NSPasteboard.generalPasteboard clearContents];  // 清除系统剪贴板原有类型和值。
-        [NSPasteboard.generalPasteboard setString:[NSString stringWithUTF8String:desktop.clipboard]  // 先把共享 NUL 字节串转成 NSString，再交给系统剪贴板。
-                                          forType:NSPasteboardTypeString];  // 声明所写内容是平台字符串类型。
-    }
-    [self setNeedsDisplay:YES];  // 登记需要重画，实际 drawRect 在事件循环稍后执行。
-}
-@end  // 结束 AiriView 的全部回调方法实现
-@interface AiriDelegate : NSObject <NSApplicationDelegate>  // 基础对象实现应用代理协议，接收生命周期回调。
-@end  // 结束 AiriDelegate 的类接口声明
-@implementation AiriDelegate  // 定义应用代理的方法实现。
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {  // 框架在最后窗口关闭后询问是否结束应用。
-    (void)sender;  // 回调签名必须包含应用对象，本策略无需读取它。
-    return YES;    // 该回调返回真，接受对应框架约定。
-}
-@end  // 结束 AiriDelegate 的生命周期方法实现
+```
+
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
+```objective-c
+int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL 字符串指针数组。
+    @autoreleasepool {  // 离开作用域时处理登记在池内的临时对象，C/CG 资源仍显式释放。
+        int w = 1280;  // 软件画布初始宽度为1280逻辑点。
+        int h = 800;   // 软件画布初始高度为800逻辑点。
+        int app = UI_EDITOR;  // 默认活动应用是Editor，名称表下标将覆盖它。
+        const char *snapshot = NULL;  // 未给文件路径时运行真实事件循环。
+        const char *theme = "night";  // 初始会话偏好为夜间。
+        const char *apps[] = {"terminal", "files",    "editor", "tasks",  // 应用名顺序必须与 enum ui_app 一致，前四项从终端到任务。
+                              "system",   "settings", "viewer"};  // 后三项补齐系统、设置和数据查看器。
+        for (int i = 1; i < argc; ++i) {  // 跳过 argv[0] 程序名，按顺序读取选项。
+            if (!strcmp(argv[i], "--snapshot") && i + 1 < argc)  // strcmp 返回零表示相等，同时确认后面还有路径参数。
+                snapshot = argv[++i];  // 先推进到选项值，再保存由运行时持有的路径指针。
+            else if (!strcmp(argv[i], "--size") && i + 1 < argc)  // 尺寸选项同样要求有下一个参数。
+```
+<!-- after -->
+```objective-c
 int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL 字符串指针数组。
     @autoreleasepool {  // 离开作用域时处理登记在池内的临时对象，C/CG 资源仍显式释放。
         bool palette = false;  // 显式调色板模式只输出机器可读颜色。
@@ -314,10 +131,21 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
             else if (!strcmp(argv[i], "--snapshot") && i + 1 < argc)  // strcmp 返回零表示相等，同时确认后面还有路径参数。
                 snapshot = argv[++i];  // 先推进到选项值，再保存由运行时持有的路径指针。
             else if (!strcmp(argv[i], "--size") && i + 1 < argc)  // 尺寸选项同样要求有下一个参数。
-                sscanf(argv[++i], "%dx%d", &w, &h);  // 从1280x800形式读取整数到 w/h；& 传可写变量地址。
-            else if (!strcmp(argv[i], "--app") && i + 1 < argc) {  // 应用选项在已知名称表中查找枚举下标。
-                const char *a = argv[++i];  // 借用当前应用名参数。
-                for (int j = 0; j < UI_APP_COUNT; ++j)  // 只遍历有效应用名称数量。
+```
+
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
+```objective-c
+                    if (!strcmp(a, apps[j]))  // 输入字符串与名称相等才匹配。
+                        app = j;  // 名称表下标同时就是后续 UI 应用身份。
+            }
+            else if (!strcmp(argv[i], "--theme") && i + 1 < argc)  // 主题用于固定快照，也可作为原生窗口初始偏好。
+                theme = argv[++i];  // 两种模式共享所有内容和布局。
+        }
+        struct ui_backend b;     // 局部回调表先由参考服务初始化。
+```
+<!-- after -->
+```objective-c
                     if (!strcmp(a, apps[j]))  // 输入字符串与名称相等才匹配。
                         app = j;  // 名称表下标同时就是后续 UI 应用身份。
             } else if (!strcmp(argv[i], "--tab") && i + 1 < argc)  // 页签选项接受整数下标。
@@ -334,19 +162,38 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
             return 0;  // JSON 输出完成后正常退出。
         }
         struct ui_backend b;     // 局部回调表先由参考服务初始化。
-        ui_fixture_backend(&b);  // 重建本进程内的参考文件和任务记录。
-        boot = *b.boot;     // 解引用后复制整个启动结构，不保留服务原结构的借用。
-        b.boot = &boot;     // 让桌面之后借用平台稳定副本。
-        size_buffer(w, h);  // 按新尺寸更新平台画布及启动描述。
-        airi_console_init(&console, &boot);  // 终端和界面都读取同一平台启动副本。
+```
+
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
+```objective-c
+        ui_init(&desktop, b, &console);      // 复制回调表，连接 console 并建立桌面初始窗口。
+        desktop.theme = !strcmp(theme, "day") ? UI_DAY : UI_NIGHT;  // 桌面持有呈现偏好，文本会话不持有颜色状态。
+        if (app == UI_VIEWER) {  // Viewer 启动前需先装入一份实际 CSV 数据。
+            for (unsigned i = 0; i < desktop.file_count; ++i)  // 遍历有效文件快照。
+```
+<!-- after -->
+```objective-c
         ui_init(&desktop, b, &console);      // 复制回调表，连接 console 并建立桌面初始窗口。
         desktop.theme = !strcmp(theme, "day") ? UI_DAY : UI_NIGHT;  // 桌面持有呈现偏好，文本会话不持有颜色状态。
         control_sheet = !strcmp(scenario, "controls");  // 控件表只用于宿主视觉验证。
         if (app == UI_VIEWER) {  // Viewer 启动前需先装入一份实际 CSV 数据。
             for (unsigned i = 0; i < desktop.file_count; ++i)  // 遍历有效文件快照。
-                if (strstr(desktop.files[i].name, ".csv")) {  // 找到包含.csv的文件名；strstr 返回匹配位置或 NULL。
-                    ui_open_document(&desktop, i);  // 按快照下标读取并解析数据，供 Viewer 渲染。
-                    break;  // 当前匹配已完成，停止这一层循环或分支。
+```
+
+<!-- replace: frontend/platform/macos/preview.m -->
+<!-- before -->
+```objective-c
+                }
+        }
+        ui_open(&desktop, (enum ui_app)app);    // 最终打开指定应用，枚举值来自名称表匹配。
+        desktop.windows[app].maximized = true;  // 默认把应用内容放到最大化工作区。
+        desktop.monitor = app == UI_EDITOR;     // Editor 场景显示旁边的状态监视区域。
+        if (snapshot) {  // 有输出路径时只生成图片，不进入事件循环。
+            dump(snapshot);  // 先共享绘图，再将画布按 PPM 字节布局输出。
+```
+<!-- after -->
+```objective-c
                 }
         }
         ui_open(&desktop, (enum ui_app)app);  // 最终打开指定应用，枚举值来自名称表匹配。
@@ -395,37 +242,7 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
         }
         if (snapshot) {  // 有输出路径时只生成图片，不进入事件循环。
             dump(snapshot);  // 先共享绘图，再将画布按 PPM 字节布局输出。
-            free(pixels);    // 快照写完后释放平台像素数组，再结束当前进程。
-            return 0;  // 正常结束当前程序，成功状态交给启动它的命令。
-        }
-        [NSApplication sharedApplication];  // 取得框架唯一应用对象，并建立 NSApp 全局入口。
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];  // 作为有窗口与 Dock 图标的普通应用运行。
-        AiriDelegate *delegate = [AiriDelegate new];  // new 返回拥有的代理对象；当前未启用 ARC，局部指针不自动释放它。
-        [NSApp setDelegate:delegate];  // 登记生命周期回调的接收对象。
-        NSWindow *window = [[NSWindow alloc]  // 先分配原生窗口实例，再由下一行初始化。
-            initWithContentRect:NSMakeRect(0, 0, w, h)  // 以指定宽高建立窗口内容区域。
-                      styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |  // 掩码组合标题栏和关闭按钮。
-                                NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable  // 继续允许最小化与调整原生窗口尺寸。
-                        backing:NSBackingStoreBuffered  // 让平台缓存绘制结果，按窗口事件更新。
-                          defer:NO];  // 立即创建窗口底层资源，不延后到首次显示。
-        window.title = @"AiriOS";  // @ 字符串创建 NSString，标题使用项目名称；参考服务的能力边界由应用内错误说明。
-        window.contentMinSize = NSMakeSize(1024, 768);   // 交互窗口内容最小1024×768逻辑点。
-        window.contentMaxSize = NSMakeSize(1800, 1100);  // 最大内容尺寸与软件画布上限一致。
-        window.acceptsMouseMovedEvents = YES;  // 允许未按下时收到 mouseMoved 回调。
-        AiriView *view = [[AiriView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];  // 分配并初始化共享画布视图，初始矩形匹配内容大小。
-        window.contentView = view;  // 把视图装入窗口，由窗口负责展示和投递事件。
-        [window makeFirstResponder:view];  // 键盘事件首先送到 AiriView 的 keyDown。
-        [window center];  // 将原生窗口居中显示。
-        [window makeKeyAndOrderFront:nil];      // 置前并成为键窗口，nil 表示此操作没有特定发送对象。
-        [NSApp activateIgnoringOtherApps:YES];  // 激活当前应用，使键盘输入可进入此窗口。
-        [NSApp run];   // 进入框架事件循环；回调修改 desktop 并请求重画。
-        free(pixels);  // 事件循环结束后没有绘图读取者，再释放最后一份画布。
-        return 0;      // 正常结束当前程序，成功状态交给启动它的命令。
-    }
-}
 ```
-
-`--state normal|empty|loading|error|offline` 把所选服务状态交给 `ui_service_state`；`--scenario dialog|dirty|workspace|save-error|system-tasks|controls` 在进入事件循环前布置窗口或发出失败动作，省略它时采用 none。`--tab` 接收从零开始的当前应用页签下标，应用名、尺寸、主题与输出路径沿用 G23 的参数。CLI演示参数采用固定合法值；未知应用仍保留Editor，未知初始主题仍采用Night，与控制台明确报错的theme invalid不同。
 
 控件表采用2像素控件圆角和2像素窗口圆角，绘制继续使用4×4子像素采样。Default、Hover、Pressed、Selected、Keyboard focus和Disabled与状态位数组按相同下标配对。右列文字分别用正文、辅助、成功、警告与错误角色，因此截图同时检查非按钮内容。
 
@@ -433,13 +250,7 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
 
 <a id="state-preservation"></a>
 
-appearance先真实输入unsaved，建立选择，分别复制工作文档、最近保存的字节、光标、锚点和Editor矩形，再打开Settings。点击点从u_window_body取得内容原点并叠加实际按钮坐标；按钮间隙不应改变偏好。切到Day再回Night后核对同一份快照，能发现切换时误调用ui_init或误清dirty。
-
-密度检查先点两个按钮之间和同高度的右侧空白，状态保持宽松；再真实点Compact与Comfortable，分别得到1和0。这样不会把“所有输入都忽略”当成命中正确。
-
-颜色测试还确认实际RGB如0x123456不会被当成角色再映射。绘图边界测试把可见像素放在两端哨兵和每行填充之间，使用24/32位像素及四组尺寸分别绘制全部应用。越界圆角只能写有效位置，行距不能被误当成宽度。
-
-编辑、保存、文件与任务动作、窗口事件一同进入下面程序。各函数先start重建独立参考服务，坏CSV或离线保存不会污染下一项。assert失败直接结束进程，不能仅生成一张图便认定状态正确。
+下面把这些检查写进一个普通 C 进程。start 每次重建 reference、console、desk，使坏 CSV、离线状态或任务删除不带入下一项；typing 则逐字节调用 ui_key，和一次粘贴整串的历史单位不同。各检查函数只修改本项状态，main 在文件末尾依次调用，任何 assert 失败都会立即中止，最后才打印 PASS。先写共同对象和输入 helper。
 
 **新建 `tests/unit/ui_test.c`：**
 
@@ -464,6 +275,12 @@ static void typing(const char *s) {  // 把NUL字符串转换为连续ASCII键�
     while (*s)  // 当前字节非NUL才继续键入。
         ui_key(&desk, *s++, false);  // 先读取当前字节送键事件，再推进指针一字节。
 }
+```
+
+共享起点和 typing 已定义。workflow 沿一份文档串起编辑、保存、撤销、剪贴板及服务动作：全选后的第一字符替换旧选区，后续逐键追加，所以这里第一次 Undo 恢复的是最后一个键入之前的文字，不是 G17 整次粘贴前的 main.lua。保存后还要 read 回同样正文；执行与离线保存失败分别留下反馈。后半创建、改名、删除、CSV、任务和切窗继续使用这一份服务。追加这个独立检查函数。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void workflow(void) {  // 沿同一文档修改、保存、撤销、剪贴板与服务失败走完动作。
     start();  // 以重新初始化的参考服务和桌面开始本项检查。
     assert(desk.active == UI_EDITOR && desk.editor_id == 1);  // 初始活动Editor必须打开服务id=1的文档。
@@ -524,6 +341,12 @@ static void workflow(void) {  // 沿同一文档修改、保存、撤销、剪�
     ui_key(&desk, UI_NEXT_WINDOW, false);      // 活动应用沿窗口顺序切换。
     assert(desk.active != UI_EDITOR);  // 切换后不能仍停在原Editor。
 }
+```
+
+workflow 结束后，下一函数先 start，回到独立原文。它先让查找字段接收粘贴，再保留 Editor 查找栏和选区切到 Files，确认筛选回车没有覆盖文档选择。回到 Editor 后才检查8191字节上限、全选短文释放容量、滚动和坏CSV；末尾用 Escape 取消待关闭意图，并观察名称框的全选替换。追加输入边界检查。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void input_boundaries(void) {  // 沿查找、容量、滚动、坏CSV和对话框检查输入边界。
     start();  // 以重新初始化的参考服务和桌面开始本项检查。
     ui_key(&desk, UI_FIND_KEY, false);  // 查找栏获得输入焦点。
@@ -589,6 +412,12 @@ static void input_boundaries(void) {  // 沿查找、容量、滚动、坏CSV和
     ui_key(&desk, UI_PASTE, false);  // 以容量和ASCII合同插入完整剪贴板。
     assert(!strcmp(desk.dialog_input, "paste.lua"));  // 字段全选粘贴必须完整替换名称。
 }
+```
+
+再从新起点检查拒绝与恢复。两个 UTF-8 字节组成的 é 交给 ASCII 插入路径，必须整体拒绝，原文、undo 和 dirty 不变；随后真正修改文档，离线关闭前保存应失败，并消耗 pending_close。恢复服务再普通保存时，Editor 要继续打开。后半用两个显式目录与筛选后的唯一项，确认查询不偷偷改变动作目录、快照下标不冒充服务身份。追加这些合同检查。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void explicit_contracts(void) {  // 核对拒绝非ASCII、失败关闭、显式目录和可见选择三组合同。
     start();  // 以重新初始化的参考服务和桌面开始本项检查。
     char original[UI_DOC_SIZE];     // 独立数组保留操作前的文档字节，供后面比较。
@@ -628,6 +457,12 @@ static void explicit_contracts(void) {  // 核对拒绝非ASCII、失败关闭�
     assert(id > 0);  // 新创建项必须分配有效正id。
     assert(backend.action(NULL, "/home/airi", UI_RENAME, id, "main.lua", "", error, sizeof(error)));  // 不同目录可以有同名main.lua，显式目录与id决定此次目标。
 }
+```
+
+下面回到主题问题。appearance 先在原文首部逐键插入 unsaved，再全选形成真实未保存文档；document、saved、cursor/anchor 和 Editor rect 各自留一份比较值。打开 Settings 后由 ui_pointer 发送 Day、Night 的按下与释放，要求 theme 改变，而文档、保存点、选区、dirty 和 Editor 几何保留。随后同一 console 输入主题命令，非法主题也不能覆盖已有模式。点击点仍由 u_window_body 取得原点并叠加按钮坐标，主题间隙也须保持已有偏好；末尾还以0x123456与日夜背景检查实际颜色映射。追加外观状态检查。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void appearance(void) {  // 用真实设置点击检查换色不损坏文档和窗口。
     start();  // 每个用例重建独立会话。
     typing("unsaved");  // 制造真实未保存文本。
@@ -668,6 +503,12 @@ static void appearance(void) {  // 用真实设置点击检查换色不损坏文
     u_theme(UI_NIGHT);  // 切换渲染器模式。
     assert(day != u_color(U_BG));  // 确认不是仅更改设置标签。
 }
+```
+
+状态保持已检查，boundary_render 再给同一个渲染器换输入布局。四组宽高、24/32位和两种主题逐组配对；每行在可见像素后额外留16字节，整块首尾各留32字节并置0xa5。全部应用、页签、服务状态、长名称框和越界圆角都在这块数组内绘制；最后既查首尾，也逐行查填充，才释放内存。追加绘图边界检查。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void boundary_render(void) {  // 在多尺寸、多位布局和哨兵内存上调用同一绘图实现。
     const unsigned widths[] = {640, 1024, 1280, 1600}, heights[] = {480, 768, 800, 900};  // 同下标配对四种画布尺寸。
     for (unsigned mode = UI_NIGHT; mode <= UI_DAY; ++mode)  // 所有像素边界用例在两种主题下执行。
@@ -724,7 +565,13 @@ static void boundary_render(void) {  // 在多尺寸、多位布局和哨兵内�
             free(p);  // 全部绘图和检查完成后才释放整块主机内存。
         }
 }
-static void mouse_windows(void) {  // 发送真实鼠标阶段序列，观察移动、最大化、最小化与关闭。
+```
+
+最后的窗口检查继续走事件入口：标题按下、移动、释放改变位置；最大化与恢复、最小化与重新打开保留同一窗口；有修改时关闭必须先确认，Discard 恢复 saved 后才关闭。继续追加这个独立函数。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
+static void mouse_windows(void) {  // 通过 ui_pointer 发送 C 事件序列，观察移动、最大化、最小化与关闭。
     start();  // 以重新初始化的参考服务和桌面开始本项检查。
     struct ui_window *w = &desk.windows[UI_EDITOR];  // 借用同一Editor窗口对象，后续事件直接修改它。
     int ox = w->rect.x, oy = w->rect.y;  // 保存初始左上坐标供位移比较。
@@ -747,6 +594,12 @@ static void mouse_windows(void) {  // 发送真实鼠标阶段序列，观察移
     assert(!w->open && !desk.dirty);  // 放弃后窗口关闭且工作文本回到已保存状态。
     assert(!strcmp(desk.editor, desk.saved));  // 放弃动作恢复saved字节，不写新文本到服务。
 }
+```
+
+密度检查先点两个按钮之间和同高度的右侧空白，状态保持宽松；再真实点Compact与Comfortable，分别得到1和0。这样不会把“所有输入都忽略”当成命中正确。 密度函数也先 start，随后 main 组合全部独立检查，只有所有断言通过才打印 PASS。继续追加至文件结束。
+
+<!-- append: tests/unit/ui_test.c -->
+```c
 static void density_hit_boxes(void) {  // 密度状态只由两个当前可见按钮改变，空白不冒充Compact。
     start();  // 独立重建参考服务与桌面，不继承前一项的模式或对话框。
     ui_open(&desk, UI_SETTINGS);  // Settings成为当前内容点击接收者。
@@ -775,11 +628,9 @@ int main(void) {  // 观察程序入口；返回非零表示预期状态未出�
 }
 ```
 
-保存失败留下错误框、未保存文本和打开的Editor；恢复服务后再次保存才更新保存点。boundary_render检查全部哨兵和行填充，再释放像素。ASan/UBSan检查非法访问和未定义行为；哨兵另检查“仍在已分配数组内、却写入非像素填充”的错误。
+ASan/UBSan检查非法访问和未定义行为；哨兵另检查“仍在已分配数组内、却写入非像素填充”的错误。
 
-`ui_test.c` 检查共享桌面，另一个程序检查 G24 的 guest 显示适配。它在主机内构造启动描述，把设备地址替换为带哨兵和行填充的数组，再同步调用显示接口。先画仪表台，再建立另一份 console，要求首次绘图为它装好扩展；随后沿新会话发送 theme day 和 theme night，并比较底栏同一像素的三个颜色字节。这样同时检查换会话重新绑定与同会话逐帧保留主题。哨兵继续核对写入边界，实际 UEFI 映射与 QEMU 展示仍由后面的 guest 命令检查。新建 `tests/unit/display_test.c`。
-
-同一地址不一定仍是原会话。下面先从仪表台切到局部console，确认新对象获得扩展；再在原地址重新初始化，使扩展清空，重画后必须恢复。随后沿同一对象发出 `theme day` 与 `theme night`，比较实际底栏像素，区分“重置后重新绑定”与“每帧都重置而丢失主题”两种行为。
+ui_test.c 检查共享桌面，接下来另建 tests/unit/display_test.c 单独链接 G24 的显示适配。它在主机内构造启动描述，把设备地址换成带哨兵和填充的数组后同步绘图。这里检查适配代码的写入与会话关系，实际 UEFI 映射及 QEMU 展示仍由后面的 guest 命令检查。先写启动 fixture 和完整命令输入 helper。
 
 <a id="code-tests-unit-display-test-c-1"></a>
 
@@ -792,7 +643,7 @@ int main(void) {  // 观察程序入口；返回非零表示预期状态未出�
 #include <stdio.h>   // 输出本轮完成记录。
 #include <airi/kernel.h>   // 借用启动描述与图形适配声明。
 #include <airi/console.h>  // 通过同一文本命令模型切换视图。
-static AiriBootInfo fixture(void) {  // 构造合法启动输入，各故障都从它的独立副本开始。
+static AiriBootInfo fixture(void) {  // 构造合法启动输入；每组布局取一份副本，同组故障逐项修改并恢复字段。
     AiriBootInfo b = {.magic = AIRI_BOOT_MAGIC,  // 指定magic识别协议，未指定成员按C规则清零。
                       .version = AIRI_BOOT_VERSION,  // 采用当前接口版本。
                       .size = sizeof(AiriBootInfo),  // 字节大小与编译的结构布局一致。
@@ -812,6 +663,14 @@ static void type(struct airi_console *c, const char *s) {  // 把完整命令按
         airi_console_key(c, *s++);  // 先取当前字节送键事件，再将源指针推进。
     airi_console_key(c, '\n');  // 命令末尾明确发送提交键，不把NUL当按键。
 }
+```
+
+fixture 只建立启动合同与两条内存区域，尚无可写设备。graphics_tests 每轮分配带哨兵和填充的主机数组，把地址写进本轮 BootInfo，再调用 G24 的真实适配代码；这仍是主机边界检查，不是实际 UEFI 映射。先画仪表台，再切换和重置命令会话，后面继续检查主题像素与各命令视图。追加本轮绘图检查。
+
+同一地址不一定仍是原会话。显示检查先由静态仪表台切到局部 console，确认新对象获得扩展；再在原地址重新初始化，使 extension 清空，重画必须恢复绑定。随后沿同一对象发送 theme day、theme night，底栏同一像素先变化再恢复。前者检查漏重绑，后者检查每帧重建而丢主题，两项不能用一次返回true互相代替。
+
+<!-- append: tests/unit/display_test.c -->
+```c
 static void graphics_tests(void) {  // 让真实共享绘图在主机有界画布运行，核对两端和行填充。
     /* Guarded 24/32-bit framebuffer with padded scanlines: exercise real renderer. */
     const unsigned layouts[] = {24, 32, 32};  // 前两次640×480分别24/32位，第三次1280×800采用32位。
@@ -842,8 +701,14 @@ static void graphics_tests(void) {  // 让真实共享绘图在主机有界画�
         assert(!c.extension);  // 确认这次重置确实撤下了此前的命令消费者。
         assert(airi_console_draw(&c));  // 地址未变也必须发现绑定失效并重建桌面。
         assert(c.extension);  // 重置后的会话重新获得自己的主题命令入口。
+```
+
+绑定检查通过以后，取底栏最右侧像素的前三字节，避开文字和窗口。night 是独立副本，后续帧可以覆盖原像素；同一 console 输入 Day 后要求字节不同，输入 Night 后要求恢复。再绘四种视图、内存翻页并查首尾及行填充，最后故意损坏 pitch、高度和通道重叠，分别要求描述验证拒绝。继续追加同一函数及主入口。
+
+<!-- append: tests/unit/display_test.c -->
+```c
         unsigned char *sample = pixels + 32 + (height - 1) * pitch + (width - 1) * (layouts[k] / 8);  // 取底栏最右像素的前三字节，避开文字和窗口。
-        unsigned char night[3];  // 保存夜间底面RGB的设备字节，24和32位布局都使用这三个颜色字节。
+        unsigned char night[3];  // 保存夜间底面前三个设备颜色字节；24/32 位均比较它们。
         memcpy(night, sample, sizeof(night));  // 独立记录新会话首帧，不借用会被下一帧覆盖的像素。
         type(&c, "theme day");  // 命令必须通过新console的扩展改变同一桌面主题。
         assert(airi_console_draw(&c));  // 同一console重画，不能重新初始化并丢掉刚设置的主题。
@@ -917,7 +782,7 @@ ui-test:
 	    kernel/lib/base.c kernel/boot/info.c kernel/console/console.c -o build/ui/ui_test
 # 运行前端动作序列与渲染哨兵检查。
 	./build/ui/ui_test
-# 同时检查真实 guest 显示适配的像素边界。
+# 在主机中链接 guest 显示适配代码，检查像素边界。
 	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude -Ifrontend/include tests/unit/display_test.c kernel/lib/base.c kernel/boot/info.c kernel/console/console.c kernel/console/display.c $(UI_SOURCES) -o build/ui/display_test
 	./build/ui/display_test # 执行当前带哨兵画布检查，失败中止Make。
 
@@ -939,13 +804,7 @@ lab-editor:
 
 <a id="contrast-and-snapshots"></a>
 
-sRGB的八位编码不是线性光强。luminance先从RGB整数右移并掩码取出红、绿、蓝，把每个0..255通道除以255；较小值除12.92，其余值经过2.4次幂，再按三个权重求和。两个相对亮度排序为low/high，(high+0.05)/(low+0.05)给出对比。普通文字目标4.5:1，必要控件边界和焦点目标3:1，对应[W3C文字对比](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)与[非文字对比](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)。比值不能判断遮挡、截字或窗口内容是否出现，仍需检查实际图像。
-
-pairs每项是(前景名,背景名,目标比例)。例如("TEXT","SURFACE",4.5)从本次palette字典取两个RGB；29组组合分别跑Night和Day，形成58条结果。报告保存原始比值，失败组合导致总检查失败。轻分隔线不承担控件识别，禁用状态也不冒充正常可操作状态。
-
-cases每项是(输出名,应用名,尺寸,服务状态,场景,页签)，如("editor-1280x800","editor","1280x800","normal","none",0)。七个应用乘三尺寸是21项，再加入四个System页签、三个Settings页签、八个列表状态和六个场景，共42项。外层遍历主题，内层解包六元组，两个模式各重跑42个独立进程，保留84张图。
-
-**新建 `scripts/ui_preview.py`：**
+新建 ui_preview.py。它有两个入口：preview 构建并打开交互应用，check_frontend 先运行可移植 C 检查，再按平台与 screenshots 选择是否生成图库。共同导入不启动窗口；先写导入与应用名称表。
 
 <a id="code-scripts-ui-preview-py-1"></a>
 
@@ -964,6 +823,12 @@ from tools import ROOT, make_command      # 复用根目录和Make工具参数�
 
 APPS = ('terminal', 'files', 'editor', 'tasks', 'system', 'settings', 'viewer')  # 固定顺序对应C应用枚举。
 
+```
+
+交互入口先需要一个可由 macOS 打开的包。package_preview 把本轮可执行文件复制到 Contents/MacOS/AiriOSFrontend，并写 Info.plist；CFBundleExecutable 必须同这个文件名对应。preview 校验字体、构建 ui-preview 后取得包路径，再用 open -n -W 启动新实例并等待退出。包装没有增加绘图实现，高分屏标志也不改变逻辑画布尺寸。继续追加这两个入口 helper。
+
+<!-- append: scripts/ui_preview.py -->
+```python
 def package_preview():  # 给已有可执行文件建立macOS .app目录结构。
     app = ROOT / 'build/ui/AiriOS Frontend.app'  # .app是包含程序和元数据的目录，不是另一份源码。
     executable = app / 'Contents/MacOS/AiriOSFrontend'     # macOS按元数据从这里找实际可执行文件。
@@ -989,6 +854,16 @@ def preview(app='editor', state='normal'):  # 默认打开Editor普通状态。
     bundle = package_preview()  # 把刚生成的程序装进.app目录。
     subprocess.run(['open', '-n', '-W', str(bundle), '--args', '--app', app, '--state', state], cwd=ROOT, check=True)  # -n新建实例，-W等待退出，--args后传给程序。
 
+```
+
+sRGB的八位编码不是线性光强。luminance先从RGB整数右移并掩码取出红、绿、蓝，把每个0..255通道除以255；较小值除12.92，其余值经过2.4次幂，再按三个权重求和。两个相对亮度排序为low/high，(high+0.05)/(low+0.05)给出对比。普通文字目标4.5:1，必要控件边界和焦点目标3:1，对应[W3C文字对比](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)与[非文字对比](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)。比值不能判断遮挡、截字或窗口内容是否出现，仍需检查实际图像。
+
+pairs每项是(前景名,背景名,目标比例)。例如("TEXT","SURFACE",4.5)从本次palette字典取两个RGB；29组组合分别跑Night和Day，形成58条结果。报告保存原始比值，失败组合导致总检查失败。轻分隔线不承担控件识别，禁用状态也不冒充正常可操作状态。
+
+现在追加 check_contrast，让 JSON 恢复的角色字典成为亮度计算的实际输入。
+
+<!-- append: scripts/ui_preview.py -->
+```python
 def check_contrast(out):  # 使用已编译程序导出的角色颜色计算实际组合。
     def luminance(rgb):  # sRGB 编码先转换成线性光，再加权求相对亮度。
         total = 0.0  # 黑色的初始亮度为零。
@@ -1025,6 +900,12 @@ def check_contrast(out):  # 使用已编译程序导出的角色颜色计算实�
         raise RuntimeError(f'Contrast targets failed: {failures}')  # 显示具体模式、角色、比值与目标。
     print(f'PASS contrast: {len(results)} text/control combinations')  # 仅所有组合成立才报告通过。
 
+```
+
+颜色计算已有了输入与判定，check_frontend 再把整次运行接起来：先 verify_fonts，再以 check=True 运行 ui-test；无截图请求或非macOS到此结束。需要图库时重新构建原生程序，建立 artifacts/frontend，移除旧的两份汇总，再检查本轮配色。中途失败不能留下旧成功JSON冒充本次结果。追加总入口的准备部分。
+
+<!-- append: scripts/ui_preview.py -->
+```python
 def check_frontend(screenshots=True):  # 先跑可移植C行为检查，平台支持时再生成状态图库。
     verify_fonts()  # 检查和显示使用相同字库。
     subprocess.run(make_command(target='ui-test'), cwd=ROOT, check=True)  # C状态与绘图检查可在非macOS运行。
@@ -1036,6 +917,14 @@ def check_frontend(screenshots=True):  # 先跑可移植C行为检查，平台�
     for name in ('contrast.json', 'render-tests.json'):  # 两份汇总只能表示本轮完整完成的检查。
         (out / name).unlink(missing_ok=True)  # 本轮若中途失败，不保留旧成功汇总。
     check_contrast(out)  # 先检查实际语义颜色，再生成状态图供目视复核。
+```
+
+cases每项是(输出名,应用名,尺寸,服务状态,场景,页签)，如("editor-1280x800","editor","1280x800","normal","none",0)。七个应用乘三尺寸是21项，再加入四个System页签、三个Settings页签、八个列表状态和六个场景，共42项。外层遍历主题，内层解包六元组，两个模式各重跑42个独立进程，保留84张图。
+
+下面只建立参数记录，尚未运行这些场景。元组每项的角色保持固定，后面的循环才把它们逐一传给原生程序。继续追加场景表。
+
+<!-- append: scripts/ui_preview.py -->
+```python
     cases = []  # 每项六元组依次为name/app/size/state/scenario/tab。
     for size in ('1024x768', '1280x800', '1600x900'):  # 三种实际布局尺寸。
         for app in APPS:  # 七个应用每种尺寸各生成一张。
@@ -1050,6 +939,12 @@ def check_frontend(screenshots=True):  # 先跑可移植C行为检查，平台�
     for scenario in ('dialog', 'dirty', 'workspace', 'save-error', 'system-tasks', 'controls'):  # 单独观察执行失败、未保存与两窗口工作区。
         cases.append((scenario, 'editor', '1280x800', 'normal', scenario, 0))  # 场景名称也成为输出文件名。
     results = []  # 只在快照和转换均成功后加入对应结果。
+```
+
+场景表已形成42项，现在外层选主题、内层解包这六项。输出名加主题前缀，PPM路径仍是 command 列表中的一个元素，即使目录有空格也不会拆成多项。原生快照和sips转换各限15秒，两者成功才加入结果；所有场景完成后才写 render-tests.json 并报告84张。继续追加循环与报告。
+
+<!-- append: scripts/ui_preview.py -->
+```python
     for theme in ('night', 'day'):  # 两个模式各自重跑相同42项场景。
         for name, app, size, state, scenario, tab in cases:  # 六元组解包成输出名与原生参数。
             name = theme + '-' + name    # 文件名明确标出模式，两个版本都保留。
@@ -1067,7 +962,7 @@ def check_frontend(screenshots=True):  # 先跑可移植C行为检查，平台�
     print(f'PASS frontend renders: {len(results)} application/layout/state snapshots')  # 按真实完成数量报告双主题样本。
 ```
 
-subprocess.run的参数列表把PPM路径作为一个元素，即使目录名有空格也不会拆开。每张图和sips转换各有15秒超时，成功才追加结果。preview为交互窗口建立.app包：Contents/MacOS保存本轮可执行文件，Info.plist说明实际程序名，open -n -W打开新实例并等待退出。包装没有增加另一套绘图，高分屏标志也没有改变软件画布的逻辑尺寸。
+两份JSON分别记录本轮颜色比值与成功快照路径；生成文件和数值通过以后，仍要查看相同场景中的遮挡、截字和内容。原生图来自独立参考进程，guest 的显示与输入还要走下方独立命令，不能用主机图库替代。
 
 **在学习目录根目录运行：**
 

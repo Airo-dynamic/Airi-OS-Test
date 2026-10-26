@@ -20,7 +20,7 @@ ui-test:
 	    kernel/lib/base.c kernel/boot/info.c kernel/console/console.c -o build/ui/ui_test
 # 运行前端动作序列与渲染哨兵检查。
 	./build/ui/ui_test
-# 同时检查真实 guest 显示适配的像素边界。
+# 在主机中链接 guest 显示适配代码，检查像素边界。
 	$(HOST_CC) -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -Iinclude -Ifrontend/include tests/unit/display_test.c kernel/lib/base.c kernel/boot/info.c kernel/console/console.c kernel/console/display.c $(UI_SOURCES) -o build/ui/display_test
 	./build/ui/display_test # 执行当前带哨兵画布检查，失败中止Make。
 

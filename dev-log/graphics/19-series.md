@@ -2,147 +2,20 @@
 
 Files能按服务id读取series.csv的文字，Viewer需要整数时间与测量值。现在沿参考文件中的seconds,load标题、0,12和1,18两行，把十进制字符转换成(0,12)与(1,18)，整份校验后发布成对数组，再按实际时间差画曲线。错误CSV保留旧数组。
 
-**完整写入 `frontend/include/ui.h`：**
+曲线要同时保存时间与测量值，series_times[i]、series_values[i] 共同表示第 i 点，series_count 限定有效前缀，series_name 记录成功来源。在 ui.h 依次替换以下旧窗口，加入四项曲线状态并更新文档打开接口的说明；已有文件、文档与窗口状态继续保留。
 
 <a id="code-frontend-include-ui-h-1"></a>
 
-<!-- write: frontend/include/ui.h -->
+<!-- replace: frontend/include/ui.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_UI_H  // 首次包含才展开下面声明，避免类型重复定义。
-#define AIRI_UI_H  // 标记这个头文件已经进入当前编译单元。
-#include <airi/console.h>  // 取得命令环、按键与视图类型。
-#include "render.h"  // 取得像素、矩形与共享绘图声明。
-#define UI_DOC_SIZE 8192  // 文档总容量含结尾NUL，最多保存8191文本字节。
-#define UI_FILES 32  // 单次文件快照至多32条。
-#define UI_TASKS 16  // 单次任务快照至多16条。
-
-enum ui_app {  // 应用身份从零递增，与平台名称表和窗口数组下标对应。
-    UI_TERMINAL,   // 终端应用，读取同一console命令对象。
-    UI_FILES_APP,  // 文件列表应用，读取服务快照。
-    UI_EDITOR,     // 维护文档工作副本的编辑器。
-    UI_TASKS_APP,  // 显示任务记录和服务统计。
-    UI_SYSTEM,     // 展示启动、内存、设备与日志。
-    UI_SETTINGS,   // 修改界面主题与密度。
-    UI_VIEWER,    // 绘制已成功解析的CSV数据。
-    UI_APP_COUNT  // 前面有效应用数量，作为数组容量和循环上界。
+    unsigned theme;    // 桌面自己持有的日夜模式，文本会话不依赖此字段。
+    unsigned density;  // Files/Tasks列表行高，0为36像素、1为28像素；相应绘图和列表命中共用。
 };
-enum ui_mode { UI_LIVE, UI_REFERENCE };  // 区分内核真实服务与主机会话参考服务。
-enum ui_state { UI_NORMAL, UI_EMPTY, UI_LOADING, UI_ERROR, UI_OFFLINE };  // 列表和动作的可见服务状态，不等同线程调度状态。
-enum ui_action {  // 回调接收的服务动作，同一动作具有明确文件或任务目标。
-    UI_SAVE,  // 将当前字节写回文档id对应记录。
-    UI_CREATE_FILE,  // 在显式目录下建立普通文件。
-    UI_CREATE_DIR,   // 建立目录记录。
-    UI_RENAME,   // 保留id，修改对应记录名称。
-    UI_DELETE,   // 删除id对应记录。
-    UI_EXECUTE,  // 请求执行文档，当前参考服务报告未连接。
-    UI_STOP,     // 删除可停止的参考任务记录，不终止宿主进程。
-    UI_COPY_FILE,  // 在目标目录创建源文件的副本。
-    UI_MOVE_FILE   // 把源id对应记录移到目标目录。
-};
-enum ui_dialog { UI_DIALOG_NONE, UI_DIALOG_ERROR, UI_DIALOG_CLOSE, UI_DIALOG_NEW_FILE, UI_DIALOG_NEW_DIR, UI_DIALOG_RENAME, UI_DIALOG_DELETE, UI_DIALOG_STOP, UI_DIALOG_SAVE_AS, UI_DIALOG_INFO };  // 对话框类型决定输入、确认与取消后续动作；NONE为零。
-enum ui_focus { UI_FOCUS_NONE, UI_FOCUS_FILTER, UI_FOCUS_FIND };  // 键入目标为应用正文、筛选字段或查找字段。
-enum ui_drag { UI_DRAG_NONE = -1 };  // 尚无指针拖动，初始化值表示无操作
-enum ui_key {  // 功能键编号与ASCII字节分开，避免把命令误插入正文。
-    UI_LEFT = 512,  // 功能键从512起，不与0..127的文本字节混淆。
-    UI_RIGHT,  // 后续枚举自动递增，表示右移光标。
-    UI_HOME,   // 光标定位当前行开头。
-    UI_END,    // 光标定位当前行末尾。
-    UI_DELETE_KEY,  // 删除光标后面的字节或文件列表项。
-    UI_ESCAPE,      // 取消当前框或字段操作。
-    UI_TAB,  // Editor正文收到此键时插入四个空格
-    UI_SAVE_KEY,    // 请求保存当前文档。
-    UI_FIND_KEY,    // 打开查找字段。
-    UI_SELECT_ALL,  // 当前输入对象全选。
-    UI_COPY,     // 把选区复制到文本剪贴板。
-    UI_CUT,      // 复制选区后删除文本。
-    UI_PASTE,    // 按容量与ASCII限制插入剪贴板。
-    UI_UNDO,     // 交换前后文本快照。
-    UI_RUN_KEY,  // 请求执行当前文档。
-    UI_NEXT_WINDOW  // 活动窗口切到绘制顺序中的下一项。
-};
-struct ui_file {  // 服务复制出来的一条文件快照，不保存文件内容。
-    int id;  // 稳定服务身份，排序和筛选不改变它。
-    bool directory;  // 区分目录和普通文件，决定打开后的动作。
-    char name[64], path[128];  // 保存有NUL终止的名称与完整路径，容量分别64/128字节。
-    unsigned bytes;  // 文件内容字节数，目录行可显示其他语义。
-};
-struct ui_task {  // 当前服务提供的一条任务记录。
-    int pid;  // 任务服务身份，停止动作传它而不是可见行号。
-    char name[32], state[16];  // 保存任务名称和状态文本，均含NUL容量。
-    unsigned cpu, memory_kib;  // CPU百分数与内存KiB，绘图按对应单位输出。
-};
-struct ui_stats {  // 一次任务查询同时返回的汇总状态。
-    bool available;  // false表示当前没有真实汇总数据，不能绘制伪装的零值。
-    unsigned cpu, memory_kib, total_kib, read_kib, write_kib;  // CPU百分数、内存/总量/读写KiB分别保存。
-    unsigned samples[60];  // 最多60个固定窗口采样值，图表逐项消费。
-};
-/* Providers own service data. A backend error is an interface state, never fake success. */
-struct ui_backend {  // 桌面复制这份服务回调表，服务数据继续由提供方持有。
-    enum ui_mode mode;  // 决定当前服务来自真实内核或主机参考进程。
-    const AiriBootInfo *boot;  // 借用运行期间有效的启动描述，不转移其所有权。
-    const char *label;  // 借用用于标明环境的文字。
-    void *context;      // 不透明服务上下文，回调原样接收并自行解释。
-    unsigned (*files)(void *, const char *, struct ui_file *, unsigned);  // 函数指针接收上下文/目录/输出数组/容量，返回实际条数。
-    bool (*read)(void *, int, char *, size_t);  // 按文件id读取字节到给定容量数组，false表示失败。
-    bool (*action)(void *, const char *, enum ui_action, int, const char *, const char *, char *, size_t);  // 接收目录、动作、id、名称、正文及错误缓冲，返回成功与否。
-    unsigned (*tasks)(void *, struct ui_task *, unsigned, struct ui_stats *);  // 输出任务数组与汇总，返回有效任务数。
-};
-struct ui_window {  // 一个应用的窗口布局与显示状态。
-    struct ui_rect rect;     // 当前整屏窗口矩形，绘图和命中共用
-    struct ui_rect restore;  // 最大化之前的普通布局，恢复时读回
-    bool open;  // 窗口是否参加绘制
-    bool minimized;   // 隐藏正文但保留打开身份
-    bool maximized;   // 是否占满扣除系统栏后的可用区
-    unsigned tab;     // 当前应用页签下标
-    unsigned scroll;  // 此窗口已卷走的行数
-};
-struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状态取得内容。
-    struct ui_backend backend;     // 桌面按值保存回调表；context与boot仍借用服务提供方对象。
-    struct airi_console *console;  // 借用稳定命令对象，终端视图与键输入共用。
-    struct ui_window windows[UI_APP_COUNT];  // 每个应用一个窗口，枚举值直接作下标。
-    unsigned order[UI_APP_COUNT];  // 保存从底到顶的应用身份，命中逆向读取。
-    unsigned order_count;  // order中已登记的有效数量。
-    int active;    // 活动应用，-1表示当前没有。
-    int width;     // 最近绘图的桌面宽度，单位像素。
-    int height;    // 最近绘图的桌面高度，单位像素。
-    bool monitor;  // 右侧状态监视区是否展开。
-    bool find;     // Editor查找栏是否展开。
-    bool dirty;    // 工作文本是否与最近成功保存内容不同。
-    bool selection;      // anchor与cursor之间是否构成有效选区。
-    bool field_all;      // 对话框字段是否处于全选替换状态。
-    bool undo_valid;     // undo数组是否有可交换的历史文本。
-    bool pending_close;  // 保存成功后是否还需继续关闭Editor。
-    enum ui_state service_state;  // 当前界面服务状态，失败动作通过它显示。
-    char directory[128];  // 当前文件操作目录，有NUL终止。
-    char filter[UI_APP_COUNT][64];  // 每个应用独立筛选文本，二维数组先按应用再按字节。
-    char editor[UI_DOC_SIZE];  // 正在修改的工作文本，服务内容不会随按键自动改变。
-    char saved[UI_DOC_SIZE];   // 独立数组接收服务实际保存的文本。
-    char undo[UI_DOC_SIZE];    // 上次编辑快照，撤销时与工作文本交换。
-    char clipboard[UI_DOC_SIZE];  // 独立持有的文本剪贴板，不借用平台临时字符串。
-    char find_text[64];  // 查找输入字段，搜索结果映射回文档字节偏移。
-    unsigned cursor;     // 光标位于0..文本长度的字节间隙。
-    unsigned anchor;     // 选区起点间隙，拖动时固定。
-    unsigned editor_scroll;  // 正文顶部已卷走的行数。
-    unsigned editor_column_scroll;  // 正文左侧已卷走的字符列数。
-    unsigned selection_file;  // 文件快照数组下标，不是文件id或排序后行。
-    unsigned selected_task;   // 任务快照数组下标，停止动作再读取pid。
-    int editor_id;  // 当前文档服务id，未保存的新文档另按创建路径处理。
-    int dialog;     // 当前对话框枚举值，零为无。
-    int dialog_target;  // 确认动作锁定的文件id或任务pid。
-    int focus;  // 当前键入字段身份。
-    int sort;   // 列表排序方向，0/1切换。
-    int file_clipboard;  // 文件剪贴板保存源id，-1表示无。
-    bool file_cut;  // 粘贴执行移动还是复制。
-    char editor_name[64];    // 当前文档名称，保存和执行请求使用。
-    char dialog_title[64];   // 确认或错误框标题。
-    char dialog_text[256];   // 服务原因与操作说明。
-    char dialog_input[128];  // 创建、重命名等动作的可编辑名称。
-    char toast[160];  // 临时操作结果或输入拒绝原因。
-    struct ui_file files[UI_FILES];  // 当前目录的有界快照记录。
-    unsigned file_count;  // files中有效条数，读取不得超过它。
-    struct ui_task tasks[UI_TASKS];  // 当前任务服务的有界快照。
-    unsigned task_count;    // tasks中有效条数。
-    struct ui_stats stats;  // 与任务快照同时取得的汇总。
+void ui_init(struct ui_desktop *, struct ui_backend, struct airi_console *);  // 初始化桌面，复制服务表并借用命令对象。
+```
+<!-- after -->
+```c
     unsigned theme;    // 桌面自己持有的日夜模式，文本会话不依赖此字段。
     unsigned density;  // Files/Tasks列表行高，0为36像素、1为28像素；相应绘图和列表命中共用。
     unsigned series_count;  // 已成功解析的曲线点数，失败保留旧值。
@@ -151,53 +24,43 @@ struct ui_desktop {  // 全部事件修改这一份状态，重画按同一状�
     char series_name[64];  // 最近成功解析的数据文件名。
 };
 void ui_init(struct ui_desktop *, struct ui_backend, struct airi_console *);  // 初始化桌面，复制服务表并借用命令对象。
-void ui_open(struct ui_desktop *, enum ui_app);  // 打开、解除最小化并置顶指定应用。
-void ui_draw(struct ui_desktop *, const struct airi_framebuffer *);  // 按实际帧缓冲绘图，并更新可用于命中的窗口矩形。
-bool ui_key(struct ui_desktop *, int key, bool shift);      // 分派字符或功能键，Shift控制扩展选区等规则。
-void ui_service_state(struct ui_desktop *, enum ui_state);  // 切换服务显示状态并刷新对应快照。
-void ui_refresh(struct ui_desktop *);  // 从当前服务取得文件、任务与汇总快照。
-void ui_command(struct ui_desktop *, enum ui_action, int, const char *, const char *);  // 把稳定身份、名称与内容交给服务动作回调。
-void ui_fixture_backend(struct ui_backend *);  // 为主机观察填入会话内存参考服务，不进入guest。
+```
 
+<!-- replace: frontend/include/ui.h -->
+<!-- before -->
+```c
+void u_icon(int, int, int, uint32_t);  // 在给定坐标以类型和颜色绘制小图标。
+unsigned ui_file_order(const struct ui_desktop *, unsigned *);  // 把当前文件排序位置写成快照下标数组并返回数量。
+void ui_open_document(struct ui_desktop *, unsigned);  // 接收快照下标，按服务id读取普通文档并打开Editor。
+void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应用身份分派内容绘图，rect已扣除标题栏。
+void ui_apps_click(struct ui_desktop *, enum ui_app, struct ui_rect, int, int, bool);  // 将内容矩形、屏幕点与双击状态交给具体应用。
+```
+<!-- after -->
+```c
 void u_icon(int, int, int, uint32_t);  // 在给定坐标以类型和颜色绘制小图标。
 unsigned ui_file_order(const struct ui_desktop *, unsigned *);  // 把当前文件排序位置写成快照下标数组并返回数量。
 void ui_open_document(struct ui_desktop *, unsigned);  // 接收快照下标，读取id对应内容并选择Editor或Viewer。
 void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应用身份分派内容绘图，rect已扣除标题栏。
 void ui_apps_click(struct ui_desktop *, enum ui_app, struct ui_rect, int, int, bool);  // 将内容矩形、屏幕点与双击状态交给具体应用。
-#endif  // 结束完整桌面接口的重复包含保护
 ```
-
-曲线状态新增两组同下标数组和有效点数。沿参考正文 `seconds,load\n0,12\n1,18\n`，先跳过首行。解析第一行时，时间字符0得到整数0，值字段的1令value从0变1，随后2使它变为1×10+2=12；遇换行后暂存(times[0],values[0])=(0,12)。第二行同样得到(1,18)，并确认时间1严格大于前点0，才计入第二个完整点。后续四行通过同样路径得到六点。解析失败保留旧曲线。
 
 <a id="csv-conversion"></a>
 
 CSV 按行组织记录、以逗号分隔字段。这里把第一行跳过作为标题，不检查seconds/load列名；后面最多六十行非负整数，时间严格递增。每次乘十前要求累计值不超过100000，下一位最大为9，所以完整字段最多1000009；这是当前小型曲线演示的数值范围，超限会拒绝整份输入。当前不处理引号字段、小数、负号或逗号旁空格，这些格式会明确失败，而不会猜测转换。先用局部 times/values 保存结果，全部通过后才复制到桌面；这使第二行失败时第一行也不会成为半份新曲线。
 
-**完整写入 `frontend/apps/internal.h`：**
+在 apps/internal.h 末尾，以包含 ui_settings_click 和 endif 的旧窗口定位，加入曲线加载与绘制声明。旧块只用于定位，写回完整新块。
 
 <a id="code-frontend-apps-internal-h-1"></a>
 
-<!-- write: frontend/apps/internal.h -->
+<!-- replace: frontend/apps/internal.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_APPS_INTERNAL_H  // 防止应用共享接口重复包含
-#define AIRI_APPS_INTERNAL_H  // 标记应用共享接口已经包含
-#include "ui.h"  // 引入前端服务合同与桌面状态
-#include <airi/base.h>  // 引入自有字节操作和有界格式化函数
-
-void ui_app_text(int x, int y, const char *s);   // 用正文体和主要颜色绘制应用文字
-void ui_app_muted(int x, int y, const char *s);  // 用小字体和次要颜色绘制说明文字
-void ui_app_field(struct ui_rect r, const char *s, bool focused);  // 画输入字段和当前焦点边框
-bool ui_app_match(const char *s, const char *q);  // 按字节判断s是否包含q；Terminal识别提示符，Files和Tasks筛选各自使用结果
-void ui_app_dialog(struct ui_desktop *s, int kind, int target, const char *title, const char *body,  // 把种类、目标身份和文案保存到桌面对话框状态
-                   const char *value);  // value是对话框输入字段的初始文字，函数只复制状态
-void ui_app_unavailable(struct ui_desktop *s, struct ui_rect r, const char *service);  // 按服务状态绘制加载、空或不可用提示
-void ui_app_toolbar(struct ui_rect r, const char *label);  // 在应用内容顶部绘制44像素工具栏
-void ui_app_status(struct ui_rect r, const char *left, const char *right);  // 在应用内容底部绘制27像素状态栏
-void ui_terminal_draw(struct ui_desktop *, struct ui_rect);  // 把console逻辑行拆成窗口显示行并绘制输入
-void ui_files_draw(struct ui_desktop *, struct ui_rect);     // 读取目录快照和排序索引，画路径、文件行和状态
-void ui_editor_draw(struct ui_desktop *, struct ui_rect);    // 将文档字节偏移换成行列，画文字、选区和光标
-void ui_tasks_draw(struct ui_desktop *, struct ui_rect);     // 绘制任务快照、CPU曲线和内存条
-void ui_system_draw(struct ui_desktop *, struct ui_rect);    // 按当前页显示同一启动信息的内存、设备或日志
+void ui_settings_draw(struct ui_desktop *, struct ui_rect);  // 按页面绘制当前会话配色、密度和接口说明
+void ui_settings_click(struct ui_desktop *, struct ui_rect, int, int, bool);  // 分别命中页签、主题和密度矩形；只改变当前会话偏好
+#endif  // 结束当前应用接口的重复包含保护
+```
+<!-- after -->
+```c
 void ui_settings_draw(struct ui_desktop *, struct ui_rect);  // 按页面绘制当前会话配色、密度和接口说明
 void ui_settings_click(struct ui_desktop *, struct ui_rect, int, int, bool);  // 分别命中页签、主题和密度矩形；只改变当前会话偏好
 void ui_viewer_draw(struct ui_desktop *, struct ui_rect);  // 把已提交时间和测量值缩放到真实时间比例的像素曲线
@@ -205,7 +68,7 @@ void ui_open_series(struct ui_desktop *, const struct ui_file *);  // 读取CSV�
 #endif  // 结束当前应用接口的重复包含保护
 ```
 
-**完整写入 `frontend/apps/series.c`：**
+新建 series.c。先按 f->id 把完整文字读进局部 csv，再越过首行；旧曲线此时没有改变，times、values 也只是本次准备提交的局部数组。
 
 <a id="code-frontend-apps-series-c-1"></a>
 
@@ -226,6 +89,14 @@ void ui_open_series(struct ui_desktop *s, const struct ui_file *f) {  // 读取C
         ++p;  // 消费当前文字字节后指针向后推进一字节
     if (*p)  // 当前尚未到NUL时才消费标题或记录行尾字节
         ++p;  // 消费当前文字字节后指针向后推进一字节
+```
+
+沿参考正文 `seconds,load\n0,12\n1,18\n`，先跳过首行。解析第一行时，时间字符0得到整数0，值字段的1令value从0变1，随后2使它变为1×10+2=12；遇换行后暂存(times[0],values[0])=(0,12)。第二行同样得到(1,18)，并确认时间1严格大于前点0，才计入第二个完整点。后续四行通过同样路径得到六点。解析失败保留旧曲线。
+
+现在 p 位于第一条记录开头，继续追加同一个函数的逐行解析。每行先读时间和逗号，再读值；末尾可跳过一个回车，但随后仍必须是换行或NUL。count 只在一行全部通过后增加。
+
+<!-- append: frontend/apps/series.c -->
+```c
     while (*p) {  // 从当前记录首字节循环解析完整time,value行，遇正文NUL结束
         if (count == 60) {  // 最多接收60个点，额外数据行使整次解析失败
             valid = false;  // 标记整份新数据不可提交，旧曲线数组仍保留
@@ -268,6 +139,12 @@ void ui_open_series(struct ui_desktop *s, const struct ui_file *f) {  // 读取C
         if (*p)  // 当前尚未到NUL时才消费标题或记录行尾字节
             ++p;  // 消费当前文字字节后指针向后推进一字节
     }
+```
+
+循环结束后，count 与两块局部数组才代表这一整份候选结果。只要 valid=false 或一条点都没有，就只复制错误说明，桌面旧数组和来源名都保留。全部通过才写 series_count、复制两份同长度前缀、记来源名并打开 Viewer；这些操作在同一次同步调用中完成，绘图在返回后读取。继续追加校验出口与提交。
+
+<!-- append: frontend/apps/series.c -->
+```c
     if (!valid || !count) {  // 任何非法记录或无有效点都保留旧曲线并报告错误
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Invalid series",  // 保存文字"Invalid series"的种类、目标和说明，最后绘图且优先接收后续事件
                       "Use a header and up to 60 integer time,value rows; timestamps must "  // 非法CSV错误说明的前半；无逗号的相邻下一字符串拼接成同一个body参数
@@ -284,13 +161,34 @@ void ui_open_series(struct ui_desktop *s, const struct ui_file *f) {  // 读取C
 }
 ```
 
-解析器现在能给出完整结果。文档打开路径接着识别 `.csv`，调用 `ui_open_series`；后者按服务 id 读取文字、校验并提交，成功后才打开 Viewer；普通源码继续进入 Editor。读取失败和格式失败各自生成错误提示，已有曲线留在桌面中。
+解析器已有成功发布与失败保留两条出口。现在把 Files 打开路径接入它：本参考快照第1项为 series.csv、服务 id=2，ui_open_document 先处理目录，再检查名称尾部是否恰为小写 .csv。CSV 直接交 ui_open_series，不覆盖 Editor；所以即使 Editor 仍有未保存文字，也可另外打开数据。其余普通文档继续走原来的 dirty 保护与完整读取。
 
-**完整写入 `frontend/apps/documents.c`：**
+在 documents.c 依次替换以下旧窗口，加入 CSV 分流并保留各条返回路径。按列出的旧文本定位，不重写其余 Editor 状态提交。
 
 <a id="code-frontend-apps-documents-c-1"></a>
 
-<!-- write: frontend/apps/documents.c -->
+<!-- replace: frontend/apps/documents.c -->
+<!-- before -->
+```c
+#include "internal.h"  // 引入当前目录内部共享接口和基础函数
+
+void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下标打开目录或读取文档，成功才切换编辑身份
+    if (index >= s->file_count)  // 快照下标必须落在这次查询的有效前缀
+        return;  // 快照下标越界，不读取条目或改变当前文档
+    struct ui_file *f = &s->files[index];  // 借用快照第index项，后面用其服务id而非下标读取
+    if (f->directory) {  // 目录项改变当前目录，不当成文字文档读取
+        airi_snprintf(s->directory, 128, "%s", f->path);  // 用目录记录的完整路径替换当前查询目录
+        ui_refresh(s);  // 以当前directory重新复制文件快照；任务回调接入后同次刷新它和资源统计
+        return;  // 已切换查询目录并刷新快照，Editor 文档保持原样
+    }
+    if (s->dirty) {  // 当前文档未保存时先阻止另一个文档覆盖编辑数组
+        ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unsaved changes",  // 保存文字"Unsaved changes"的种类、目标和说明，最后绘图且优先接收后续事件
+                      "Save or discard the current document before opening another file.", "");  // 说明未保存正文阻止新文档覆盖，最后空串表示此错误框没有名称初值
+        return;  // 当前文档未保存，显示提示并保留工作数组
+    }
+    if (!s->backend.read ||  // 先检查读取函数地址是否存在，短路或保证缺回调时不调用空函数指针
+```
+<!-- after -->
 ```c
 #include "internal.h"  // 引入当前目录内部共享接口和基础函数
 
@@ -314,25 +212,25 @@ void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下�
         return;  // 当前Editor有未保存修改，保留其文字和身份并结束本次打开
     }
     if (!s->backend.read ||  // 先检查读取函数地址是否存在，短路或保证缺回调时不调用空函数指针
-        !s->backend.read(s->backend.context, f->id, s->editor, sizeof(s->editor))) {  // 按服务id读取文档，缺回调或失败时保留原文并显示原因
+```
+
+<!-- replace: frontend/apps/documents.c -->
+<!-- before -->
+```c
+        ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unable to open file",  // 保存文字"Unable to open file"的种类、目标和说明，最后绘图且优先接收后续事件
+                      "The file service did not return the document.", "");  // 说明读取服务失败，错误框无需名称字段，原编辑正文保持完整
+        return;  // 读取回调缺失或读取失败，保留原文与编辑身份
+    }
+    s->editor_id = f->id;  // 读取成功后才让编辑器绑定新文件的服务身份
+```
+<!-- after -->
+```c
         ui_app_dialog(s, UI_DIALOG_ERROR, 0, "Unable to open file",  // 保存文字"Unable to open file"的种类、目标和说明，最后绘图且优先接收后续事件
                       "The file service did not return the document.", "");  // 说明读取服务失败，错误框无需名称字段，原编辑正文保持完整
         return;  // 完整读取失败，错误框已设置，保留当前文档身份和保存点
     }
     s->editor_id = f->id;  // 读取成功后才让编辑器绑定新文件的服务身份
-    airi_snprintf(s->editor_name, 64, "%s", f->name);  // 完整读取成功后复制文件名作为Editor身份说明，服务id另存于editor_id
-    airi_snprintf(s->saved, UI_DOC_SIZE, "%s", s->editor);  // 读入文档时为当前内容建立独立保存副本
-    s->dirty = false;  // 当前文字与保存副本一致，清除未保存标记
-    s->cursor = 0;     // 新文档光标从第一个字符前的间隙开始
-    s->editor_scroll = 0;  // 垂直滚动回到第一行
-    s->editor_column_scroll = 0;  // 水平滚动回到第0列
-    s->selection = false;   // 取消现有文档选区，anchor不再参与当前显示
-    s->undo_valid = false;  // 新文档不沿用之前文档的撤销副本
-    ui_open(s, UI_EDITOR);  // 将已读入的文档所在Editor窗口打开并置顶，正文数组不会再次复制
-}
 ```
-
-
 
 <a id="series-scaling"></a>
 
@@ -359,7 +257,7 @@ void ui_viewer_draw(struct ui_desktop *s, struct ui_rect r) {  // 把已提交�
         ui_app_unavailable(s, (struct ui_rect){r.x, r.y + 44, r.w, r.h - 72},  // 按服务状态绘制加载、空或不可用提示，本次实参取自当前桌面状态
                            "Open a two-column CSV document from Files.");  // 提示从Files打开两列CSV的实际入口，尚未加载时不显示参考假曲线
         ui_app_status(r, "No series loaded", NULL);  // 在内容底部显示文字"No series loaded"；右侧说明按测得的文字宽度对齐
-        return;  // 当前把已提交时间和测量值缩放到真实时间比例的像素曲线在本分支结束，后续语句不执行
+        return;  // 服务状态不可用或尚无已提交曲线，只显示提示，不缩放或连点
     }
     struct ui_rect graph = {r.x + 52, r.y + 156, r.w - 84, r.h - 241};  // 曲线图区扣左侧52像素标签、顶156像素工具栏及底部空间，尺寸仍按像素
     unsigned max = 1;  // 纵轴上限至少为1，使全零序列也不除零
@@ -373,6 +271,12 @@ void ui_viewer_draw(struct ui_desktop *s, struct ui_rect r) {  // 把已提交�
         airi_snprintf(n, 24, "%u", max - i * max / 3);  // 当前纵轴网格从最大测量值降到0，用实际数据范围形成刻度
         ui_app_muted(r.x + 20, y - 7, n);  // 在内容左缘右移20像素、整屏y=y - 7显示当前纵轴数值文字
     }
+```
+
+纵轴网格已按当前最大值形成，下面才用首尾时间得到 duration，并将每个有效点换成图内坐标。相邻点连线后再画空心方标记：线说明点之间的连接，方框标明真正存在的观测。首末时间标签与状态栏继续读取同一有效前缀。继续追加 Viewer 的坐标换算与收尾。
+
+<!-- append: frontend/apps/viewer.c -->
+```c
     unsigned duration = s->series_times[s->series_count - 1] - s->series_times[0];  // 最后时间减首时间得到整幅横轴表示的实际跨度
     if (!duration)  // 单个数据点的时间跨度为0时采用非零分母
         duration = 1;  // 仅为缩放计算保留1，原始时间数组不修改
@@ -403,31 +307,20 @@ void ui_viewer_draw(struct ui_desktop *s, struct ui_rect r) {  // 把已提交�
 
 ```
 
-**完整写入 `frontend/apps/builtin.c`：**
+在 builtin.c 的 Settings 与 default 之间接入 Viewer 绘制，替换下面唯一旧窗口。点击分派继续保留本章已有内容。
 
 <a id="code-frontend-apps-builtin-c-1"></a>
 
-<!-- write: frontend/apps/builtin.c -->
+<!-- replace: frontend/apps/builtin.c -->
+<!-- before -->
 ```c
-#include "internal.h"  // 取得应用内部绘图、命中与对话框的共同声明。
-void ui_apps_draw(struct ui_desktop *s, enum ui_app app, struct ui_rect r) {  // 根据应用枚举绘制同一内容矩形，窗口框由外层负责。
-    switch (app) {     // 应用枚举决定本次内容绘制器。
-    case UI_TERMINAL:  // 应用身份为终端时进入对应分支。
-        ui_terminal_draw(s, r);  // 用当前桌面和内容矩形绘制终端。
+        ui_settings_draw(s, r);  // 用当前桌面和内容矩形绘制设置。
         break;  // 当前匹配已完成，停止这一层循环或分支。
-    case UI_FILES_APP:  // 应用身份为目录时进入对应分支。
-        ui_files_draw(s, r);  // 用当前桌面和内容矩形绘制目录。
+    default:  // 未知应用编号不绘制内容；窗口框仍由外层处理
         break;  // 当前匹配已完成，停止这一层循环或分支。
-    case UI_EDITOR:  // 应用身份为文档时进入对应分支。
-        ui_editor_draw(s, r);  // 用当前桌面和内容矩形绘制文档。
-        break;  // 当前匹配已完成，停止这一层循环或分支。
-    case UI_TASKS_APP:  // 应用身份为任务时进入对应分支。
-        ui_tasks_draw(s, r);  // 用当前桌面和内容矩形绘制任务。
-        break;  // 当前匹配已完成，停止这一层循环或分支。
-    case UI_SYSTEM:  // 应用身份为系统信息时进入对应分支。
-        ui_system_draw(s, r);  // 用当前桌面和内容矩形绘制系统信息。
-        break;  // 当前匹配已完成，停止这一层循环或分支。
-    case UI_SETTINGS:  // 应用身份为设置时进入对应分支。
+```
+<!-- after -->
+```c
         ui_settings_draw(s, r);  // 用当前桌面和内容矩形绘制设置。
         break;  // 当前匹配已完成，停止这一层循环或分支。
     case UI_VIEWER:  // 应用身份为曲线时进入对应分支。
@@ -435,38 +328,32 @@ void ui_apps_draw(struct ui_desktop *s, enum ui_app app, struct ui_rect r) {  //
         break;  // 当前匹配已完成，停止这一层循环或分支。
     default:  // 未知应用编号不绘制内容；窗口框仍由外层处理
         break;  // 当前匹配已完成，停止这一层循环或分支。
-    }
-}
-
-void ui_apps_click(struct ui_desktop *s, enum ui_app app, struct ui_rect r, int x, int y,  // 总入口先按应用身份分派内容点击。
-                   bool twice) {  // 双击标志保持原值交给应用，不在桌面重复解释。
-    s->focus = UI_FOCUS_NONE;  // 先取消旧字段焦点，应用命中字段后可重新设置。
-    switch (app) {     // 按已命中的应用编号选择点击处理器
-    case UI_SETTINGS:  // 应用身份为设置时进入对应分支。
-        ui_settings_click(s, r, x, y, twice);  // 将当前矩形、屏幕点和双击状态交给设置的命中规则。
-        break;  // 当前匹配已完成，停止这一层循环或分支。
-    default:  // 未知或本阶段尚未接点击的应用不改变状态
-        break;  // 当前匹配已完成，停止这一层循环或分支。
-    }
-}
 ```
 
 ## 在图片进程中读取同一份CSV
 
 数值观察和图片观察是两次独立启动的主机程序，各自初始化reference、console和desktop。build/series退出后，它的数组不会传给build/desktop。图片程序因此在应用参数为Viewer时，先按本参考快照第1项读取CSV，再绘制当前进程的已提交数组；其他应用的观察路径保持原样。
 
-**完整替换 `labs/tutorial/desktop.c`：**
+图片程序仍使用同一 main。依次替换下面的唯一旧窗口，更新初始化说明、接入 Viewer 参数下的 CSV 加载，并更新绘图调用说明。真正新增的读取发生在打开并最大化所选应用之前；其他输出步骤保留。
 
 <a id="code-labs-tutorial-desktop-c-1"></a>
 
-<!-- write: labs/tutorial/desktop.c -->
+<!-- replace: labs/tutorial/desktop.c -->
+<!-- before -->
 ```c
-#include "ui.h"      // 引入前端服务合同与桌面状态
-#include <stdio.h>   // 主机观察使用标准文件输出与打印接口
-#include <stdlib.h>  // 主机观察使用atoi转换应用参数
-static uint32_t pixels[1280 * 800];  // 主机观察程序拥有静态像素数组，绘图描述只借用它
-static struct ui_desktop desktop;    // 主机观察拥有整份静态桌面，多个步骤修改同一对象
-static struct airi_console console;  // 主机观察拥有同一console输入输出状态
+int main(int argc, char **argv) {    // 在主机准备输入、运行当前观察并以退出码报告结果
+    struct ui_backend backend;     // 观察程序持有回调合同副本，初始化后才可调用
+    ui_fixture_backend(&backend);  // 重置当前主机参考服务并填入回调表，本次实参取自当前桌面状态
+    airi_console_init(&console, backend.boot);  // 观察console与System借用同一参考启动结构，日志和面板来源一致
+    ui_init(&desktop, backend, &console);  // 清桌面状态，绑定服务和console并打开默认应用，本次实参取自当前桌面状态
+    int app = argc > 1 ? atoi(argv[1]) : UI_TERMINAL;  // 有参数时把十进制字符串变成应用编号，否则生成Terminal
+    if (app < 0 || app >= UI_APP_COUNT)  // 检查转换结果的数组边界后才索引窗口
+        return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
+    ui_open(&desktop, (enum ui_app)app);    // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
+    desktop.windows[app].maximized = true;  // 观察程序先把目标窗口设为最大化，绘图据此计算实际矩形
+```
+<!-- after -->
+```c
 int main(int argc, char **argv) {    // 在主机准备输入、运行当前观察并以退出码报告结果
     struct ui_backend backend;     // 观察程序持有回调合同副本，初始化后才可调用
     ui_fixture_backend(&backend);  // 把服务回调写入本观察程序的 backend 结构，并重置参考静态记录
@@ -479,25 +366,24 @@ int main(int argc, char **argv) {    // 在主机准备输入、运行当前观�
         ui_open_document(&desktop, 1);  // 本参考快照第1项是series.csv，成功解析后发布六个点
     ui_open(&desktop, (enum ui_app)app);    // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
     desktop.windows[app].maximized = true;  // 观察程序先把目标窗口设为最大化，绘图据此计算实际矩形
-    struct airi_framebuffer fb = {  // 当前操作使用的airi_framebuffer记录布局
-        .virtual_address = (uintptr_t)pixels, .width = 1280, .height = 800,  // 设置像素数组的主机虚拟地址、软件画布像素宽度、软件画布像素高度
+```
+
+<!-- replace: labs/tutorial/desktop.c -->
+<!-- before -->
+```c
+        .pitch = 1280 * 4, .bpp = 32, .red_size = 8, .red_shift = 16,  // 设置每行实际字节跨度、每像素位数、红色通道位数、红色通道最低位位置
+        .green_size = 8, .green_shift = 8, .blue_size = 8};  // 设置绿色通道位数、绿色通道最低位位置、蓝色通道位数
+    ui_draw(&desktop, &fb);  // 按当前窗口次序绘制整帧，本次实参取自当前桌面状态
+    FILE *file = fopen("build/desktop.ppm", "wb");  // 以二进制写并截断旧内容打开本次桌面PPM文件
+    if (!file)  // 打开PPM输出失败时不继续写文件
+```
+<!-- after -->
+```c
         .pitch = 1280 * 4, .bpp = 32, .red_size = 8, .red_shift = 16,  // 设置每行实际字节跨度、每像素位数、红色通道位数、红色通道最低位位置
         .green_size = 8, .green_shift = 8, .blue_size = 8};  // 设置绿色通道位数、绿色通道最低位位置、蓝色通道位数
     ui_draw(&desktop, &fb);  // 按窗口层次画整帧，并将对话框留在最后，本次实参取自当前桌面状态
     FILE *file = fopen("build/desktop.ppm", "wb");  // 以二进制写并截断旧内容打开本次桌面PPM文件
     if (!file)  // 打开PPM输出失败时不继续写文件
-        return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
-    fprintf(file, "P6\n1280 800\n255\n");  // 把PPM魔数、尺寸和255通道上限写到主机输出文件
-    for (unsigned i = 0; i < 1280 * 800; ++i) {  // 逐个像素向PPM输出1280×800个RGB三字节
-        unsigned char rgb[] = {(pixels[i] >> 16) & 255, (pixels[i] >> 8) & 255, pixels[i] & 255};  // 从像素数值按红绿蓝顺序提取3个八位通道，形成与主机字节序无关的PPM字节
-        if (fwrite(rgb, 1, 3, file) != 3)  // 每像素应写3个RGB字节，短写即报告失败
-            return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
-    }
-    if (fclose(file))  // 关闭时检查缓冲输出是否真正交给主机文件系统接口
-        return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
-    printf("app=%d -> build/desktop.ppm\n", app);  // 向主机终端报告本次观察的实际状态或输出位置
-    return 0;  // 观察完整通过，主机进程以成功状态退出
-}
 ```
 
 长应用名还需要正确呈现。G15的u_label_width按真实字形advance加每字符两像素测量身份，片宽在54像素左部空间之外再留12像素给斜切边缘。下面先画Viewer一帧，并沿相同推进量取得最后R的包围盒：每个覆盖率都应混入 U_CHROME，身份片须覆盖最后一个字母的有效像素。观察程序分别比较字形实心、部分覆盖和空白，再检查 CSV 失败时旧数组是否保留。
@@ -551,6 +437,12 @@ static bool title_fits(void) {  // 校验DATA VIEWER最后R的字形与它下面
     return true;  // 当前长标签已经由真实字体度量得到足够承载范围。
 }
 
+```
+
+title_fits 已有了按真实标题字形逐像素核对的路径，main 接下来先在本进程初始化服务并打开快照第1项。确认六个点已提交且 active=UI_VIEWER，才调用标题观察或用 count-1 取末项；不能在加载失败时自行补一个假点。继续追加 main 的正常路径。
+
+<!-- append: labs/tutorial/series.c -->
+```c
 int main(void) {  // 在主机准备输入、运行当前观察并以退出码报告结果
     struct ui_backend backend;     // 观察程序持有回调合同副本，初始化后才可调用
     ui_fixture_backend(&backend);  // 把服务回调写入本观察程序的 backend 结构，并重置参考静态记录
@@ -565,6 +457,12 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
            desktop.series_times[0], desktop.series_values[0],  // 报告当前进程已提交曲线首点的真实时间与值
            desktop.series_times[desktop.series_count - 1],     // 以有效点数减1定位最后时间，前提是解析已有点
            desktop.series_values[desktop.series_count - 1], desktop.active);  // 同一下标取得最后测量值，并报告当前活动应用编号
+```
+
+正常六点与标题观察完成后，继续在同一进程构造失败。先独立复制当前六个时间和六个值，再通过服务把 CSV 改成时间0重复的两行。服务只保存字节，所以保存会成功；再次打开时解析器才在第二条时间0处拒绝。此时要求错误框、series_count=6 和旧数组各字节都保持，不能只看点数。
+
+<!-- append: labs/tutorial/series.c -->
+```c
     unsigned old_times[60], old_values[60];  // 独立保存当前已验证数组，稍后检查非法输入没有改任何有效点
     airi_memcpy(old_times, desktop.series_times, 6 * sizeof(*old_times));  // 保存6个时间值，数组尾部不属于当前有效前缀
     airi_memcpy(old_values, desktop.series_values, 6 * sizeof(*old_values));  // 保存相同6个测量值，与时间下标继续配对
@@ -582,7 +480,7 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
 }
 ```
 
-观察程序先检查点数与活动窗口，再打印首尾，避免读取失败时用count-1产生越界下标。随后保存一份时间重复的CSV文字并重新打开：文件服务只负责保存，解析器负责拒绝重复时间；错误对话框出现，但旧六点数组必须逐字节保持原值。图片程序是另一个进程，会重新初始化正常参考CSV，所以这次故障观察不会污染随后生成的图片。
+数值观察中的服务正文现在是非法CSV，但这份修改只活在当前进程。图片程序另行启动，会重新初始化正常参考CSV，再走自己的完整读取与解析，所以故障观察不会污染随后生成的图片。
 
 **在学习目录根目录运行：**
 

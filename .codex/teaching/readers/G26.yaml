@@ -16,6 +16,9 @@ already_explained:
   at: ../../../dev-log/core/12-boot-tests.md#console-observation
   establishes: PS/2输入后只等待旧日志末尾之后的新完成标记，再截本轮guest帧
 first_use:
+- concept: 逐键输入与整串粘贴的撤销单位
+  at: ../../../dev-log/graphics/26-theme-validation.md#state-preservation
+  establishes: typing每字节调用ui_key并更新undo，第一次Undo回到最后一键之前；G17一次UI_PASTE的undo则保存整次粘贴前全文；两种场景分别核对
 - concept: 从实际调色板导出JSON
   at: ../../../dev-log/graphics/26-theme-validation.md#actual-palette
   establishes: C角色值变成RGB整数，Python从编译程序输出取字典，不复制颜色常量
@@ -35,6 +38,9 @@ borrowed:
 - component: macOS Cocoa与sips
   contract: 共享C直接输出PPM，sips只转换格式；其他平台不声称生成原生图库
 feedback:
+- source: B13 双主题验证的对象与证据复核
+  observation: Cocoa扩展和多个独立检查全文连贴，前端状态、主机显示边界、原生图库与guest证据容易混用
+  revision: preview用确定旧窗口更新；C检查按重置与真实输入序列接续并区分逐键Undo，显示检查分重绑与保留主题，Python按包入口/颜色消费者/场景材料/实际进程与报告分块
 - source: 用户前端重构后教程要求
   observation: 原生参数和验证代码不能提前大规模预置，也不能用注释数量代替真实状态说明
   revision: 23先接最小窗口，26再引入状态和场景；展开嵌套列表推导为当前数据形状清楚的循环

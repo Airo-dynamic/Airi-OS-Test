@@ -27,7 +27,7 @@ bool ui_app_match(const char *s, const char *q) {  // 按字节判断字符串s�
 
 void ui_app_dialog(struct ui_desktop *s, int kind, int target, const char *title, const char *body,  // 把种类、目标身份和文案保存到桌面对话框状态
                    const char *value) {  // value提供确认输入的初值，按字段容量复制
-    s->dialog = kind;  // 保存对话框种类，让桌面在普通窗口之后绘制；事件优先级在后续输入阶段实现
+    s->dialog = kind;  // 保存对话框种类，在普通窗口之后绘制；输入分派优先检查此状态
     s->dialog_target = target;  // 保存本次确认将使用的文件id或任务pid
     s->field_all = true;  // 输入字段内容设为整体选中，下一次键入可以替换
     airi_snprintf(s->dialog_title, 64, "%s", title);   // 复制此次对话框标题到桌面独立64字节数组，不借用调用者临时指针

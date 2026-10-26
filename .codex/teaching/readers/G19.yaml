@@ -10,6 +10,9 @@ already_explained:
   at: ../../../dev-log/graphics/17-editing.md#dialog-lifetime
   establishes: ui_app_dialog将标题和原因复制进desktop，局部csv或错误数组退出后仍可显示提示。
 first_use:
+- concept: 文件字节到局部候选再发布
+  at: ../../../dev-log/graphics/19-series.md#csv-conversion
+  establishes: 快照第1项id2读取到局部csv，逐位得出time/value；全部合法才发布同长度数组并打开Viewer，未保存Editor仍独立保留
 - concept: 字符转整数与临时数组整份提交
   at: ../../../dev-log/graphics/19-series.md#csv-conversion
   establishes: 0,12中value先为1，再乘10加2；标题跳过而不检查列名；时间严格递增，失败不覆盖旧曲线。
@@ -29,6 +32,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B13 CSV连续消费与编辑定位复核
+  observation: CSV逐位转换已有完整解释，但头文件和观察程序的重贴隔开了局部候选到发布及独立图片进程的交接
+  revision: 保留原数值范围和缩放机制，用确定旧窗口更新五个已有文件，解析按读取/逐行/整份提交接续，失败观察按保存字节后再解析的实际边界说明
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

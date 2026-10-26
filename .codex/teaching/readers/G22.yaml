@@ -13,6 +13,9 @@ already_explained:
   at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
   establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
 first_use:
+- concept: 输入状态按绘图区逐次消费
+  at: ../../../dev-log/graphics/22-pointer-feedback.md#interaction-region
+  establishes: ui_pointer保存pointer_down；u_interaction按值设置当前区许可，u_button只组合外观位；active为-1时资源区仍需独立许可
 - concept: 鼠标位置、动作与按压反馈分别持有
   at: ../../../dev-log/graphics/22-pointer-feedback.md#feedback-events
   establishes: 无持续拖动的phase=0只移动；已有拖动时更新几何或选区而不保存。phase1/3置pointer_down；phase2无论命中哪里清它。保存动作来自输入分派，不来自u_button。
@@ -29,6 +32,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B13 输入动作与像素反馈复核
+  observation: 动作/反馈和区域许可已有成熟论证，但真正改变的连接藏在渲染器及整帧全文重贴中
+  revision: 保留已有分层与显式pointer_down观察，六个文件均改为确定旧窗口更新；把press状态交给区域许可、再交u_button的消费过程讲连续，并解释active=-1时资源区重建许可
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

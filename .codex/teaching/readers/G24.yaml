@@ -30,6 +30,9 @@ first_use:
   establishes: 首次有效绘图、console地址改变，或同地址重置使extension_context不再指向desktop时，ui_init重建并装主题扩展；对象与绑定都未变才复用后续帧。dashboard console有静态寿命。
 borrowed: []
 feedback:
+- source: B13 完整章节试点
+  observation: 主机到guest的环境切换、会话重绑与帧完成条件集中在实现之前，进入函数后需要回翻
+  revision: 沿设备验证→绑定live会话→view映射→ui_draw返回→READY逐段接续，静态dashboard会话与两层资产摘要分别放到各自消费者处
 - source: 作者全文顺读，响应用户对主线和语言的反馈
   observation: 主机参考与真实内核之间的环境切换需要显式说明。
   revision: 从K13保留的内核文本循环接入共享绘图，解释live数据、串口回退和完成标记。

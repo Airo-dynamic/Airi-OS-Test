@@ -8,9 +8,11 @@
 
 <a id="service-callbacks"></a>
 
-ui_backend 保存服务函数的地址。`bool (*read)(void *, int, char *, size_t)` 中 read 是函数指针，调用者把上下文、文件 id、输出数组和容量交给它。上下文是服务自己的数据入口；这份实现使用静态数组，暂不需要上下文，仍将它原样传回。调用在同一个主机进程中完成。
+观察程序不会直接访问服务的 entries 数组。它持有一个 ui_backend，表里的 files、read、action 保存各项服务函数的地址；`backend.read(...)` 就调用表中这一地址。声明 `bool (*read)(void *, int, char *, size_t)` 中，括号里的 `*read` 表示这个字段是函数指针，返回值为 bool，后面的四种类型规定本次调用要提供什么。调用仍发生在同一主机进程。
 
-这里的 `read(context,id,out,cap)` 返回是否复制成功；`files(context,path,out,cap)` 返回复制的记录条数。`action` 的参数依次为上下文、父目录、动作、现有文件 id、新名称、新正文、错误数组及其容量；创建空文件时 id 传 0、正文传空串，成功返回 true，失败才从错误数组读取原因。
+读取时，`backend.read(backend.context, snapshot[0].id, text, sizeof(text))` 把服务上下文、首条元信息的 id、调用者的 text 数组及其容量交给 read。context 是服务私有数据的入口，必须把表里的值原样传回；当前实现把记录放在静态数组，初始化时 context 为 NULL，read 不读取它。返回 true 才说明 text 已收到完整正文及 NUL。目录查询的 files 则把元信息复制到 snapshot，并返回此次有效条数。
+
+action 使用同样的上下文约定，但它改变服务记录。创建 hello.txt 时传 telemetry 父目录、UI_CREATE_FILE、现有 id 的占位值 0、名称 hello.txt、空正文，以及调用者的 error 数组和容量。下面的实现只创建空记录，所以暂不使用 id、data；失败返回 false，调用者此时才读取 error。
 
 **完整写入 `frontend/include/ui.h`：**
 
@@ -50,7 +52,7 @@ void ui_fixture_backend(struct ui_backend *);  // 重置参考服务并填好本
 
 ## 服务保存记录，调用者取得副本
 
-entries 保留固定数量的槽，used 表示槽是否占用。read 只有在正文连NUL能完整放进调用者数组时才复制；容量不足返回false，调用者原数组不改变。id=槽号+1，0 不对应文件。files 只返回当前目录的直接子项；read 把文字复制进调用者缓冲。创建先检查名称、完整路径容量和重名，再占用空槽，错误会通过输出缓冲返回。当前服务按传入的目录字符串拼接路径，没有独立验证父目录是否存在；观察程序始终传初始化中已有的 telemetry 目录。
+服务先准备自己的记录容器。entries 有 UI_FILES 个槽，每槽同时保存可查询的元信息、服务拥有的 text 正文和 used 占用标记。add 把一份初始文件写进指定槽，并令 id=槽号+1；0 因而不表示文件。查询只是复制 entry，不会把 text 数组交给调用者。先写容器和填槽函数，后面再追加查询、读取和创建。
 
 **完整写入 `frontend/backends/reference.c`：**
 
@@ -78,6 +80,12 @@ static void add(unsigned slot, const char *path, const char *name, bool director
     airi_snprintf(f->text, sizeof(f->text), "%s", body);  // 复制初始正文到服务拥有的8192字节数组，后续read从此处取得内容
     f->entry.bytes = (unsigned)airi_strlen(body);  // 保存内容长度，不把终止零计入文件字节数
 }
+```
+
+files 沿服务槽顺序查询，但只把当前目录的直接子项复制进 out。父路径前缀相同还不够：前缀后必须是斜杠，余下名称里不能再有斜杠。返回的 n 表示调用者数组里有效的前 n 项，cap 限制最多复制多少项；服务中的槽和 id 都不随这份副本移动。接着追加目录查询。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 static unsigned files(void *unused, const char *path, struct ui_file *out, unsigned cap) {  // 将当前目录直接子项元信息复制给调用者快照
     (void)unused;    // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
     unsigned n = 0;  // 本次已复制给调用者的文件条数从0开始，仅此计数之前的out槽有效
@@ -100,6 +108,12 @@ static unsigned files(void *unused, const char *path, struct ui_file *out, unsig
     }
     return n;  // 返回本次已经复制到调用者数组的有效记录条数
 }
+```
+
+read 收到查询副本里的 id 后，用 id-1 回到服务槽。它先检查 id 范围、占用标记和普通文件身份，再检查完整正文及 NUL 是否装得下，全部通过才 memcpy。比如 small 的容量是 4，只能容纳三内容字节；main.lua 超过这个长度，因此返回 false 前不会写入 small。追加读取函数。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 static bool read(void *unused, int id, char *out, size_t cap) {  // 按服务id复制完整文档到调用者数组
     (void)unused;  // 此参考服务使用静态表，回调合同的上下文参数本实现不读取
     if (id < 1 || id > UI_FILES || !entries[id - 1].used || entries[id - 1].entry.directory)  // 先用短路或保护id-1下标，再要求槽已占用且不是目录，失败不写输出
@@ -110,6 +124,12 @@ static bool read(void *unused, int id, char *out, size_t cap) {  // 按服务id�
     airi_memcpy(out, entries[id - 1].text, length + 1);  // 内容连NUL一起复制，输出由调用者独立拥有
     return true;  // 完整正文连NUL已写入调用者数组，服务自身正文未改变
 }
+```
+
+创建也把校验放在修改之前。名称须非空、不超过 63 字节，不能为 .、..，不能含斜杠、反斜杠或控制字节；完整路径还须装进 128 字节。确认目标不重名后，才寻找空槽并调用 add。错误由 error 辅助函数复制进调用者缓冲。当前服务只按传入的目录字符串拼路径，没有独立验证父目录是否存在；观察程序始终使用初始化里已有的 telemetry 目录。追加校验与动作函数。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 static bool error(char *out, size_t cap, const char *message) {  // 把失败原因写入调用者错误缓冲并返回false
     airi_snprintf(out, cap, "%s", message);  // 将具体失败原因复制到调用者错误数组，cap包含终止零的位置
     return false;  // 失败原因已写出，请求方据false显示错误而不更新保存点
@@ -146,6 +166,12 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
         }
     return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
 }
+```
+
+最后追加初始化入口。每次调用都先清空服务槽，再填入初始记录；telemetry 目录中有六个直接子项，另外的父目录记录属于各自的父路径。结尾把三个函数地址写进调用者的回调表，未指定的 context 按 C 的初始化规则置为 NULL。调用者取得表的副本，服务数组仍留在本文件。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服务并填入回调表
     airi_memset(entries, 0, sizeof(entries));  // 把服务拥有的32个槽清空，再填本会话初始参考文件
     add(0, "/home/airi/projects/telemetry", "main.lua", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
@@ -173,7 +199,7 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
 
 ## 连续观察读取与创建
 
-观察程序先取得六条元信息，按第一项的 id 读取 main.lua，然后创建并重新查询。调用返回的条数决定 snapshot 的有效前缀；旧数组不是服务本身，只有再次查询才能获得新记录。
+现在把调用方接起来。backend、snapshot、text、error 都属于 main：初始化填好 backend 后，files 把六条目录元信息写进 snapshot；确认 before=6 后，才取 snapshot[0].id 读取 main.lua。随后用容量 4 的 small 再读同一 id，核对失败时四个原字节仍是 xyz 加 NUL。先写这一段。
 
 **完整写入 `labs/tutorial/provider.c`：**
 
@@ -201,6 +227,12 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
     printf("small buffer: success=%d preserved=%s\n", copied, small);  // 同时观察失败返回值和调用者原字节
     if (copied || airi_memcmp(small, "xyz", sizeof(small)))  // 任一成功或四字节变化都违反完整读取的合同
         return 1;  // 拒绝把截断或部分写入报告为通过
+```
+
+继续追加创建与复查，仍在同一个 main 内。第一次 action 用当前目录和 hello.txt 建立空文件；它改变服务的 entries，却不会自行更新旧 snapshot。因此立刻再次调用 files，用新的返回条数 after 确认结果变成七条。第二次传完全相同的创建参数，服务在重名检查处返回 false，error 才有可读取的失败原因；已有记录保持不变。
+
+<!-- append: labs/tutorial/provider.c -->
+```c
     bool created = backend.action(backend.context, directory, UI_CREATE_FILE, 0,  // 校验请求后改变服务记录，错误留在输出缓冲
                                   "hello.txt", "", error, sizeof(error));  // 明确创建名称hello.txt，正文为空；错误原因只写160字节调用者数组
     unsigned after = backend.files(backend.context, directory, snapshot, UI_FILES);  // 将当前目录直接子项元信息复制给调用者快照

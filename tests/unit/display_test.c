@@ -5,7 +5,7 @@
 #include <stdio.h>   // 输出本轮完成记录。
 #include <airi/kernel.h>   // 借用启动描述与图形适配声明。
 #include <airi/console.h>  // 通过同一文本命令模型切换视图。
-static AiriBootInfo fixture(void) {  // 构造合法启动输入，各故障都从它的独立副本开始。
+static AiriBootInfo fixture(void) {  // 构造合法启动输入；每组布局取一份副本，同组故障逐项修改并恢复字段。
     AiriBootInfo b = {.magic = AIRI_BOOT_MAGIC,  // 指定magic识别协议，未指定成员按C规则清零。
                       .version = AIRI_BOOT_VERSION,  // 采用当前接口版本。
                       .size = sizeof(AiriBootInfo),  // 字节大小与编译的结构布局一致。
@@ -56,7 +56,7 @@ static void graphics_tests(void) {  // 让真实共享绘图在主机有界画�
         assert(airi_console_draw(&c));  // 地址未变也必须发现绑定失效并重建桌面。
         assert(c.extension);  // 重置后的会话重新获得自己的主题命令入口。
         unsigned char *sample = pixels + 32 + (height - 1) * pitch + (width - 1) * (layouts[k] / 8);  // 取底栏最右像素的前三字节，避开文字和窗口。
-        unsigned char night[3];  // 保存夜间底面RGB的设备字节，24和32位布局都使用这三个颜色字节。
+        unsigned char night[3];  // 保存夜间底面前三个设备颜色字节；24/32 位均比较它们。
         memcpy(night, sample, sizeof(night));  // 独立记录新会话首帧，不借用会被下一帧覆盖的像素。
         type(&c, "theme day");  // 命令必须通过新console的扩展改变同一桌面主题。
         assert(airi_console_draw(&c));  // 同一console重画，不能重新初始化并丢掉刚设置的主题。

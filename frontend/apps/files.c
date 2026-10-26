@@ -57,7 +57,7 @@ void ui_files_draw(struct ui_desktop *s, struct ui_rect r) {  // 读取目录快
         ui_app_unavailable(s, (struct ui_rect){x, r.y + 98, w, r.h - 128},  // 按服务状态绘制加载、空或不可用提示，本次实参取自当前桌面状态
                            "File service / current directory");  // 不可用说明具体缺的是当前目录查询服务
         ui_app_status(r, "No directory snapshot", NULL);  // 在内容底部显示文字"No directory snapshot"；右侧说明按测得的文字宽度对齐
-        return;  // 当前读取目录快照和排序索引，画路径、文件行和状态在本分支结束，后续语句不执行
+        return;  // 目录服务状态不可用或缺查询回调，保留提示且不读文件条目
     }
     u_rect(x, r.y + 106, w, 28, U_PANEL);     // 用工具栏底色写矩形，起点(x,r.y + 106)，尺寸w×28像素
     ui_app_muted(x + 12, r.y + 112, "Name");  // 在整屏x=x + 12、内容顶边下移112像素显示文字"Name"

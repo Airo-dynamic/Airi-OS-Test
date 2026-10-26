@@ -1,4 +1,4 @@
-#include "internal.h"  // 引入当前目录内部共享接口和基础函数
+#include "internal.h"  // 取得核心内部的桌面类型、有限copy与基础库接口。
 #include "ui.h"  // 引入前端服务合同与桌面状态
 #include <airi/base.h>  // 引入自有字节操作和有界格式化函数
 static bool appearance(struct airi_console *console, const char *command, void *context) {  // 本扩展只消费完整的主题命令。
@@ -17,7 +17,7 @@ void ui_refresh(struct ui_desktop *s) {  // 重新取得文件任务快照，更
     s->task_count = 0;  // 刷新前清有效任务条数，随后由任务服务填写
     airi_memset(&s->stats, 0, sizeof(s->stats));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
     if (s->service_state != UI_NORMAL)  // 服务未正常时停止复制或显示成功快照
-        return;  // 当前重新取得文件任务快照，更新显示所需有效计数在本分支结束，后续语句不执行
+        return;  // 服务未处于正常状态，本轮不发布成功快照
     if (s->backend.files)  // 文件查询回调存在时才调用
         s->file_count = s->backend.files(s->backend.context, s->directory, s->files, UI_FILES);  // 查询当前目录并复制最多32项元信息到桌面数组，返回值标出此次有效前缀
     if (s->file_count > UI_FILES)  // 服务条数超过本地32槽容量时收窄
@@ -68,7 +68,7 @@ void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) 
 }
 void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个应用，更新窗口次序和活动编号
     if (app >= UI_APP_COUNT)  // 应用编号超出窗口数组范围时拒绝打开
-        return;  // 当前打开或置顶一个应用，更新窗口次序和活动编号在本分支结束，后续语句不执行
+        return;  // 应用编号未通过范围检查，不访问窗口数组或改变次序
     struct ui_window *w = &s->windows[app];  // 借用当前应用的窗口状态，app已经通过范围检查
     if (!w->open) {  // 只在首次打开或关闭后重新设置窗口初始几何
         int offset = (int)s->order_count * 24;  // 每个已排入次序的窗口错开24像素，新窗口避免完全重合

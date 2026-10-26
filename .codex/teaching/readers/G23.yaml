@@ -13,6 +13,9 @@ already_explained:
   at: ../../../dev-log/graphics/14-services.md#service-callbacks
   establishes: 回调表保存函数地址，前端按合同传上下文与输出缓冲；调用仍在同一进程
 first_use:
+- concept: 请求重画与实际显示的交接
+  at: ../../../dev-log/graphics/23-native-window.md#event-loop
+  establishes: 事件方法改同一desktop并登记setNeedsDisplay，框架稍后调用drawRect消费像素；快照则在dump内同步ui_draw后输出并退出
 - concept: Cocoa 对象与消息
   at: ../../../dev-log/graphics/23-native-window.md#cocoa-objects
   establishes: 框架提供应用、窗口和视图；自有视图实现回调，消息语法在同一进程调用
@@ -29,6 +32,9 @@ borrowed:
 - component: Cocoa 与 CoreGraphics
   contract: 主机框架负责事件与显示，共享 C 核心在同进程处理文档与像素
 feedback:
+- source: B13 原生平台的连续交接复核
+  observation: setNeedsDisplay的语法释义混入PPM失败段，完整keyDown和main把平台材料、共享状态、显示调度放在远处
+  revision: 保留成熟事件循环与图像寿命论证并前置实际循环，分别接画布/输出、事件映射/剪贴板/派发、参数/会话/快照出口/Cocoa运行；不把登记重画写成已经绘图
 - source: 作者全文顺读，响应用户对主线和语言的反馈
   observation: 平台类、事件与像素生命周期需要围绕实际窗口衔接。
   revision: 从平台持有画布到重绘，再连接事件坐标、按键转换与程序关闭。

@@ -25,11 +25,17 @@ first_use:
 - concept: 文件短写与关闭
   at: ../../../dev-log/graphics/11-pixels.md#code-labs-tutorial-pixels-c-1
   establishes: PPM每像素三字节，任意短写停止输出但仍关闭，成功才报告文件完成
+- concept: 同一画布从借用到文件输出
+  at: ../../../dev-log/graphics/11-pixels.md#code-labs-tutorial-pixels-c-1
+  establishes: u_begin借用主机canvas与pixels，先背景再局部裁剪并画图，恢复整屏后画边框，save_image读取同一数组输出PPM；描述与数组覆盖全部调用。
 borrowed: []
 feedback:
 - source: 用户要求的微语法就近说明与主线连续性
   observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
   revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长
+- source: 本轮全教程解释性改进 B12
+  observation: 颜色编码、裁剪和地址写入集中在一块实现前后，操作与保存数组的交接需连续辨认。
+  revision: 沿粉色条带实际求交组织绘图，按颜色绑定、裁剪、矩形写入拆块，将pitch与对齐解释移到地址形成处；保留线段演算与输出失败语义。
 not_inferred: 解释存在与运行成功不证明真实读者已掌握；画像引用须与本章实际表达式核对
 source_reading:
 - concept: 半开几何与裁剪

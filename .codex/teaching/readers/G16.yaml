@@ -22,6 +22,12 @@ first_use:
 - concept: 应用接口随实际消费者增长
   at: ../../../dev-log/graphics/16-files-editor-view.md#code-frontend-apps-internal-h-1
   establishes: 在保留当前辅助函数后加入Files/Editor绘图；点击与对话框随后首次使用时再加入。
+- concept: 初始化读取与两次图片进程的关系
+  at: ../../../dev-log/graphics/16-files-editor-view.md#document-copies
+  establishes: ui_init按服务次序尝试首份普通文件，读入成功才绑定id、名称和saved；命令行参数只选择绘制窗口，各次观察进程独立初始化。
+- concept: 文件名进入既有窗口标题
+  at: ../../../dev-log/graphics/16-files-editor-view.md#code-frontend-core-paint-c-1
+  establishes: 保留原窗口遍历，在Editor且外框宽度大于500时画分隔符和editor_name；标题裁剪和其余应用继续沿用。
 borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
@@ -29,6 +35,12 @@ feedback:
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
+- source: 本轮全教程解释性改进 B12
+  observation: 整份重贴遮住四行标题新增，初始文档读取与排序显示容易被误连成一次点击。
+  revision: 标题改为两处唯一旧窗口替换；沿目录副本、服务id与初始read重组正文，分开各次图片进程；源码和命令字节保持冻结基线。
+- source: 独立阅读复查后的增量编辑修整
+  observation: ui.h和state.c整文件重贴使已有窗口、主题与刷新代码再次进入输入范围，遮住新增文档字段及初始化读取。
+  revision: 两文件改为以G15真实旧文本定位的三处与四处替换；保留完整新字段、read实参及失败条件，累计源码字节、命令、旧锚点和旁注字节不变。
 not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
 source_reading:
 - concept: 可见行、快照下标与文件身份

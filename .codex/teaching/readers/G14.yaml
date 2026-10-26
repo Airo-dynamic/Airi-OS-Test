@@ -7,6 +7,9 @@ already_explained:
   at: ../../../dev-log/graphics/13-themed-controls.md#code-frontend-render-draw-c-3
   establishes: u_control按显式状态组合图元和字形，u_button只转换选择与禁用位；按钮像素尚不触发服务动作。
 first_use:
+- concept: 回调声明与本次实参
+  at: ../../../dev-log/graphics/14-services.md#service-callbacks
+  establishes: backend.read接context、snapshot[0].id、text、sizeof(text)；创建hello.txt后重新files才得到七条，error只在失败时读取
 - concept: 文件名、完整路径、服务id与查询下标
   at: ../../../dev-log/graphics/14-services.md#file-identities
   establishes: telemetry/main.lua的name是main.lua、path包含父目录；id=槽号+1，只用于当前服务会话；六条快照是查询复制结果。
@@ -18,6 +21,9 @@ first_use:
   establishes: 完整正文加终止零容纳后才memcpy；小数组失败不写输出。used标记槽是否占用；不重复占已有名称。
 borrowed: []
 feedback:
+- source: B12 回调实际参数与服务副本复核
+  observation: 回调签名与实际调用相隔完整服务实现，容器、查询、读取和创建一次压在一段中
+  revision: 先以 snapshot[0].id、text、sizeof(text)说明实际调用，服务按容器到消费者分块；创建后以重新查询连接六到七条
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

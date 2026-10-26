@@ -275,7 +275,7 @@ static void boundary_render(void) {  // 在多尺寸、多位布局和哨兵内�
             free(p);  // 全部绘图和检查完成后才释放整块主机内存。
         }
 }
-static void mouse_windows(void) {  // 发送真实鼠标阶段序列，观察移动、最大化、最小化与关闭。
+static void mouse_windows(void) {  // 通过 ui_pointer 发送 C 事件序列，观察移动、最大化、最小化与关闭。
     start();  // 以重新初始化的参考服务和桌面开始本项检查。
     struct ui_window *w = &desk.windows[UI_EDITOR];  // 借用同一Editor窗口对象，后续事件直接修改它。
     int ox = w->rect.x, oy = w->rect.y;  // 保存初始左上坐标供位移比较。

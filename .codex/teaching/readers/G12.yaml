@@ -15,7 +15,7 @@ first_use:
   establishes: TTF轮廓在主机光栅化为覆盖率，字号不等于包围盒高度
 - concept: 三层图集容器
   at: ../../../dev-log/graphics/12-fonts.md#atlas-shape
-  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同
+  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同；metrics写成u_glyphs[8][95]，data写成u_coverage，U_BODY字符A读取[1][33]并由offset定位覆盖率
 - concept: 枚举与数组顺序
   at: ../../../dev-log/graphics/12-fonts.md#code-frontend-include-render-h-1
   establishes: 八套字体下标同时对齐faces和u_glyphs，Medium实际14px/500
@@ -35,6 +35,9 @@ feedback:
 - source: 用户要求的微语法就近说明与主线连续性
   observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
   revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长
+- source: 本轮全教程解释性改进 B12
+  observation: Python生成数据与C文字函数之间缺少同一条记录的连续消费，容器与图集名称需接起来。
+  revision: 按输入校验、轮廓收集、C输出拆开生成器；沿U_BODY的A连接两数组、屏幕坐标与blend；裁剪和度量观察放回对应调用处，保留原数值与失败条件。
 not_inferred: 解释存在与运行成功不证明真实读者已掌握；画像引用须与本章实际表达式核对
 source_reading:
 - concept: 字形、字号与字重轴
@@ -43,7 +46,7 @@ source_reading:
   status: 本章首次就地说明；不推断已掌握
 - concept: 三层图集容器
   at: ../../../dev-log/graphics/12-fonts.md#atlas-shape
-  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同
+  establishes: data整数覆盖率、glyphs六元组、metrics八套列表，append与extend层级不同；metrics写成u_glyphs[8][95]，data写成u_coverage，U_BODY字符A读取[1][33]并由offset定位覆盖率
   status: 本章首次就地说明；不推断已掌握
 - concept: 枚举与数组顺序
   at: ../../../dev-log/graphics/12-fonts.md#code-frontend-include-render-h-1

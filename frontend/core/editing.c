@@ -37,7 +37,7 @@ static void insert(struct ui_desktop *s, const char *text) {  // 整份检查输
 static void field_key(struct ui_desktop *s, char *field, size_t cap, int key) {  // 让一个事件只修改当前短字段和字段级选择
     if (key == UI_SELECT_ALL) {  // 当前接收者内全选：短字段标记整字段，文档分支则设置两端字节间隙
         s->field_all = true;  // 输入字段内容设为整体选中，下一次键入可以替换
-        return;  // 当前让一个事件只修改当前短字段和字段级选择在本分支结束，后续语句不执行
+        return;  // 已标记整字段选中，此键不再作为普通字符插入
     }
     if (key == UI_COPY || key == UI_CUT) {  // 复制保留当前文字，剪切还会删除；具体范围由此接收者的选中状态决定
         if (s->field_all) {  // 只有短字段整体选中时才复制其正文，文档选区不参与此字段操作
@@ -45,7 +45,7 @@ static void field_key(struct ui_desktop *s, char *field, size_t cap, int key) { 
             if (key == UI_CUT)  // 短字段剪切复制完成后清空字段，普通复制保留输入
                 field[0] = 0;  // 清空当前短输入字段，文档编辑数组不受影响
         }
-        return;  // 当前让一个事件只修改当前短字段和字段级选择在本分支结束，后续语句不执行
+        return;  // 复制或剪切分支已结束；未全选时也不把快捷键插入字段
     }
     if (s->field_all && (key == 8 || key == UI_PASTE || (key >= 32 && key <= 126))) {  // 整字段选中后首次退格、粘贴或字符输入替换整份字段，其余快捷键不清空
         field[0] = 0;  // 清空当前短输入字段，文档编辑数组不受影响

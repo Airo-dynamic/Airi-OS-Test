@@ -2,7 +2,9 @@
 
 文件服务能返回快照，绘图也能写文字。现在在同一个主机程序中建立文本会话和桌面，让 Terminal 显示会话日志、System 显示它借用的启动描述。参考服务提供这份示例启动数据；内核仍沿 K11 的串口路径运行。打开窗口并写出 PPM 后，窗口位置、标题和遮挡才成为可见结果。
 
-桌面对象保存各应用窗口的整屏像素矩形；order记录从底到顶的绘制次序，active记录接受后续操作的窗口。C 观察程序先设置这些状态，再触发一帧绘图。标题栏按钮目前只有外观，菜单、错误框与鼠标事件随后随实际操作加入。
+本章的一帧从三个已有对象接起来：reference 服务提供文件和示例 boot，console 借用 boot 建立文本会话，desktop 再借用 console 并复制服务回调表。观察程序调用 ui_open 选择窗口，调用 ui_draw 把当前状态画进主机 pixels 数组，最后把数组写成 PPM。打开只改变窗口状态，画布在 ui_draw 时才出现像素；本章没有持续运行的窗口事件循环。
+
+桌面用 windows[app] 保存每个应用的窗口，用 order 保存从底到顶的应用编号，用 active 指出当前活动应用。默认初始化先打开 Terminal；选择 System 的那次观察还会打开并最大化 System，所以桌面同时保留两个打开身份，画面显示最上方的最大化 System。标题栏按钮目前只画外观。
 
 **完整写入 `frontend/include/ui.h`：**
 
@@ -118,65 +120,17 @@ u_label_width累加相同字形advance与每字符两像素额外间距；例如
 
 u_plate以每行减去y/3的宽度形成斜切右缘，三行只缩一像素。u_brand用已有整数线段与矩形组成A形标识，整段绘图继续受到当前裁剪范围限制。
 
-**完整写入 `frontend/include/render.h`：**
+在 render.h 中定位原来只有 UI_CONTROL_RADIUS 的 ui_metric 声明，用第一个新块替换它，加入本章实际使用的窗口度量与标签函数声明。旧块用于定位；像素、字体、颜色和状态接口继续保留。
 
 <a id="code-frontend-include-render-h-1"></a>
 
-<!-- write: frontend/include/render.h -->
+<!-- replace: frontend/include/render.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_RENDER_H   // 同一编译单元只展开一次绘图接口
-#define AIRI_RENDER_H   // 记住本头文件已经处理
-#include <airi/boot.h>  // 借用前文的帧缓冲描述、固定宽整数和bool
-struct ui_rect {  // 用像素数描述半开矩形，右下边界不属于矩形
-    int x;  // 左边所在的整屏列号，可为负以表示部分在屏外
-    int y;  // 顶边所在的整屏行号，向下增加
-    int w;  // 横向像素数，不是右边坐标
-    int h;  // 纵向像素数，不是底边坐标
-};
-void u_begin(const struct airi_framebuffer *);  // 借用已验证的描述与可写像素数组，直到本次绘图结束
-void u_clip(struct ui_rect);  // 请求矩形与整幅画布求交，替换当前裁剪区
-void u_reset_clip(void);      // 恢复整幅画布的可写范围
-void u_rect(int, int, int, int, uint32_t);  // 按左上、宽高及0xRRGGBB填充裁剪内像素
-void u_line(int, int, int, int, uint32_t);  // 用整数误差将含两端点的线段变成像素
-void u_frame(struct ui_rect, uint32_t);     // 用四条一像素宽矩形绘制边框
-bool u_inside(struct ui_rect, int, int);    // 判断整屏坐标是否在半开矩形内
-enum ui_font {  // 枚举下标与生成器faces的顺序一一对应
-    U_SMALL,  // Plex Sans 12px、字重400，用于次要信息
-    U_BODY,   // Plex Sans 14px、字重400，用于正文
-    U_LABEL,  // Plex Sans 16px、字重500，用于标签
-    U_TITLE,  // Plex Sans 22px、字重500，用于标题
-    U_MONO,   // Plex Mono 14px常规字重，用于终端
-    U_CODE,   // Plex Mono 16px常规字重，用于代码
-    U_MEDIUM,  // Plex Sans 14px、字重500，用于紧凑按钮
-    U_DISPLAY  // Plex Sans 32px、字重300，用于大读数
-};
-void u_text(int, int, const char *, enum ui_font, uint32_t);  // 用度量与覆盖率绘制可打印ASCII文字
-int u_text_width(const char *, enum ui_font);  // 累加单行字形advance供文字布局
-enum ui_color {  // 数值从24位RGB范围之外开始，名字表示用途而非固定像素
-    U_BG = 0x1000000,  // 整幅画布背景，第一个角色的编号
-    U_PANEL,    // 标题、工具栏和普通按钮的底面
-    U_SURFACE,  // 正文内容区域
-    U_RAISED,   // 被选择的列表背景
-    U_EDGE,     // 轻分隔和不活动外框
-    U_TEXT,     // 主要正文
-    U_MUTED,    // 次要说明
-    U_ACCENT,   // 粉色主动作与身份标记
-    U_BLUE,     // 蓝色焦点与辅助强调
-    U_RED,      // 错误和危险操作
-    U_WARM,     // 警示与代码数值
-    U_PINK,     // 独立身份色，区别于可操作强调
-    U_CONTROL,  // 普通可操作边界
-    U_SHADOW,     // 窗口或对话框阴影
-    U_HOVER,      // 悬停按钮底面
-    U_PRESSED,    // 按下按钮底面
-    U_DISABLED,   // 禁用文字
-    U_SUCCESS,    // 成功状态
-    U_ON_ACCENT,  // 粉色实面上的文字
-    U_CHROME,  // 标题身份片的表面
-    U_INK,     // 标题身份片的前景
-    U_COLOR_END  // 半开角色终点，只用于边界检查，不是可绘制颜色
-};
-enum ui_theme { UI_NIGHT, UI_DAY };  // 下标0夜间、1日间，零初始化自然选择夜间
+enum ui_metric { UI_CONTROL_RADIUS = 2 };  // 本章只需要按钮的2像素圆角，不预置窗口尺寸
+```
+<!-- after -->
+```c
 enum ui_metric {  // 绘图与后续命中共用同一组像素度量
     UI_TOP = 36, UI_DOCK = 56, UI_BOTTOM = 30, UI_TITLE_H = 48,  // 整屏顶部、应用栏、底栏及窗口标题高度
     UI_TOOLBAR_H = 44, UI_STATUS_H = 27,  // 窗口内容顶部和底部的独立区域
@@ -187,19 +141,17 @@ int u_label_width(const char *);  // 按Medium推进量和每字符两像素字�
 void u_label(int, int, const char *, uint32_t);  // 14px Medium短标签，每字符推进后加两像素字距
 void u_plate(struct ui_rect, uint32_t);  // 逐行收窄右缘的窗口身份片
 void u_brand(int, int);  // 用已有线段画原创A形系统标识
-enum ui_control_state {  // 不同状态占不同二进制位，可以按位或组合
-    U_NORMAL = 0,    // 没有任何额外状态位
-    U_SELECTED = 1,  // 第0位：当前已选中的动作
-    U_HOT = 2,      // 第1位：悬停反馈
-    U_DOWN = 4,     // 第2位：按下反馈
-    U_FOCUSED = 8,  // 第3位：键盘焦点
-    U_INACTIVE = 16  // 第4位：服务不可用，覆盖其他交互强调
-};
-void u_theme(unsigned);      // 选择本轮绘图调色板，不拥有应用的会话数据
-uint32_t u_color(uint32_t);  // 角色解析成RGB，0至0xffffff的真实RGB原样通过
-void u_round(struct ui_rect, int, uint32_t);  // 圆角边缘按4×4样本混合，仍遵守裁剪
-void u_control(struct ui_rect, const char *, unsigned);   // 按调用者明确给出的状态绘制按钮，不执行动作
-void u_button(struct ui_rect, const char *, bool, bool);  // 将selected与disabled转换为共同状态表
+```
+
+再定位文件末尾的 endif，替换成正文矩形与选择标记函数，并保留结尾包含保护。两个函数都复用当前绘图接口。
+
+<!-- replace: frontend/include/render.h -->
+<!-- before -->
+```c
+#endif  // 结束包含保护
+```
+<!-- after -->
+```c
 static inline struct ui_rect u_window_body(struct ui_rect r) {  // 由外框得到标题下方的应用矩形
     return (struct ui_rect){r.x + 1, r.y + UI_TITLE_H + 1, r.w - 2, r.h - UI_TITLE_H - 2};  // 左右各去一像素，顶部去48像素标题及一像素边框
 }
@@ -244,13 +196,13 @@ void u_brand(int x, int y) {  // 两条斜边和悬浮横梁组成原创A形标�
 }
 ```
 
-标题文字现在可以按实际推进距离测宽，斜切片据此留出完整空间。窗口框和应用内容仍使用同一套像素与调色板；下一步先准备这些内容要读取的启动与文件状态。
+这几项辅助函数还没有建立窗口。后面的 ui_draw 会先用 u_label_width 测身份文字，算出片宽，再依次画 u_plate、图标和 u_label；测量与绘制用相同的字形推进量。接下来准备窗口内容要读取的启动与文件状态。
 
 ## 让文本会话和 System 借用同一份启动描述
 
 Terminal 的日志与 System 的内存表需要同一个启动来源。参考服务在静态 `boot` 中建立四条示例内存区域，再把 `&boot` 放进回调表；它和文件槽都活到进程结束。主机画布另由观察程序拥有，示例 `boot` 的帧缓冲字段仍为零，所以 System 会说明当前是窗口会话。
 
-**完整写入 `frontend/backends/reference.c`：**
+reference.c 此次增加长期有效的 boot 对象和初始化字段。下面仍按本检查点完整内容写入；已有文件查询、读取和创建合同保持 G14 的含义。先写到 action 末尾，再追加初始化。
 
 <a id="code-frontend-backends-reference-c-1"></a>
 
@@ -345,6 +297,12 @@ static bool action(void *unused, const char *directory, enum ui_action act, int 
         }
     return error(out, cap, "Reference workspace capacity reached.");  // 拒绝本次服务修改并向调用者报告：Reference workspace capacity reached
 }
+```
+
+追加初始化函数。前半段继续建立同一批服务文件；后半段填写 boot 的合同字段及四条区域。最后把 &boot 放入 backend.boot，console 和 System 后面都会沿这一指针读取它。这里没有为 boot.framebuffer 填入画布：主机 pixels 的地址将在观察程序中单独交给 ui_draw。
+
+<!-- append: frontend/backends/reference.c -->
+```c
 void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服务并填入回调表
     airi_memset(entries, 0, sizeof(entries));  // 把服务拥有的32个槽清空，再填本会话初始参考文件
     add(0, "/home/airi/projects/telemetry", "main.lua", false,  // 向明确编号的服务槽填这份路径、名称、目录标记与正文
@@ -387,11 +345,9 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
 }
 ```
 
-## 创建之后刷新桌面快照
+## 初始化桌面并打开窗口
 
-若服务创建了 hello.txt，desktop.files 仍是之前复制的六条元信息，必须再次查询才能看到新增项。本章观察程序会重新初始化服务，先显示原来的六条。刷新把服务的当前元信息复制到桌面数组，file_count 记录有效条数。容量 32 指数组有多少槽，file_count 指本次用了多少槽，两者不能混作循环终点。
-
-ui_refresh 先清文件快照计数，服务状态非正常便返回，旧成功数据不继续显示。正常时调用现有回调，并把条数限在本地容量内。选中下标超出新快照则归零。
+桌面建立后也持有一份文件查询副本。本章观察程序重新初始化服务，所以首次刷新仍得到原来的六条；G14 中前一次进程创建的 hello.txt 不会带进来。以后服务改变记录，也须再次查询才能更新 desktop.files。file_count 记录本次有效条数，32 记录本地数组容量，遍历不能把二者混用。
 
 K11 的文本解释器保留一个可选扩展回调，将内置分支未识别的命令交给它。桌面在 `ui_init` 中把 `appearance` 和当前桌面地址安装到 extension 与 extension_context，`theme day`、`theme night` 和查询 `theme` 因而交给图形层处理；未识别文字返回 false，由文本解释器生成未知命令错误。
 
@@ -415,6 +371,12 @@ static bool appearance(struct airi_console *console, const char *command, void *
     airi_console_print(console, "Appearance: %s / theme day | theme night", desktop->theme ? "Day" : "Night");  // 查询和设置都报告实际呈现状态。
     return true;  // 表示本条命令已经同步处理。
 }
+```
+
+ui_refresh 先清文件快照计数，服务状态非正常便返回，旧成功数据不继续显示。正常时调用现有回调，并把条数限在本地容量内。选中下标超出新快照则归零。本次实际调用把 s->directory 作为输入，把 s->files 和 UI_FILES 作为输出数组及容量，返回值写进 s->file_count。追加刷新函数。
+
+<!-- append: frontend/core/state.c -->
+```c
 void ui_refresh(struct ui_desktop *s) {  // 重新查询当前目录元信息，并重新建立文件快照的有效前缀
     s->file_count = 0;  // 刷新前清有效文件条数，失败时不显示旧成功快照
     if (s->service_state != UI_NORMAL)  // 服务未正常时停止复制或显示成功快照
@@ -427,6 +389,12 @@ void ui_refresh(struct ui_desktop *s) {  // 重新查询当前目录元信息，
         s->selection_file = 0;  // 旧选中下标失效时回到新快照第一项
 }
 
+```
+
+ui_init 接收观察程序准备的 backend 和 console。清零后，UI_NORMAL 与 Night 都对应零初值；active 则显式设为 -1，表示尚无活动窗口。随后保存 1280×800 的初始布局尺寸、设置查询目录、取得六条元信息，最后调用 ui_open(s, UI_TERMINAL)。此时没有编辑文字数组，也还没向画布写像素。追加初始化。
+
+<!-- append: frontend/core/state.c -->
+```c
 void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) {  // 清桌面状态，绑定服务和console并打开默认应用
     airi_memset(s, 0, sizeof(*s));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
     s->backend = b;  // 把回调表和上下文复制进桌面，服务数据仍归服务拥有
@@ -441,9 +409,15 @@ void ui_init(struct ui_desktop *s, struct ui_backend b, struct airi_console *c) 
     ui_open(s, UI_TERMINAL);  // 打开或置顶一个应用，更新窗口次序和活动编号，本次实参取自当前桌面状态
 }
 
+```
+
+接着实现 ui_open。首次打开 Terminal 时，order_count 为 0，窗口从 (92,72) 开始建立初始 rect，并复制到 restore；open 变为 true，active 变为 0，order 的有效前缀变成 [0]。之后打开 System，会用已有数量形成 24 像素错位，次序变成 [0,4]、active=4。若再次打开已有应用，它保留 rect，取消最小化，从旧 order 中去重后追加到末尾；这就是置顶，不需要重建日志或启动对象。
+
+<!-- append: frontend/core/state.c -->
+```c
 void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个应用，更新窗口次序和活动编号
     if (app >= UI_APP_COUNT)  // 应用编号超出窗口数组范围时拒绝打开
-        return;  // 当前打开或置顶一个应用，更新窗口次序和活动编号在本分支结束，后续语句不执行
+        return;  // 应用编号未通过范围检查，不访问窗口数组或改变次序
     struct ui_window *w = &s->windows[app];  // 借用当前应用的窗口状态，app已经通过范围检查
     if (!w->open) {  // 只在首次打开或关闭后重新设置窗口初始几何
         int offset = (int)s->order_count * 24;  // 每个已排入次序的窗口错开24像素，新窗口避免完全重合
@@ -465,14 +439,18 @@ void ui_open(struct ui_desktop *s, enum ui_app app) {  // 打开或置顶一个�
     s->order_count = n;  // 记录去重后绘图顺序的有效长度
 }
 
+```
+
+最后追加服务状态入口。它先记录新状态，再走同一个 ui_refresh；因此切到非正常状态后，有效文件条数成为 0，后面的不可用提示不会继续显示旧的成功快照。
+
+<!-- append: frontend/core/state.c -->
+```c
 void ui_service_state(struct ui_desktop *s, enum ui_state state) {  // 切换服务显示状态并刷新相应快照
     s->service_state = state;  // 用调用者指定状态切换服务反馈，随后刷新决定是否继续查询快照
     ui_refresh(s);  // 按新服务状态重新查询；非正常状态留下0条有效元信息
 }
 
 ```
-
-ui_init先清桌面，再复制回调表并借用console，令active为-1，设置1280×800的初始尺寸与查询目录，刷新文件快照，最后打开Terminal。此时还没有编辑文字数组。ui_open把目标应用从旧次序中移除，再追加到order末尾；因此它只出现一次并在下一次绘图中位于顶层。
 
 ## 应用共用的文字与控件
 
@@ -675,6 +653,12 @@ void ui_terminal_draw(struct ui_desktop *s, struct ui_rect r) {  // 把console�
             offset[n++] = j * cols;  // 保存该显示段在原日志中的字节偏移，再推进显示行计数
         }
     }
+```
+
+上面得到两列配对索引：seq[i] 指向一条 console 逻辑行，offset[i] 指出这一显示段从该行哪个字节开始；n 是显示段总数。例如二十字符按十二列拆成两段，两项 seq 相同而 offset 分别为 0、12。接下来把 console.scroll 收窄到可回看的范围，求出 [begin,end)，再从原日志复制本屏各段来画。原始日志仍保持完整。继续追加同一函数。
+
+<!-- append: frontend/apps/terminal.c -->
+```c
     unsigned maxscroll = n > visible ? n - visible : 0,  // 显示段比窗口容量多时才能回滚，最多回看多出的行数
              scroll = c->scroll < maxscroll ? c->scroll : maxscroll, end = n - scroll,  // 把请求滚动收窄到有效范围，再从尾部减滚动量得到显示终点
              begin = end > visible ? end - visible : 0;  // 显示区间起点最多向前visible行，少于一屏时从第0段开始
@@ -692,6 +676,12 @@ void ui_terminal_draw(struct ui_desktop *s, struct ui_rect r) {  // 把console�
         u_text(r.x + 18, r.y + 14 + (int)(i - begin) * 24, row, U_CODE,  // 在内容左缘右移18像素、整屏y=r.y + 14 + (int)(i - begin) * 24显示本次拆出的显示文字行，使用等宽字形
                ui_app_match(row, "airi>") ? U_BLUE : U_TEXT);  // 当前日志显示段含airi>时用蓝色突出提示符，否则使用普通文字色
     }
+```
+
+日志区临时收窄过 clip，下面先恢复传入的整个 body，再画分隔线、当前输入和状态栏。输入超过可见列时只让显示起点 start 向后走，完整命令仍在 console.input；光标按可见尾部的位置绘制。继续追加到函数结束。
+
+<!-- append: frontend/apps/terminal.c -->
+```c
     u_clip(r);  // 恢复当前应用内容裁剪，后续列或控件可使用完整内容区
     u_rect(r.x, r.y + r.h - 68, r.w, 1, U_EDGE);  // 用分隔线色写矩形，起点(r.x,r.y + r.h - 68)，尺寸r.w×1像素
     u_text(r.x + 18, r.y + r.h - 54, "airi>", U_CODE, U_BLUE);  // 在内容左缘右移18像素、内容底边上移54像素显示文字"airi>"，使用等宽字形
@@ -706,7 +696,7 @@ void ui_terminal_draw(struct ui_desktop *s, struct ui_rect r) {  // 把console�
 
 ```
 
-System 读取相同 boot，五个 tab 分别显示概况、内存、存储、设备和日志。内存比例使用 usable、held 和 kernel 的启动分类；页表和分配器尚未提供实时统计。内存表起点由 map_page×12 加窗口 scroll 得到，每次最多十二条。
+System 读取相同 boot，五个 tab 分别显示概况、内存、存储、设备和日志。tab 先从 System 窗口状态取得，下面按它选择一页正文。
 
 reference 与 live 使用不同页脚。当前存储页说明服务范围，尚无挂载磁盘。主机观察把像素数组作为画布交给 ui_draw，但参考 boot 没有真实固件帧缓冲；System 因此显示启动显示描述缺失，而不会把这份 1280×800 画布误记成引导器提供的设备。真实内核运行时，System 才从同一启动描述显示设备宽高和 pitch。
 
@@ -750,6 +740,12 @@ void ui_system_draw(struct ui_desktop *s, struct ui_rect r) {  // 按当前页�
                          ? "Session storage / no disk mounted"  // 参考文件只存于本进程数组，尚无磁盘服务
                          : "Boot information / console / framebuffer");  // 真实内核后端当前只提供启动、console与像素输出
         u_button((struct ui_rect){x, y + 263, 180, 32}, "Open preferences", false, false);  // 画文字"Open preferences"按钮；其矩形供后续事件命中共用，当前仅输出像素
+```
+
+Memory 页使用同一 boot 的启动分类，页表和分配器尚未提供实时统计。sizes、names、colors 按相同下标对应 usable、held、kernel 三类；柱条按累计字节边界计算，所以最后一段与总宽闭合，总和为零时不除零。下方地址表再用 map_page×12 加窗口 scroll 取得首条区域，同时受真实条数、窗口容量和每页十二条约束。继续追加 Memory 分支，开头的右花括号闭合上面的 Overview。
+
+<!-- append: frontend/apps/system.c -->
+```c
     } else if (tab == 1) {  // System第1页显示启动内存地图及各类字节总量
         u_label(x, y, "PHYSICAL MEMORY / BOOT INVENTORY", U_MUTED);  // 内存分类是启动库存，不是分配器实时用量
         uint64_t sizes[] = {airi_memory_bytes(s->backend.boot, AIRI_MEMORY_USABLE),  // 三类数据读取同一启动描述
@@ -794,6 +790,12 @@ void ui_system_draw(struct ui_desktop *s, struct ui_rect r) {  // 按当前页�
                    region->kind == AIRI_MEMORY_USABLE ? U_ACCENT : U_TEXT);  // 可用内存强调规则不变
 
         }
+```
+
+其余页面继续读取当前已有来源。Storage 只在参考服务正常时说明会话内存工作区；否则明确显示尚无块设备文件系统。Devices 和 Journal 分别格式化固定设备说明与有序启动记录，不把这些文字再追加进 console 日志。最后状态栏区分 Recorded boot inventory 与 Live boot handoff。继续追加至函数结束。
+
+<!-- append: frontend/apps/system.c -->
+```c
     } else if (tab == 2) {  // System第2页说明参考内存工作区，或报告尚无块设备文件系统
         u_text(x, y, "Storage volumes", U_LABEL, U_TEXT);  // 在整屏x=x、整屏y=y显示文字"Storage volumes"
         if (s->backend.mode == UI_REFERENCE && s->service_state == UI_NORMAL) {  // 只有当前主机参考服务正常时才显示本会话内存工作区
@@ -859,11 +861,11 @@ void ui_apps_draw(struct ui_desktop *s, enum ui_app app, struct ui_rect r) {  //
 
 重叠窗口不需要像素知道属于谁。若 Terminal 先画、System 后画，两者重叠处最终留下 System 的颜色，这就是当前的遮挡方式。order 保存这种从底到顶的顺序，active 保存接受窗口操作的应用编号；置顶时两者一起更新。
 
-裁剪矩形限定当前可写范围。应用即使画了长行，像素写入也只在 body 内发生，标题栏与其他窗口不会被覆盖。返回桌面绘图后恢复整屏裁剪，顶栏与应用入口才能正常写到 body 外。
+裁剪限制一个应用写到自己的 body 之内，避免长行越过标题和边框。窗口之间的遮挡仍由先后覆盖决定：上层窗口随后写入同一片画布。每个应用返回后恢复整屏裁剪，下一个窗口和最后的底栏才不会被前一个 body 限住。
 
 具体绘制先铺背景、顶栏和左侧应用栏，再从 order 底部向顶部画可见窗口，最后画底部窗口栏。Terminal 与 System 已有内容函数，其余应用编号当前只绘制外框。`ui_draw(s,f)` 借用桌面 s 与画布描述 f；它会按本帧尺寸回写窗口几何，后续事件必须读取这些更新后的矩形。
 
-每个窗口计算 `body={x+1,y+49,w-2,h-50}`，把 clip 限到 body 后调用应用，返回时恢复整屏裁剪。窗口大小变化时，ui_draw 先更新桌面尺寸并回写实际 rect；后面的鼠标命中会使用这份几何。
+因此一次绘图也会确定本帧真正使用的几何。ui_open 中的尺寸是初始值；ui_draw 先读取实际画布宽高，再收窄或最大化窗口并回写 rect。随后才计算 `body={x+1,y+49,w-2,h-50}`，把它交给 ui_apps_draw。后面输入接入时须读取这些更新后的矩形，不能另算一套旧位置。
 
 颜色角色已经由G13解析。本次绘图先借用实际画布，再从desktop.theme取得会话模式，铺桌面栏和应用标识；下面的函数尚未闭合，窗口遍历接在同一个ui_draw中。
 
@@ -878,7 +880,7 @@ static const char *titles[] = {"Terminal", "Files",    "Editor",     "Tasks",  /
                                "System",   "Settings", "Data viewer"};  // 继续应用枚举4到6的窗口标题，数组顺序与应用id一致
 void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按当前窗口次序绘制整帧
     if (!airi_framebuffer_valid(f))  // 画布地址、尺寸或通道无效时，在写像素之前结束
-        return;  // 当前按当前窗口次序绘制整帧在本分支结束，后续语句不执行
+        return;  // 画布验证未通过，本帧不写像素
     s->width = (int)f->width;    // 当前帧画布宽度按像素保存，绘图已检查帧缓冲能用且宽度可转int
     s->height = (int)f->height;  // 当前帧画布高度按像素保存，窗口收窄和坐标布局使用这个尺寸
     u_begin(f);  // 借用本次画布描述，建立颜色布局与整屏裁剪
@@ -946,6 +948,12 @@ active<0 时顶栏显示 Desktop，否则用应用编号取标题。当前没有
             w->rect.x = 68;  // 左缘最小保留68像素，确保窗口不会盖住56像素侧栏
         if (w->rect.y < 46)  // 窗口顶缘越过顶栏后的最小位置时向下收回
             w->rect.y = 46;  // 顶缘最小46像素，确保标题栏位于系统顶栏之下
+```
+
+到这里，w->rect 已是本帧可用区内的外框。下面复制成局部 r，画阴影、表面和标题身份片；heads 的字距与片宽使用前面的标签辅助函数。标题文字另设裁剪区，系统按钮仍在它的右侧。随后 u_window_body(r) 只扣除外框边线与标题，将 body 交给应用内容函数。继续追加当前窗口循环。
+
+<!-- append: frontend/core/paint.c -->
+```c
         struct ui_rect r = w->rect;  // 复制已收窄的当前窗口矩形，后面从它计算边框、标题与body
         u_reset_clip();  // 恢复整个画布的可写范围，后续控件不继承上一次局部裁剪
         bool focused = s->active == (int)app;  // 标题和局部边界共同指出当前窗口
@@ -1006,9 +1014,7 @@ active<0 时顶栏显示 Desktop，否则用应用编号取标题。当前没有
 }
 ```
 
-观察程序先改变 desktop，再调用 ui_draw，最后像G11一样输出 PPM 图片。图片保存这次状态形成的一帧像素，后续交互还需要事件入口。
-
-观察程序初始化 reference、console 与 desktop，按参数打开应用并最大化，再生成 PPM。atoi 将参数转成整数，使用前检查 0..UI_APP_COUNT-1。窗口状态由这组 C 调用决定。
+最后写出触发本章这一帧的调用方。它依次初始化 reference、console、desktop；再把参数转换为 app，确认编号在 0..UI_APP_COUNT-1 内，打开该应用并设置 maximized。然后建立指向 pixels 的画布描述，调用一次 ui_draw，才把结果保存为图片。所有对象都覆盖这一轮调用，console 和 boot 没有为各个窗口另复制一份。
 
 **新建 `labs/tutorial/desktop.c`：**
 
@@ -1037,6 +1043,12 @@ int main(int argc, char **argv) {    // 在主机准备输入、运行当前观�
         .pitch = 1280 * 4, .bpp = 32, .red_size = 8, .red_shift = 16,  // 设置每行实际字节跨度、每像素位数、红色通道位数、红色通道最低位位置
         .green_size = 8, .green_shift = 8, .blue_size = 8};  // 设置绿色通道位数、绿色通道最低位位置、蓝色通道位数
     ui_draw(&desktop, &fb);  // 按当前窗口次序绘制整帧，本次实参取自当前桌面状态
+```
+
+ui_draw 返回时，pixels 已保存本次状态对应的整帧像素，desktop 中也保留本帧修正后的窗口几何。下面继续 main，把数组按 PPM 的 RGB 字节次序输出；这一步只保存图片，不再刷新服务或执行窗口操作。
+
+<!-- append: labs/tutorial/desktop.c -->
+```c
     FILE *file = fopen("build/desktop.ppm", "wb");  // 以二进制写并截断旧内容打开本次桌面PPM文件
     if (!file)  // 打开PPM输出失败时不继续写文件
         return 1;  // 当前主机观察失败，以非零状态阻止后续误判通过
@@ -1053,7 +1065,7 @@ int main(int argc, char **argv) {    // 在主机准备输入、运行当前观�
 }
 ```
 
-依次运行 Terminal 与 System。输出路径相同，每次覆盖前一张，可在运行对应命令后查看。
+下面两次运行是两个独立主机进程，每次都会从参考数据重新初始化。第一次生成 Terminal，复制图片后再运行参数 4 生成 System；两次写入同一路径，所以每次紧接着另存这一帧。
 
 **在学习目录根目录运行：**
 
@@ -1067,4 +1079,4 @@ cp build/desktop.ppm build/terminal.ppm  # 留下Terminal这一帧，随后Syste
 cp build/desktop.ppm build/system.ppm  # 保存System实际生成的另一帧
 ```
 
-不带参数生成 Terminal，参数 `4` 是 `UI_SYSTEM` 在应用枚举中的编号，因此第二次运行生成 System。打开 `build/desktop.ppm` 可见内容；当前没有任务统计回调或资源栏，因此两帧显示所选窗口与共同桌面框架。任务与资源统计在G18接入。窗口位置尚由观察程序设置。下一章让 Files 显示目录，Editor 显示同一服务里的文档。
+不带参数时，ui_init 已打开 Terminal，main 再打开它只做去重置顶，order 仍是 [0]。参数 4 时，order 是 [0,4]；System 最大化后，绘图把 first 设为它的层次，跳过被完全遮住的 Terminal 像素，但 Terminal 仍出现在底栏的已打开应用中。查看 build/terminal.ppm 与 build/system.ppm，可以分别对应这两次状态；当前没有任务统计回调或资源栏，G18 才接入。下一章在同样的窗口框架中绘制 Files 和 Editor。

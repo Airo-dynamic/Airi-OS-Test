@@ -10,6 +10,9 @@ already_explained:
   at: ../../../dev-log/graphics/11-pixels.md#pixel-canvas
   establishes: 矩形尺寸与可写范围分开，描述和数组在绘图期间有效
 first_use:
+- concept: 角色与状态的实际消费者
+  at: ../../../dev-log/graphics/13-themed-controls.md#code-frontend-render-draw-c-2
+  establishes: native与blend先把U_ACCENT变成实际RGB；names[i]与states[i]共同成为控件输入，两轮共用数组而分别写出文件
 - concept: 角色编号与24位RGB
   at: ../../../dev-log/graphics/13-themed-controls.md#color-roles
   establishes: 角色从0x1000000开始，普通RGB与混合结果不会再次映射；21列二维调色板
@@ -27,6 +30,9 @@ first_use:
   establishes: 观察显式传状态；u_button不读取鼠标、不执行应用动作
 borrowed: []
 feedback:
+- source: B12 连续带敲与消费关系复核
+  observation: 调色板、混合入口与按钮状态曾夹在大段已有绘图重贴中；状态规则迟于实现
+  revision: 用局部替换接入角色解析，圆角后再进入控件状态，观察程序按标签与状态同下标连接到两轮输出
 - source: 用户要求的微语法就近说明与主线连续性
   observation: 旧颜色常量直接等同角色，字体Medium注释错误写成12px，阶段预置未来窗口字段
   revision: 原始像素先独立实现，八套字体一次建立，13才引入用途与明确状态；窗口与指针按首次用途增长

@@ -13,6 +13,9 @@ already_explained:
   at: ../../../dev-log/core/11-serial-build.md#command-extension
   establishes: console只保存函数地址及void*上下文；未识别命令同步交给扩展，true表示已处理，回调不能保存局部命令地址。
 first_use:
+- concept: 打开状态、一帧绘图与独立进程
+  at: ../../../dev-log/graphics/15-windows.md#paint-order
+  establishes: ui_open只改windows/order/active；Terminal为order[0]，System观察为[0,4]且最大化跳过底层像素；ui_draw回写实际几何再输出PPM，两次运行分别初始化
 - concept: 整屏窗口矩形与正文矩形
   at: ../../../dev-log/graphics/15-windows.md#window-coordinates
   establishes: ui_window.rect保存整屏像素，body扣48像素标题加顶边；外框(100,80,800,600)得到(101,129,798,550)。
@@ -35,6 +38,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B12 一帧过程与窗口状态复核
+  observation: 实际触发一帧的调用方迟于全部实现，打开身份、层次、最大化可见结果容易混在一起
+  revision: 开篇先接 reference→console→desktop→open→draw→PPM，随定义追踪 order 的 [0] 与 [0,4]，保留本帧几何回写和独立进程范围
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

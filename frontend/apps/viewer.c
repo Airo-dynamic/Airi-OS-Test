@@ -9,7 +9,7 @@ void ui_viewer_draw(struct ui_desktop *s, struct ui_rect r) {  // 把已提交�
         ui_app_unavailable(s, (struct ui_rect){r.x, r.y + 44, r.w, r.h - 72},  // 按服务状态绘制加载、空或不可用提示，本次实参取自当前桌面状态
                            "Open a two-column CSV document from Files.");  // 提示从Files打开两列CSV的实际入口，尚未加载时不显示参考假曲线
         ui_app_status(r, "No series loaded", NULL);  // 在内容底部显示文字"No series loaded"；右侧说明按测得的文字宽度对齐
-        return;  // 当前把已提交时间和测量值缩放到真实时间比例的像素曲线在本分支结束，后续语句不执行
+        return;  // 服务状态不可用或尚无已提交曲线，只显示提示，不缩放或连点
     }
     struct ui_rect graph = {r.x + 52, r.y + 156, r.w - 84, r.h - 241};  // 曲线图区扣左侧52像素标签、顶156像素工具栏及底部空间，尺寸仍按像素
     unsigned max = 1;  // 纵轴上限至少为1，使全零序列也不除零

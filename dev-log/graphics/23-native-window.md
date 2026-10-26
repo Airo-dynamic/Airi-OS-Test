@@ -8,6 +8,10 @@
 
 Cocoa 是 macOS 的应用界面框架。NSApplication 管理应用事件，NSWindow 表示原生窗口，NSView 表示窗口内接受绘制与输入的一块区域。我们定义 AiriView 继承 NSView，提供框架会调用的方法，像 C++ 继承后实现虚函数一样接入既有调用过程；Objective-C 使用消息语法和自身运行时完成派发。
 
+<a id="event-loop"></a>
+
+打开窗口后 main 不可能事先列出每次点击。NSApp run 等待输入，按事件调用 mouseDown 或 keyDown 等方法；方法改变 desktop 并登记重画需求后返回。事件循环随后调用 drawRect 消费新状态。这是请求重画与实际重画之间的交接，不能认为 setNeedsDisplay 在当前行就完成了绘图。
+
 ## 由平台持有画布
 
 Objective-C 的 `.m` 文件可以直接包含并调用 C 接口。`#import` 与这里的 include 一样取得声明，并避免重复导入；`@"AiriOS"` 则建立平台字符串对象，与 C 的 `"AiriOS"` 字符数组不同。像素由平台分配，ui_draw 只在绘图期间借用；size_buffer 将尺寸限到 640..1800、480..1100，重新 calloc 后更新帧缓冲描述。
@@ -55,6 +59,12 @@ static void size_buffer(int w, int h) {  // w/h 为画布宽高；尺寸变化�
                                             .blue_size = 8};   // 蓝通道占八位，未指定 blue_shift 时默认零。
     boot.framebuffer = framebuffer;  // 启动描述副本取得同一画布参数，窗口中的设备信息可以读取。
 }
+```
+
+size_buffer 已让 framebuffer 描述平台拥有的数组，并把同一描述复制进平台 boot。静态 desktop 和 console 还要由 main 初始化，当前先完成输出 helper：dump 调 ui_draw 填这块数组，再顺序写 PPM。它检查头、每像素三字节和关闭结果；部分文件可能留下，但任一步失败都会返回非零进程状态。继续追加 dump。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
 static void dump(const char *name) {  // name 是输出文件路径，快照直接使用同一共享绘图。
     ui_draw(&desktop, &framebuffer);  // 共享 C 渲染将当前桌面状态写进平台像素数组。
     FILE *f = fopen(name, "wb");      // 以二进制写模式创建 PPM，失败返回 NULL。
@@ -80,7 +90,7 @@ static void dump(const char *name) {  // name 是输出文件路径，快照直�
 }
 ```
 
-分配失败时 calloc 返回 NULL，立即打印原因并结束；只有有效数组才进入帧缓冲描述。PPM输出也必须检查完成：fprintf写头，fwrite每次交出三个通道，返回值少于请求数量就停止。即使这些调用暂时成功，字节仍可能只进入stdio缓冲；fclose会尝试刷新并关闭，失败也使进程返回1。部分文件可能留下，但Python的check=True不会把它当成成功快照。`[self setNeedsDisplay:YES]` 中 self 是当前视图对象，setNeedsDisplay: 是包含参数位置的消息名，YES 是传入值。`@interface` 与 `@implementation` 分别提供类声明和实现；`- (void)drawRect:(NSRect)dirty` 是某个实例的方法，dirty 是本次允许重画的范围，当前代码选择重画整帧。
+分配与输出的失败都会立即结束本进程。关闭前字节可能仍只在 stdio 缓冲中，所以 fclose 也属于图片完成条件，Python 的 check=True 才能据退出码拒绝不完整快照。
 
 <a id="display-lifetime"></a>
 
@@ -88,7 +98,7 @@ pixels 是 C 平台层分配的数组，framebuffer 只描述它。CGDataProvide
 
 这里按视图逻辑尺寸分配软件画布，再缩放到视图显示，没有按 Retina 物理像素另建高分辨率画布。窗口的点坐标与这份画布坐标对应，实际屏幕像素可能更多。
 
-前缀 `-` 表示实例方法，YES/NO 是布尔常量，`self.bounds.size.width` 读取当前视图宽度。
+Objective-C 用 @interface 声明类、@implementation 给实现，前缀 - 表示实例方法。drawRect: 的 dirty 是本次允许重画的范围，当前代码选择整帧；self 是这个视图实例，self.bounds.size.width 取得它的逻辑宽度。YES/NO 是布尔常量。[self setNeedsDisplay:YES] 向它发送消息：setNeedsDisplay: 是包含参数位置的消息名，YES 是实参；该消息只登记需求。
 
 isFlipped 让视图事件以左上为原点。drawRect 先调用 ui_draw 填像素，再经 CGDataProvider 和 CGImage 交给 CoreGraphics；按 32 位小端 RGB 描述数据，并在绘制时平移、反转 Y。完成后释放 image、provider 和 colorspace，像素仍留给平台到下次 resize 或退出。当前每次全帧重画。
 
@@ -133,9 +143,7 @@ isFlipped 让视图事件以左上为原点。drawRect 先调用 ui_draw 填像�
 }
 ```
 
-<a id="event-loop"></a>
-
-打开窗口后 main 不可能事先列出每次点击。NSApp run 等待输入，按事件调用 mouseDown 或 keyDown 等方法；方法改变 desktop 并登记重画需求后返回。事件循环随后调用 drawRect 消费新状态。这是请求重画与实际重画之间的交接，不能认为 setNeedsDisplay 在当前行就完成了绘图。
+上面的 AiriView 已能消费共享像素，下面给它接入输入回调。方法修改的仍是同一个 desktop，登记的重画将由框架稍后调用 drawRect。
 
 鼠标方法先用 convertPoint 将窗口坐标变成视图坐标，按事件种类送相应 phase，再请求重绘。nil 表示没有对象指针；本次 `fromView:nil` 特意表示输入来自窗口坐标，而非另一视图，含义由这个接口约定。这样坐标才落在软件画布采用的原点下。[Apple 的坐标转换接口](https://developer.apple.com/documentation/appkit/nsview/convert%28_%3Afrom%3A%29-1dq9l?language=objc)说明了这个参数。
 
@@ -188,11 +196,7 @@ NSEvent 带修饰位和字符。按位与 `&` 判断 Command、Ctrl、Shift 等�
 
 Command/Ctrl 统一为快捷动作，Alt-Tab 切窗口。普通键入循环会跳过非 ASCII 字节；粘贴则把整份字节交给 insert 检查，遇非 ASCII 会拒绝整次插入。两种操作的范围都只支持当前 ASCII 文档。
 
-文字粘贴从NSPasteboard取得NSString，先检查是否存在完整字节视图、是否能容纳字节和NUL，再复制到desktop.clipboard。没有字符串时不继续发UI_PASTE，否则先前复制的旧内容会误入当前文档；超过8191字节时也整体拒绝，不能先截短再让insert检查。
-
-完整交接后，Editor的insert才按ASCII合同检查全部字节，拒绝时旧文档、保存点与undo均保留。Files正文粘贴沿文件id动作处理，名称对话框与筛选字段才读取系统文字。
-
-复制/剪切的文字路径反向将C字符串变成NSString；对象指针只在本回调内借用，复制后的数组独立持有内容。
+复制/剪切在核心处理后才把 desktop.clipboard 转回 NSString 并交给系统；C数组和系统对象分别持有内容，不把平台临时字节指针存进桌面。
 
 **追加到 `frontend/platform/macos/preview.m` 末尾：**
 
@@ -282,6 +286,18 @@ Command/Ctrl 统一为快捷动作，Alt-Tab 切窗口。普通键入循环会�
         default:  // 当前码元不匹配此组快捷键，保持 key 为零。
             break;  // 当前匹配已完成，停止这一层循环或分支。
         }
+```
+
+快捷键和功能键现已映成共享整数，普通字符尚未送入核心。先处理 UI_PASTE 的平台材料。
+
+文字粘贴从NSPasteboard取得NSString，先检查是否存在完整字节视图、是否能容纳字节和NUL，再复制到desktop.clipboard。没有字符串时不继续发UI_PASTE，否则先前复制的旧内容会误入当前文档；超过8191字节时也整体拒绝，不能先截短再让insert检查。
+
+完整交接后，Editor的insert才按ASCII合同检查全部字节，拒绝时旧文档、保存点与undo均保留。Files正文粘贴沿文件id动作处理，名称对话框与筛选字段才读取系统文字。
+
+继续追加同一个 keyDown，完成文字的完整交接。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
     bool file_paste = desktop.active == UI_FILES_APP &&  // Files正文粘贴使用前文保存的文件id，不读取系统文字剪贴板。
                       desktop.dialog == UI_DIALOG_NONE && desktop.focus == UI_FOCUS_NONE;  // 名称对话框和筛选字段仍是文字接收者，不能走文件动作。
     if (key == UI_PASTE && !file_paste) {  // 只有文字粘贴才需要从平台字符串交接完整字节。
@@ -296,6 +312,12 @@ Command/Ctrl 统一为快捷动作，Alt-Tab 切窗口。普通键入循环会�
         } else  // 完整平台文字及终止零都能装入共享数组。
             memcpy(desktop.clipboard, text, strlen(text) + 1);  // 连同NUL复制到桌面自有数组，核心之后不借用NSString字节。
     }
+```
+
+文字交接完成以后，非零 key 交 ui_key；没有快捷修饰的普通字符才逐字节发送 ASCII。普通键入跳过范围外字节，整份文档粘贴则由 insert 拒绝任何非 ASCII，两条输入规则保持区别。COPY/CUT 之后回调将 desktop.clipboard 同步成系统 NSString；Files 的文件身份仍另存在 file_clipboard，系统字符串不能代替它。最后只请求重画，方法到这里才结束。继续追加至 AiriView 的 @end。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
     if (key)  // 识别出非零功能事件后走共享键规则。
         ui_key(&desktop, key, shift);  // 传递事件与 Shift 状态，改变同一文档或窗口状态。
     else if (!command && e.characters.length) {  // 没有快捷键修饰且有普通字符时才进行文本键入。
@@ -336,7 +358,7 @@ autoreleasepool 在离开作用域时处理登记在池中的临时对象，并�
 
 `main` 在池的作用域中解析四类可选参数：`--size 宽x高` 决定软件画布，`--app` 选择初始应用，`--theme day` 选择日间颜色，`--snapshot 路径` 生成一帧后退出；没有快照路径时进入交互窗口。随后初始化 reference 服务。boot 复制成平台持有的结构，backend.boot 指向该副本，画布尺寸变化可单独更新它。
 
-snapshot 分支直接绘制并 dump；交互分支创建 NSApplication、delegate、window 与 AiriView，设置 contentView 和 firstResponder。makeFirstResponder 让键盘送到该视图，NSApp run 开始事件循环，关闭窗口后返回。
+snapshot 分支调用 dump，由它先 ui_draw 再写出当前数组，成功后退出。交互分支则创建 NSApplication、delegate、window 和 AiriView，设置 contentView 与 firstResponder，再由 NSApp run 等事件。makeFirstResponder 让 keyDown 得到输入，关闭窗口后事件循环才返回。
 
 `[[AiriView alloc] initWithFrame:...]` 连续发送两次消息：先分配实例，再按给出的矩形初始化，结果成为窗口的内容视图。NSApplication 的 sharedApplication 则取得框架提供的应用对象，而不是每次输入都新建一个应用。
 
@@ -369,6 +391,12 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
             else if (!strcmp(argv[i], "--theme") && i + 1 < argc)  // 主题用于固定快照，也可作为原生窗口初始偏好。
                 theme = argv[++i];  // 两种模式共享所有内容和布局。
         }
+```
+
+参数只确定本次运行的尺寸、初始应用、主题和是否输出图片，尚未创建共享会话。现在初始化 reference，再将其 boot 整体复制到平台静态对象；b.boot 改借用这个地址，size_buffer 更新的也是这个副本的帧缓冲。console、desktop 因而读取同一长期对象。Viewer 若被选中，先沿已有文件路径装入 CSV；最终打开目标应用并最大化。继续追加 main，保持 autoreleasepool 内缩进。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
         struct ui_backend b;     // 局部回调表先由参考服务初始化。
         ui_fixture_backend(&b);  // 重建本进程内的参考文件和任务记录。
         boot = *b.boot;     // 解引用后复制整个启动结构，不保留服务原结构的借用。
@@ -387,11 +415,23 @@ int main(int argc, char **argv) {  // 宿主运行时传入参数数量和 NUL �
         ui_open(&desktop, (enum ui_app)app);    // 最终打开指定应用，枚举值来自名称表匹配。
         desktop.windows[app].maximized = true;  // 默认把应用内容放到最大化工作区。
         desktop.monitor = app == UI_EDITOR;     // Editor 场景显示旁边的状态监视区域。
+```
+
+这时 reference、console、desktop 和 pixels 都已经准备好，主题与初始窗口也已确定。先接快照出口：snapshot 非空便同步 dump，再 free 数组并返回。没有路径才继续创建 Cocoa 窗口；两种模式是这次进程的两条出口，不会先写快照再进入交互。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
         if (snapshot) {  // 有输出路径时只生成图片，不进入事件循环。
             dump(snapshot);  // 先共享绘图，再将画布按 PPM 字节布局输出。
             free(pixels);    // 快照写完后释放平台像素数组，再结束当前进程。
             return 0;  // 正常结束当前程序，成功状态交给启动它的命令。
         }
+```
+
+快照出口之后才进入窗口模式。sharedApplication 取得应用对象，delegate 接生命周期，window 持有 AiriView 作为内容并让它先接按键。启用 mouseMoved 后，未按下的移动也会登记重画；NSApp run 开始前面说明的事件循环。循环结束时已没有本次图像读取，再释放最后的 pixels，main 与池在末尾闭合。继续追加至文件结束。
+
+<!-- append: frontend/platform/macos/preview.m -->
+```objective-c
         [NSApplication sharedApplication];  // 取得框架唯一应用对象，并建立 NSApp 全局入口。
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];  // 作为有窗口与 Dock 图标的普通应用运行。
         AiriDelegate *delegate = [AiriDelegate new];  // new 返回拥有的代理对象；当前未启用 ARC，局部指针不自动释放它。

@@ -10,6 +10,9 @@ already_explained:
   at: ../../../dev-log/graphics/16-files-editor-view.md#document-copies
   establishes: read复制正文到editor和独立saved；编辑工作数组不会自动修改服务记录，dirty比较两份内容。
 first_use:
+- concept: 真实编辑序列中的四份文字
+  at: ../../../dev-log/graphics/17-editing.md#edit-save-run
+  establishes: 替换后editor十字节、undo原文、saved与服务原文；两次Undo交换前端副本，Save成功后saved与服务十字节，Run失败不撤回保存
 - concept: 修改前校验、重叠移动与单步撤销
   at: ../../../dev-log/graphics/17-editing.md#edit-transaction
   establishes: 先验证输入与最终容量，后保存undo、删除选区、搬含NUL尾部、复制；ABCD在2插xy得到ABxyCD。
@@ -32,6 +35,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B12 编辑与服务各次状态复核
+  observation: 长段界面重贴隔开了修改、撤销、保存和观察；同一文件各副本在中途容易失去状态
+  revision: 以真实十字节输入追踪 editor、undo、saved 与服务记录，局部更新 paint/state，逐组解释观察程序每次操作的前后状态及重置边界
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

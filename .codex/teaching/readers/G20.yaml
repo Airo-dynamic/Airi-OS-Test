@@ -10,6 +10,9 @@ already_explained:
   at: ../../../dev-log/graphics/16-files-editor-view.md#cursor-gap
   establishes: cursor和anchor保存文档字节间隙，半开范围决定选中字节；换行与滚动使它们和屏幕坐标分别表示。
 first_use:
+- concept: 首次命中与续拖使用不同入口
+  at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
+  establishes: 普通按下先分工具栏与正文；UI_DRAG_SELECT的移动只调用定位器，body798无项目栏，短行停在行尾，不把越过Save当保存
 - concept: 屏幕坐标经可见行与快照映射得到服务id
   at: ../../../dev-log/graphics/20-pointer-routing.md#pointer-routing
   establishes: Files扣除body表头后按行高求视口行，加scroll得到全列表行，再经ui_file_order取快照下标交给ui_open_document；读取才使用记录id。
@@ -29,6 +32,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B13 按下到释放的连续操作复核
+  observation: 正文定位器已有完整边界说明，但Files多个早退与指针阶段关系夹在大块源代码中
+  revision: 保留798/800和Save越界论证，按工具栏/内容控件/底部动作/列表拆Files新实现，按已有拖动与首次命中接指针；五个已有文件改唯一旧窗口更新
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。

@@ -10,6 +10,9 @@ already_explained:
   at: ../../../dev-log/graphics/20-pointer-routing.md#text-position
   establishes: 按body宽度判断项目栏；外框800对应body798，左缘不扣190。越界坐标夹回文字裁剪，定位器只返回间隙，续拖不会保存或改anchor。
 first_use:
+- concept: 事件几何与绘图收窄的时点
+  at: ../../../dev-log/graphics/21-window-actions.md#drag-state
+  establishes: 移窗保留按下偏移，缩放以鼠标到左上距离求宽高并限720×480；本轮观察先比较事件rect，下一次ui_draw才按可用区收窄
 - concept: 移动只改变窗口几何，下一帧与命中读取相同rect
   at: ../../../dev-log/graphics/21-window-actions.md#window-actions
   establishes: 标题按下保存鼠标距左上偏移，移动减该偏移；右下角动作改变宽高并保持最小尺寸；释放结束动作。
@@ -26,6 +29,9 @@ borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
 feedback:
+- source: B13 窗口与应用动作交接复核
+  observation: 新入口与少量状态接入散落在八份旧文件全文，逆绘图命中与最大化恢复解释迟于扩展实现
+  revision: 用唯一旧窗口给全部已有文件增量，将拖动阶段、对话框/桌面拦截和窗口命中模型前移；Tasks按实际pid与可见行交接，保留几何演算和事件后绘图收窄的边界
 - source: 用户本轮连续教程要求
   observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
   revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
