@@ -24,3 +24,8 @@ not_assumed:
 limits:
 - 单CPU不可抢占内核，有界八槽扫描
 - 普通阻塞流无隐藏超时，用户无事件可能永久等待，内核不伪造完成
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/29-wait-queues.md#wait-saved-request
+  establishes: 父 read10 与孩子 awake 贯穿登记、目标页表重试、结果先发布再唤醒；有限就绪等待和原请求完成分开，启动服务续点的栈寿命接到纯计算者超时。

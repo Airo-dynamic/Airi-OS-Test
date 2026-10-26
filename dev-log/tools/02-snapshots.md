@@ -4,7 +4,7 @@ T01已经能从正文重建K13。现在要把一个版本留作对照：参考�
 
 <a id="snapshot-git-model"></a>
 
-Git的每份提交记录指向一棵已经保存的文件树，完整SHA可以定位这份不可变记录；`main`和`gui`则是可以移到新提交的分支名。导出时先把需要的分支解析成SHA，后续读取这个提交，避免导出一半时分支前移而混入另一版材料。
+T01 能从当前正文重建，但如果导出期间参考资料被改动，不同文件就可能来自不同版本。先把“本次读哪一版”变成稳定输入，再谈输出目录怎样替换。Git 的每份提交记录指向一棵已经保存的文件树，完整SHA可以定位这份不可变记录；`main`和`gui`则是可以移到新提交的分支名。导出时先把需要的分支解析成SHA，后续读取这个提交，避免导出一半时分支前移而混入另一版材料。
 
 参考工程的主线提交用消息末尾的`AiriOS-Checkpoint: K13`标明教学身份，GUI提交使用G编号。一次合并通常有两个父提交：在主线上合入GUI时，第一个父是合并前的主线位置，另一个父来自GUI。`--first-parent`只沿第一个父继续，主线身份因此按自己的顺序读取，GUI内部停点另从GUI分支取得。
 
@@ -59,7 +59,7 @@ def specification():  # 列表只需教程资料，不要求存在Git。
 ```
 
 <a id="snapshot-branches"></a>
-读取main时，先找本地`refs/heads/main`，不存在才找`refs/remotes/origin/main`；GUI同理。`origin/gui`是此前取回并保存在本地的远端跟踪引用，读取它不会自动访问网络。`rev-parse --verify`要求引用存在，后面的`^{commit}`要求它解析为提交对象，成功后就固定这个SHA。
+目标 K13 是教学身份，main 是会移动的引用，两者不能互相替代。先定位本次 main 的终点，再在其历史中找 K13。读取 main 时，先找本地`refs/heads/main`，不存在才找`refs/remotes/origin/main`；GUI同理。`origin/gui`是此前取回并保存在本地的远端跟踪引用，读取它不会自动访问网络。`rev-parse --verify`要求引用存在，后面的`^{commit}`要求它解析为提交对象，成功后就固定这个SHA。
 
 以K13为例，`wanted["K13"]`是课程声明，`records["K13"]`在它的基础上增加三个来源字段：`commit`是带K13尾注的那份提交，`branch`是main，`branch_commit`是本次固定的main分支终点。后面从分支终点读取同版的整套教程，再按K13的前置重建；这与直接归档K13那份Git文件树是两种操作。
 
@@ -104,7 +104,7 @@ def branch_records(branch, items):  # 只沿该分支第一父链识别有教学
 
 ```
 
-主线声明可以单独读取，只有课程资料中存在graphics.json时才定位GUI历史。`checkpoint_records`返回的外层字典以检查点身份为键，值是刚才补充来源字段的记录；后面的固定视图从这些记录取得本次main与gui的准确终点。
+准确 SHA 已确定，接下来取得它保存的文件；到这一步仍不需要创建 HISTORY。主线声明可以单独读取，只有课程资料中存在graphics.json时才定位GUI历史。`checkpoint_records`返回的外层字典以检查点身份为键，值是刚才补充来源字段的记录；后面的固定视图从这些记录取得本次main与gui的准确终点。
 
 `git archive`把指定提交树编码为tar归档，`archive`接到的是bytes。`io.BytesIO(archive)`让tarfile像读取文件一样读取这些内存字节。归档中的每个成员都有路径、类型与权限；读取器拒绝绝对路径、上级跳转、文件路径别名、重复文件名，以及符号链接和其他特殊类型。合格文件放进`files`字典，值是`(data, mode)`二元组：data是原始字节，mode是权限整数。此时仍未创建输出目录。
 
@@ -145,7 +145,7 @@ def archive_files(commit):  # 把一个不可变提交树转成路径到(bytes,m
 ```
 
 <a id="snapshot-output-protection"></a>
-`write_archive`只接受尚不存在的目录，按刚才核对过的成员创建普通文件。`export_checkpoint`再给这层写入增加目标位置保护：拒绝目标本身的链接、已有目录、参考工程内部和参考工程的祖先。它直接写出指定Git提交树，T03的current导出会使用这条路径。
+固定输入解决了读哪版，写到哪里仍要独立保护。不能因为输入可信，就覆盖一个可能含个人修改的旧目录。`write_archive` 只接受尚不存在的目录，按刚才核对过的成员创建普通文件。`export_checkpoint`再给这层写入增加目标位置保护：拒绝目标本身的链接、已有目录、参考工程内部和参考工程的祖先。它直接写出指定Git提交树，T03的current导出会使用这条路径。
 
 重复生成HISTORY需要另一种判断。`check_previous`先检查目录中的`index.json`是否带有当前`GENERATOR`身份，再重新读取其余每个文件的摘要；实际内容与索引不相等就拒绝替换。索引本身不加入摘要，避免要求它记录自己的哈希。新增、缺失和内容编辑都能发现，权限变化与空目录变化不由这份字节索引记录。
 
@@ -222,9 +222,9 @@ Git参考工程先要求没有未提交或未跟踪的改动，再从固定的�
 
 GUI相对00的差异必须全为新增路径，而且不能抢占主线`owned`。`--parents`的每行由当前提交SHA与父SHA组成；非根提交有一个父时是两项，超过两项就出现合并。GUI拒绝这种合并父链，main则可以保留合入GUI的提交。组合时，同名GUI文件与main中已有副本相同就保留，不同则明确报错，不能悄悄选一边覆盖。
 
-没有`.git`的普通源码包不查分支。`inputs`保存允许读取的实际文件路径，`files`保存“相对路径→(字节, 权限)”；第二次读取与内存字节比较，若读取期间出现变化就停止。`write_archive`随后把这份已收集的内容写到独立临时目录，此后各路线都从那里取材料，原目录的后续编辑不再改变本次输入。Git模式在报告中保存分支SHA，普通包保存每份输入的摘要。
+学习目录也可能只是一个源码包，没有提交历史可定位。这时稳定性来自收集后的内存字节与再次读取比较，不能伪造一个 Git SHA。没有 `.git` 的普通源码包不查分支。`inputs`保存允许读取的实际文件路径，`files`保存“相对路径→(字节, 权限)”；第二次读取与内存字节比较，若读取期间出现变化就停止。`write_archive`随后把这份已收集的内容写到独立临时目录，此后各路线都从那里取材料，原目录的后续编辑不再改变本次输入。Git模式在报告中保存分支SHA，普通包保存每份输入的摘要。
 
-允许材料包括课程正文、元数据、说明、外部协议和字体资产。除了锁定字体与配方生成的图集，内核、前端应用和Python脚本实现都不从文件树直接送入学习版本；真正的实现仍由write/append产生。自己使用任意Git历史时，可以采用章末的无Git资料观察方式，继续调用同一导出函数。
+允许材料包括课程正文、元数据、说明、外部协议和字体资产。除了锁定字体与配方生成的图集，内核、前端应用和Python脚本实现都不从文件树直接送入学习版本；真正的实现仍由写入、追加与精确替换动作产生。自己使用任意Git历史时，可以采用章末的无Git资料观察方式，继续调用同一导出函数。
 
 **追加输入白名单和固定视图：**
 
@@ -317,7 +317,7 @@ def export_route(name, destination, alongside=None):  # 路线快照从固定正
 ```
 
 <a id="snapshot-composition"></a>
-以导出K13为例，`replay`先按固定资料重建到K13，并写出包含源码摘要的`.airi-checkpoint.json`。随后`selected`取得实际应用的全部章节记录，复制课程说明、许可和纯教学资料，再据selected生成这份输出专用的清单。原资料可能还描述后续T01–T03，输出清单只保留本次确实形成的前置与终点。
+暂存资料已固定，真正输出还应只描述本次选中的路线：带上后续 T03 的声明，却没有 T03 实现，会制造一个自相矛盾的包。以导出 K13 为例，`replay`先按固定资料重建到K13，并写出包含源码摘要的`.airi-checkpoint.json`。随后`selected`取得实际应用的全部章节记录，复制课程说明、许可和纯教学资料，再据selected生成这份输出专用的清单。原资料可能还描述后续T01–T03，输出清单只保留本次确实形成的前置与终点。
 
 `core`保存非图形记录，`graphical`保存图形记录，列表推导式只筛选元素而不改变原顺序。`core[-1]`是最后一个主线记录，它的files字典描述这次主线累计源码；图形owned则从组合状态中减去这些路径。复制纯教学资料时可能带入来源的完整graphics.json，所以输出先删除这个副本，再按实际选择写出图形声明；未选择GUI就保持该文件不存在，图形实现和字体也不会加入。
 
@@ -329,7 +329,7 @@ def export_route(name, destination, alongside=None):  # 路线快照从固定正
 ```python
 def write_route(name, target, source, commits, alongside=None):  # 公共导出与内部快照共用相同重建动作。
     from course import replay, plan, ordered  # 此函数不重新解析Git引用。
-    replay(target, name, False, alongside, source=source)  # 只执行write/append，不运行Shell。
+    replay(target, name, False, alongside, source=source)  # 只应用明确编辑动作，不运行Shell。
     data = plan(source)  # 使用同一组已固定的清单。
     selected = ordered([name] + ([alongside] if alongside else []), data)  # 共享前置只进入一次。
     for directory in ('dev-log', 'docs', '.codex/teaching'):  # 复制纯教程、画像和作者验证说明，不复制实现或技能。
@@ -374,7 +374,7 @@ def write_route(name, target, source, commits, alongside=None):  # 公共导出�
 <a id="snapshot-lock"></a>
 ## 先完成新树，再交接旧树
 
-两个生成器同时写同一个HISTORY会互相移动目录。宿主文件锁使用工程真实路径的摘要区分不同仓库；`LOCK_EX | LOCK_NB`表示独占且不等待，已经有人持有时直接失败。锁文件留在临时目录不代表仍被锁，文件描述符关闭或进程退出后，内核会释放锁。
+一次导出可以写到新目录，重复生成 HISTORY 却需要交接旧树与新树。如果两个生成器同时交接，就可能把对方的暂存状态当成自己的旧状态。两个生成器同时写同一个 HISTORY 会互相移动目录。宿主文件锁使用工程真实路径的摘要区分不同仓库；`LOCK_EX | LOCK_NB`表示独占且不等待，已经有人持有时直接失败。锁文件留在临时目录不代表仍被锁，文件描述符关闭或进程退出后，内核会释放锁。
 
 **追加外层生成入口：**
 
@@ -395,7 +395,7 @@ def generate():  # 文件锁在进程结束时释放，不因残留文件永久�
 
 `target`始终是正式HISTORY，`stage`是本轮正在构造的新树，`previous`是交接时保存的旧树。生成器先在与target相同的文件系统中构造stage，逐个写出全部路线及索引，期间不移动旧HISTORY。新树完成后再核对旧内容，确认构造期间没有个人编辑。
 
-交接先把target整体移到previous，再把stage移到target。previous来自`mkdtemp`，不会在离开with时自动清理；这样即使恢复失败，旧树仍保存在工程下的`.airios-history-backup-.../previous`。`except BaseException`同时接住普通错误和Ctrl-C的KeyboardInterrupt，在正式目标仍不存在时尝试把旧树移回。
+stage 已完整构造，才允许旧路径暂时离开正式位置。交接先把 target 整体移到 previous，再把stage移到target。previous来自`mkdtemp`，不会在离开with时自动清理；这样即使恢复失败，旧树仍保存在工程下的`.airios-history-backup-.../previous`。`except BaseException`同时接住普通错误和Ctrl-C的KeyboardInterrupt，在正式目标仍不存在时尝试把旧树移回。
 
 成功后才删除已经验证未修改的旧生成物，`finally`只删除空的备用目录。两次移动各自是目录rename，整个交接并不是一次不可分割的操作；进程若在中间被强制结束，正式路径可能暂时缺失，旧树仍可在备用位置找到。恢复时先处理错误报告的权限或文件系统问题，再在HISTORY不存在的条件下把previous移回，保留旧副本直至正式路径恢复。
 
@@ -448,7 +448,7 @@ if __name__ == '__main__':  # 导入仅建立函数，直接执行才生成。
 
 ## 在隔离资料目录观察导出
 
-下面的源目录只有课程正文与教学JSON，没有`.git`或终点实现。给`snapshots.ROOT`赋值，只改变当前Python进程中这个模块的路径属性；`course.replay`接收的source则由固定视图显式传入，因此仍从同一份资料读正文。两个导出各自写到一个新目录，随后比较files摘要字典。临时目录在观察结束后释放，自己的学习目录保持原样。
+最后用同一输入导出两份 K13，比较实际生成字节，观察的是内容稳定性，不是重复操作自己的学习目录。下面的源目录只有课程正文与教学 JSON，没有`.git`或终点实现。给`snapshots.ROOT`赋值，只改变当前Python进程中这个模块的路径属性；`course.replay`接收的source则由固定视图显式传入，因此仍从同一份资料读正文。两个导出各自写到一个新目录，随后比较files摘要字典。临时目录在观察结束后释放，自己的学习目录保持原样。
 
 <!-- run -->
 ```sh

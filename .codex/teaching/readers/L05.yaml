@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - SSH255，Linux分支编译/运行/strace未验证
 - Mac只检查拒绝分支，代码和操作完整不代替环境证据
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/05-threads.md#threads-queue-predicate
+  establishes: 从检查后再睡的空窗引出条件变量与 futex；通知不持有任务、WAKE 不发布普通数据，队列锁、relaxed 统计和 join 各自支持不同关系。

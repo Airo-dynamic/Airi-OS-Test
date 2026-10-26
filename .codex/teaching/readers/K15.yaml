@@ -23,3 +23,8 @@ not_assumed:
 - 自有页表、按需缺页、内核堆、并发页池
 limits:
 - 不记录读者已掌握；主机检查不是guest内存访问
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/15-physical-pages.md#page-ownership
+  establishes: 从地图不随借出变化推导 managed/allocated；同一页经历向内取整、占位、HHDM 写读、拒绝非法归还及复用。主机编号和 guest 真地址保持区别。

@@ -1,14 +1,18 @@
 # 07 · 把 ELF 放入 UEFI 镜像并看到第一行
 
-内核 ELF 已经包含 `_start → airi_limine_start → UART`。启动它还需要把 ELF、Limine 和配置放在同一介质上。OVMF 从 UEFI 介质入口 BOOTX64.EFI 启动 Limine，Limine 再按配置找到内核路径并交接。
+已有内核 ELF，尚未有机器装载它。本章把载荷放进启动介质，交给 OVMF，再等待内核发送 `_start → C → UART` 的标记。主机的编译文件、介质的目录与固件实际读取的启动映像需要分清，否则同名 EFI 文件容易造成装载关系的误判。
 
-ISO 是表示一张光盘全部文件及启动信息的镜像文件。QEMU 把它作为虚拟光盘读取，里面的路径与 Mac 工程目录不是同一个文件系统。Mac 上的 `build/normal/airios.elf` 将被复制成介质里的 `/boot/airios.elf`；Limine 配置引用后者，不能让虚拟机去打开 Mac 的工程路径。
+ISO 表示光盘文件与启动信息，QEMU 把它当虚拟光盘。主机 `build/normal/airios.elf` 会复制到其中的 `/boot/airios.elf`，配置引用后者；guest 不会按这条路径去打开 Mac 工程目录。
 
-这次介质有两次装载：OVMF 先取得 `/EFI/BOOT/BOOTX64.EFI` 这个 UEFI 启动程序，也就是 Limine；Limine 再读 limine.conf，找到内核 ELF，装入并跳到 `_start`。把源码编译成 ELF 完成代码生成，把 ELF 放进介质才让这两次装载有文件可读。
+本次 UEFI 光盘入口由 xorriso 登记的 `limine-uefi-cd.bin` 提供。它内部已有一份 FAT 文件系统，包含 `/EFI/BOOT/BOOTX64.EFI`；OVMF 从该启动映像取得 EFI 程序。外层 ISO 也保存同名 EFI 路径，但不能据此把它当成这次光盘启动的直接读取来源。Limine 固定版本的[构建规则](https://github.com/Limine-Bootloader/Limine/blob/v12.9.2/GNUmakefile.in#L229-L246)明确先建立 FAT，再把 EFI 目录放入其中。
 
-## 将内核放入启动介质
+EFI 程序开始运行以后，Limine 再找到介质上的 limine.conf，按配置读取外层 `/boot/airios.elf`，装入并跳到 `_start`。前一次装载启动引导程序，后一次装载自己的内核；编译 ELF 与打包介质分别为它们提供输入。
 
-`timeout: 0` 让 Limine 不等待菜单倒计时，verbose 和 serial 请求详细信息与引导器自身的串口记录；它们不是内核的日志函数。`/AiriOS` 为启动菜单项名称，缩进字段属于这一项。protocol 选择 Limine 交接协议；path 中 `boot():` 指启动介质，后面的 `/boot/airios.elf` 指介质内文件。resolution 请求显示尺寸，实际帧缓冲仍由响应决定。kaslr 关闭内核地址随机化，使当前固定链接地址和调试观察一致。KASLR 原本会让内核加载地址在不同启动中变化，以增加猜测地址的难度。
+## 配置指向介质里的内核
+
+`timeout: 0` 跳过菜单倒计时，verbose/serial 选择引导器自己的详细和串口输出，不是调用内核日志函数。`/AiriOS` 是菜单项，缩进字段归它；protocol 指交接协议，`boot():/boot/airios.elf` 指启动介质上的载荷。
+
+resolution 只是请求尺寸，实际可用帧缓冲由响应决定。kaslr=no 关闭内核地址随机化，使固定链接和调试地址一致；随机化本用于增加猜测地址的难度，当前先保留可重复布局。
 
 **新建 `config/boot/limine.conf`：**
 
@@ -27,11 +31,13 @@ serial: yes
     kaslr: no
 ```
 
-staging 是打包之前的临时目录树。脚本让它先具有介质希望看到的目录结构，再让 xorriso 把这棵树写入一个文件。重新构建前删除旧 staging，旧文件就不会因为本次没再复制而混进镜像；待输出目录则继续由 profile 区分。
+## 主机先组织目录树，制镜像工具再写入启动信息
 
-Make 把 profile 作为脚本第一个参数传入，`sys.argv[1]` 因此决定使用 `build/normal` 等目录。
+image.py 接收 Make 传来的 profile，`sys.argv[1]` 选择 build/normal 等目录。它先删除旧 staging，再重建本次目录树，防止已不需要的旧文件混入新镜像；其他配置继续使用各自目录。
 
-四次 copyfile 放入内核、配置、BOOTX64.EFI 与引导 CD 映像。`xorriso -as mkisofs` 使用制镜像接口，efi-boot 等参数将 UEFI 映像登记到 ISO。它生成磁盘数据，之后 QEMU 才会读取这份介质。路径各占参数列表的一项。
+四次 copyfile 分别放入内核、根目录配置、外层 EFI 文件和已经含有 FAT/EFI 内容的 CD 映像。copyfile 只是主机文件复制，不会重新制作 CD 映像内部的 FAT。`xorriso -as mkisofs` 将 staging 写成 ISO，`--efi-boot` 等参数登记现成映像并提供相应启动布局，QEMU 随后才能使用它。
+
+每个路径仍是 argv 的独立元素。至此增加的是磁盘数据，脚本成功打印 Image 只说明打包完成，还没有执行内核。
 
 **新建 `scripts/image.py`：**
 
@@ -63,27 +69,23 @@ subprocess.run([tool('xorriso','xorriso'),'-as','mkisofs','-R','-r','-J',  # 选
 print(f'Image: {out/"airios.iso"}')  # 打印实际生成的主机镜像路径供启动脚本使用
 ```
 
-## 等待这次启动的串口记录
+## 用本次串口输出确认装载后实际执行
 
 <a id="host-guest-output"></a>
 
-主机是运行脚本与 QEMU 的当前电脑，guest 是 QEMU 内那台正在执行 AiriOS 的机器。脚本不能直接读取内核局部数组，必须通过约定的设备通路取得结果。`-serial file:路径` 将 guest COM1 的发送字节写入主机 serial.log；QEMU 自身的错误另接到 qemu.log。两份日志分别来自不同执行者。
+主机脚本运行 QEMU，guest 在其中执行内核；脚本不直接读取内核局部数组，而用 `-serial file:路径` 接收 COM1 字节到 serial.log。QEMU 自身 stdout/stderr 写 qemu.log，分别保存 guest 输出与主机虚拟机诊断。
 
-`-display none` 关闭 QEMU 的图形窗口，串口通路仍工作。`-monitor none` 关闭 QEMU 自己的文字监控台，使批量观察脚本的标准输入不再接到监控台。脚本读到内核发送的完整标记后才打印日志。QEMU 的输出连接方式见[字符设备与串口选项](https://www.qemu.org/docs/master/system/invocation.html#character-device-options)。
+`-display none` 关闭图形窗口，串口仍工作；`-monitor none` 关闭 QEMU 自己的监控台，避免批处理标准输入接错。连接方式见 [QEMU 字符设备选项](https://www.qemu.org/docs/master/system/invocation.html#character-device-options)。
 
 <a id="qemu-machine"></a>
 
-观察脚本固定 q35、qemu64、单 CPU、256 MiB 和 TCG。cdrom 接刚制好的 ISO，boot d 选择光盘。
+机器固定为 q35 主板、qemu64 CPU、单 CPU、256 MiB，采用 TCG 将 guest 指令翻译为主机操作，所以 Apple Silicon 也能运行 x86-64 内核。cdrom 选择新 ISO，boot d 优先光盘；pflash 两份 drive 分别放只读固件 code 与本轮可写 vars 副本，参考固件保持不变。
 
-q35 选择模拟的 PC 主板与设备组合，qemu64 选择虚拟 CPU 型号，smp=1 是一颗虚拟 CPU。TCG 是 QEMU 将 guest 指令翻译成主机可执行操作的机制，Apple Silicon 因而能运行这份 x86-64 内核。pflash 表示固件使用的闪存设备，两份 drive 分别装入 code 和本次 vars 副本。
+Popen 启动后立即交回进程对象，Python 可以继续读日志。启动前删除旧 serial.log，再用 monotonic 建立 90 秒截止点；单调时间不随墙上时钟校准倒退。poll 为 None 表示仍运行，整数表示已经退出，未取到标记就退出必须失败。
 
-`Popen` 启动 QEMU 后立即返回进程对象，脚本可以同时检查串口日志。启动前删除旧日志，随后设置 90 秒截止时间。读取时保留行尾换行，只接受完整的内核标记行；poll 返回整数则说明 QEMU 已退出，本次启动不再能产生结果。
+每 0.1 秒读一次可能遇到半行。splitlines 保留行尾，只接受以标记开头且换行已到的完整行；读到它才打印结果并 break。旧日志先删除、半行不接受，分别避免旧成功与尚未发完的输出被当成本轮完成。
 
-单调时钟 monotonic 用于测量经过时间，它不随墙上时钟校准倒退。`deadline=当前值+90`，循环只在此之前继续等待；QEMU 仍运行时 poll 返回 None。完整标记连换行都已到达，才说明发送循环提供了这条记录。
-
-日志每 0.1 秒读取一次，所以最后一行可能仍只有前半段。splitlines(keepends=True) 保留换行，检查 endswith 换行排除尚未收全的行。启动前删除旧 serial.log 则排除上一次运行留下的成功。
-
-循环的 else 在没有 break 时执行，负责报告超时。finally 在成功或异常后均终止 QEMU，先等待五秒，必要时 kill 并 wait 回收进程。
+while 的 else 在没有 break 时报告超时，finally 则无论成功或异常都回收 QEMU：先 terminate，等五秒，仍不退出再 kill/wait。guest 的 hlt 不会替它完成这项主机进程清理。
 
 **新建 `scripts/first_boot.py`：**
 
@@ -134,7 +136,7 @@ with (work / 'qemu.log').open('w') as errors:  # 打开 QEMU 自身诊断文件�
             process.wait()  # 回收被强制结束的进程，避免留下未收取的子进程状态
 ```
 
-沿用第 02 章已经准备好的固定依赖，先执行 image 目标，再运行观察脚本。脚本取得新串口记录后打印成功行，结束本次虚拟机。
+材料沿用第 02 章锁定版本。先执行 image，Make 会先满足 ELF 依赖，再打包本轮 ISO；随后 first_boot 才启动机器并等待设备输出。两步任一失败都不能用已有文件或旧标记替代。
 
 **在学习目录根目录运行：**
 
@@ -148,7 +150,6 @@ PY
 python3 scripts/first_boot.py  # 启动本轮虚拟机并等待完整串口标记，成功或失败后都回收进程
 ```
 
-输出应包含 `[AIRI_LESSON_READY] _start -> C -> UART`。CPU 已经过汇编入口，建立栈，调用 C，并将文字写到设备端口。
+应收到 `[AIRI_LESSON_READY] _start -> C -> UART`。它位于 C 入口的成功分支，说明本次已装入载荷、建立栈、进入 C 并通过 UART 送出记录，而不是仅仅成功生成了 ISO。
 
-超过 90 秒仍未取得完整标记时，脚本失败并结束 QEMU。`build/first-boot/qemu.log` 保存虚拟机错误，`serial.log` 保存内核输出，可据此区分失败发生在哪一侧。入口已经可观察，内存信息仍需从引导响应取得。
-
+90 秒未有完整标记，或 QEMU 提前退出，脚本都失败并结束进程。查看 `build/first-boot/qemu.log` 与 serial.log，可区分主机虚拟机错误和 guest 已发送的内容。入口已能报告状态，下一章才把真实引导内存响应交给它。

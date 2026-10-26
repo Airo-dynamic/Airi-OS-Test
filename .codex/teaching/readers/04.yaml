@@ -33,3 +33,8 @@ source_reading:
   at: ../../../dev-log/core/04-format.md#code-kernel-lib-base-c-3
   establishes: va_arg 必须按格式分支读取实际类型；fmt 的每次推进分别跳过百分号、宽度或长度标记，size_t 与 long 的约定限定在 LP64
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/04-format.md#serial-model
+  establishes: 按实际的 %s:%u、IO、123u 追踪两项实参；output 在入口创建，格式指针、args 与 count 各自推进，截断仍继续统计。已修正原追踪与观察不同的路径。

@@ -15,10 +15,10 @@ first_use:
   establishes: 明确持有物理页与映射，借用结束前不能释放，失败回滚已成功部分
 - concept: 主动切栈和普通C ABI
   at: ../../../dev-log/core/19-kernel-tasks.md#switch-call-abi
-  establishes: call已保存返回地址，六个callee-saved寄存器加RSP恢复另一调用链
+  establishes: call先留返回地址，push保留六寄存器，mov写回旧RSP后再换新RSP，ret继续目标旧调用；不能把压栈当作字段已写回
 - concept: 首次任务栈和状态机
   at: ../../../dev-log/core/19-kernel-tasks.md#task-first-stack
-  establishes: 预制返回入口和对齐，DONE不可再调度，启动任务在别的栈上回收
+  establishes: 首次六寄存器槽、入口和模拟返回槽满足SysV对齐；0→1→2→0说明全局current与各自old；DONE后在别的栈回收
 - concept: 保护页与双重故障IST
   at: ../../../dev-log/core/19-kernel-tasks.md#guard-double-fault
   establishes: 坏内核栈无法压PF现场，需要DF独立栈报告；故障演示停止
@@ -27,3 +27,8 @@ not_assumed:
 limits:
 - 只有一次启动演示，不提供可反复创建的完整线程API
 - 运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/19-kernel-tasks.md#stack-region-owner
+  establishes: 保留已认可完整稿，复查 K18 时钟只计数与主动换栈的边界，再接用户态。六寄存器、首次栈、0→1→2→0、DONE 后离栈回收和 DF 演示完整保留。

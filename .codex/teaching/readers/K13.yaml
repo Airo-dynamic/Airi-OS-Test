@@ -33,3 +33,8 @@ feedback:
   observation: 命令入口缺少具体参数与运行过程，doctor的GNU Make查找偏离01的回退规则。
   revision: 沿run和test解释分派、条件导入和主机进程；doctor复用make_command的首项路径，末尾继续必修Linux集合。
 not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/13-commands.md#command-entry
+  establishes: 从一次 run/test 的真实动作串起参数解析、依赖准备、Make、ELF 检查与 QEMU；编辑器数据库只是同规则消费者，保留懒导入、Shell 参数边界及 AiriBoot 失败语义。

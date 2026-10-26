@@ -1,8 +1,8 @@
 # AiriOS
 
-AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于理解和开发 BOSS、Taishan 这类系统。教程从空目录逐步写出内核、构建、验证与平台适配。内核和 Linux 对照是必修主线，图形工作站在独立的 gui 分支中推进。
+AiriOS 用一套逐步写出的 x86-64 内核解释存储与 I/O 的系统边界。比如用户 shell 输入 demo 后，程序怎样取得页、用 FD 找到文件、提交设备请求、暂时让出 CPU，再按自己的完成记录继续。Linux 对照沿真实系统接口观察同类问题，用于理解和开发 BOSS、Taishan。教程从空目录逐步写出内核、构建、验证与平台适配。内核和 Linux 对照是必修主线，图形工作站在独立的 gui 分支中推进。
 
-从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)，00–02 的实现字节保持不变。K14–K17 完成异常与内存，K18–K23 完成用户进程，K24–K28 完成文件、管道、VirtIO 与日志，K29–K32 完成阻塞等待和有界异步 I/O；[K33](dev-log/core/33-shell-pipeline.md) 用真实用户态 shell 串起分配、文件、任务切换、设备完成与继续运行。L01–L08 提供同期 Linux 对照，当前个人主机 SSH255，Linux 实际运行仍未验证。
+从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)，00–02 的实现字节保持不变。K14–K17 完成异常与内存，K18–K23 完成用户进程，K24–K28 完成文件、管道、VirtIO 与日志，K29–K32 完成阻塞等待和有界异步 I/O；[K33](dev-log/core/33-shell-pipeline.md) 用真实用户态 shell 串起分配、文件、任务切换、设备完成与继续运行。L01–L08 提供同期 Linux 对照，既有个人主机连接记录 SSH255，Linux 实际运行仍未验证。
 
 ## 默认从串口运行
 
@@ -15,7 +15,7 @@ AiriOS 从自己的 x86-64 内核进入 Linux 存储与 I/O 机制，服务于�
 ./airios test
 ```
 
-run 把 QEMU 的 UART 接到当前终端，可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run waits/run async/run storage/run recover。输入 run sh 进入用户态 shell，再输入 programs、demo、storage、recover、exit。按 Ctrl-A 后按 X 退出 QEMU。test 运行八组 ASan/UBSan 主机检查、九种带超时启动、三条 UART/PS/2 输入路径、一组真实用户 shell 会话、十二代常驻 init 服务与三次存储/I/O 会话启动（含跨 QEMU 恢复和真实限速）。
+run 启动的是 QEMU 中的 guest，主机终端通过 UART 与它交互；终端里的提示符不是主机 shell。可以输入 help、mem、mem map、devices、log、echo、programs 和 run hello/run processes/run files/run pipes/run waits/run async/run storage/run recover。输入 run sh 进入用户态 shell；此时输入 demo，shell 会 fork 孩子再 exec。输入 exit 才回到内核 monitor；programs、storage、recover 也可从用户 shell 直接输入。按 Ctrl-A 后按 X 退出 QEMU。test 运行八组 ASan/UBSan 主机检查、九种带超时启动、三条 UART/PS/2 输入路径、一组真实用户 shell 会话、十二代常驻 init 服务与三次存储/I/O 会话启动（含跨 QEMU 恢复和真实限速）。
 
 主机需要 Python 3.12+、LLVM/LLD、GNU Make、QEMU、xorriso 和 mtools。macOS 可执行 `brew install python llvm lld qemu xorriso mtools make`。虚拟机固定为 q35、单 CPU、256 MiB 和 OVMF UEFI，Apple Silicon 使用 TCG。工具选择、外部来源与依赖校验由教程 00–02 展开。 Apple Silicon 上若 `python3 --version` 仍显示系统旧版，可先执行 `export PATH="/opt/homebrew/bin:$PATH"`，再运行上述命令。
 
@@ -56,6 +56,8 @@ ui-preview 是 macOS 原生参考窗口。Files/Editor 使用参考进程的会�
 ./airios snapshots
 ./airios docs-check
 ```
+
+上面几组命令的作用不同：linux-lab 在 Linux 主机运行实验；kernel-debug 用远端调试器观察本机 QEMU；learn/export/snapshots 处理课程资料和对照版本，docs-check 核对来源与导航。它们不因使用同一入口就处在同一执行环境。
 
 Linux/GDB 默认只连接个人主机 airi@ssh.airi-dynamic.top。运行证据与连接限制见[验证记录](docs/verification.md)。learn 从参考工程执行，默认只读 main 当前发布的检查点；导出以教程和明确前置关系重建源码，要求目标目录尚不存在。
 

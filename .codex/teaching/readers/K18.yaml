@@ -21,3 +21,8 @@ not_assumed:
 limits:
 - 固定单核q35兼容PIC时钟，非Linux现代时钟实现
 - 运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/18-timer.md#pit-pic-route
+  establishes: 至少五次事件连接设备、控制器和 CPU 三环节；初始化后才开 IF，EOI 后才可继续交付。保留屏蔽故障、APIC 前提、周期等待与未来防丢唤醒区别。

@@ -1,17 +1,18 @@
 # K17 · 在持有的页面上分配小对象
 
-从 K16 继续。页池一次交出 4096 字节，后续内核任务或文件对象往往只需要几十字节；为每个小对象独占一页会浪费空间。我们先借出十六个物理页，用自己的页表把它们接成连续的 64 KiB 虚拟范围，再在这个范围里划分和回收小对象。页面不要求物理连续，小对象也不直接拥有整页。
+页池每次借出 4096 字节，任务或文件记录却可能只要几十字节。让每个小对象独占一页会浪费，因此先借十六个物理页，用自己的页表接成连续 64 KiB 虚拟范围，再在其中划块。物理页可以不相邻，连续的虚拟地址让对象算法按普通字节处理。
 
-本节新建 heap.h、heap.c、memory.h 和主机观察，更新页池头中的内存初始化声明归属，再替换 memory.c、console.h/console.c、main.c、Makefile 和两个观察脚本。K16 的页表与异常实现保持。全部完成后构建，不需要图形源码。
+本章先写 heap 接口和算法，再建立 memory 服务并接入现有 mem；K16 页表和异常保留。新增主机观察与构建输入，最后才运行。初始化依赖始终是页池、页表、堆，不让底层先依赖尚未存在的 kmalloc。
 
 <a id="heap-backing"></a>
-## 页面和对象分别由谁持有
 
-内核堆持有固定的 backing 范围：页池记录这十六页已经借出，页表把它们映射到 0xffffd00000000000 开始的连续虚拟地址，权限为 supervisor 读写、NX。堆分配器只在这片已可访问的范围中写块头和 payload，不再申请页，也不执行特权指令。以后归还一个对象，空间回到堆中，backing 页仍归堆持有，页池 free 不会因此增加。
+## 归还对象，不等于归还承载它的页
 
-每块的 32 字节块头记录 payload 容量、后继块指针和空闲标记。所有 payload 按 16 字节对齐，足以满足当前整数、指针和普通内核结构的对齐要求；更高对齐或 DMA 请求以后需要独立接口。第一次只有一个空闲块，因此初始 payload 是 65536−32=65504 字节。空闲 payload 可能分散在多个块里，其总和不表示能够一次分配同样大的连续对象。
+十六页的长期所有者是内核堆，页池将它们记为已借出，页表映到 `0xffffd00000000000` 起的 supervisor 读写 NX 区。heap.c 只在这片已可访问空间中写元数据和内容，不再借页或执行特权指令。
 
-**新建 `include/airi/heap.h`。** 不完全类型 `struct airi_heap_block` 允许接口保存指针，把布局留在实现里。
+每块有 32 字节头，保存 payload 容量、后继和 free。payload 按 16 对齐，适合当前普通整数、指针和结构，更高对齐或 DMA 需另有接口。开始只有一个空块，可分配容量为 65536−32=65504。free 对象只让这片空间回堆，backing 页仍占用，页池 free 不增加；分散空块总和也不保证能装下一份同样大的连续请求。
+
+**新建 `include/airi/heap.h`。** 接口用不完全类型保存块指针，具体布局留实现。
 
 <!-- write: include/airi/heap.h -->
 ```c
@@ -33,15 +34,18 @@ size_t airi_heap_free_bytes(const struct airi_heap *heap); // 空闲 payload 字
 ```
 
 <a id="heap-split"></a>
-## 分割时先接住原来的后继
 
-alloc 把请求向上补齐到 16，先检查 bytes+15 不会溢出，再按地址顺序选第一个空闲且足够大的块。只有余下空间能容纳新块头和至少 16 字节 payload，才分出尾块。tail 先保存旧后继，再让当前块指向 tail；若反过来覆盖 b->next，会失去后面的块链。余量过小时整块交给对象，避免创建没有可用内容的块。
+## 一次请求怎样拆开并重新连接块链
 
-C 的 `b+1` 不是加一个字节，而是跨过一个完整块头，得到 payload 起点；转换成 uint8_t 指针后再加 needed，才按字节定位尾块头。块头大小与 needed 都是 16 的倍数，后续对象因此继续对齐。返回前先把 free 改为 false，保证空间不再被下一次分配选中。
+alloc 先拒绝零与 bytes+15 溢出，再向上对齐到 16，从头找第一个足够大的空块。若余量能再放一个头和至少 16 字节 payload，就在本次 payload 后创建 tail：先让 tail 接住旧 next，再把当前 next 改成 tail，避免丢掉后面的活对象。余量过小则整块交出，不产生无用尾块。
 
-free 不从传入指针向前猜块头，而是沿已知块链比较 payload 起点，拒绝内部指针和重复释放。找到活对象后才标为空闲，再把相邻空闲块合并；原后继块头也回到 payload 容量中。调用者必须已经结束其他借用，归还后不能继续使用旧指针。接口不能识别一个地址被重新借出后的过期引用，也无法防止调用者越界破坏块头；当前需要内核调用者遵守所有权约定。
+`b+1` 跨过整个结构头，不是一个字节；转 uint8_t* 后加 needed 才按字节定位尾头。32 字节头与对齐后的 needed 都为 16 的倍数，下一 payload 继续对齐。返回前先置 free=false，后续申请不会再命中它。
 
-**新建 `kernel/mm/heap.c`。** 不引入宿主 malloc；输入空间必须已经由调用者持有并映射。
+free 不从任意传入地址往前读头，而沿已有链比较精确 payload 起点，拒绝内部指针与重复释放。找到活对象才改 free，再合并相邻空块，旧后继头的 32 字节也回到容量。例如 80 与 128 两块分别不足 208，合并后可用 80+32+128=240，便能重新从首地址容纳该请求。
+
+归还前要结束借用，之后停止用旧指针。地址复用后的过期引用、越界破坏头部仍无法自动识别；当前内核所有者必须守约。输入 backing 已由调用者拥有并映射，不借宿主 malloc。
+
+**新建 `kernel/mm/heap.c`：**
 
 <!-- write: kernel/mm/heap.c -->
 ```c
@@ -112,11 +116,14 @@ size_t airi_heap_free_bytes(const struct airi_heap *heap) { // 统计可供小�
 ```
 
 <a id="memory-service"></a>
-## 查询者只取得数值
 
-接下来给后续内核代码提供 kmalloc/kfree，并把分配状态复制成一个小快照。快照中的 pages_free 是物理页池状态，heap_free 是堆内部空闲 payload，它们不能混成一个“剩余内存”数字。文本控制台只接收这些数值，不拿位图、块头或页表内部指针；未来图形或宿主网关也可以消费同样的只读数据。
+## 控制台需要结果数值，不需要修改分配器内部对象
 
-**新建 `include/airi/memory.h`。** 内存服务初始化从页池算法头移到这里，kmalloc 的 NULL 和 kfree 的布尔失败语义明确保留。
+后续内核通过 kmalloc/kfree 取得小对象，mem 则只想显示资源状态。把当前 pages_total/free 与 heap_bytes/free 复制到一个小快照：前者以页计、后者以 payload 字节计，不能合为同一个“剩余内存”。
+
+消费者不拿位图、块头或页表内部指针，文本与未来图形都可使用相同数值。memory.h 因而承担服务接口，页算法头只保留自己职责；NULL 和布尔失败继续明确区分。
+
+**新建 `include/airi/memory.h`：**
 
 <!-- write: include/airi/memory.h -->
 ```c
@@ -135,7 +142,9 @@ bool airi_kfree(void *pointer); // 结束对象借用，backing 页仍由内核�
 #endif // 结束包含保护。
 ```
 
-**完整替换 `include/airi/pages.h`。** 这里只保留物理页池自身接口，原 memory_init 声明移入 memory.h。
+将 memory_init 声明移到 memory.h，不改变页池算法。这样只使用页面的调用者不会仅因包含 pages.h 就依赖堆服务。
+
+**完整替换 `include/airi/pages.h`：**
 
 <!-- write: include/airi/pages.h -->
 ```c
@@ -156,11 +165,13 @@ bool airi_page_free(struct airi_page_pool *pool, uint64_t physical); // 对齐�
 #endif // 结束包含保护。
 ```
 
-堆的十六个 backing 页逐页借出和映射，成功后才登记到数组。若中途失败，先逆序解除已成功映射的范围，使旧翻译失效，再归还对应数据页；不能把“分配成功但映射失败”的本次数据页漏掉。只有十六页全部建立后，才清零并创建初始块。
+## backing 全部就绪，才创建第一个可分配块
 
-启动演示先分 80、128、32 字节三块，保留第三块尾字节。归还前两块后申请 208 字节，应该复用第一个地址，证明相邻空间已合并；第三块仍活着，它的尾字节不能被改变。零请求、SIZE_MAX、超过整个 backing 的请求均返回 NULL，内部地址与重复释放均被拒绝。最后全部对象归还，payload 恢复65504字节，backing页面继续持有。
+memory.c 逐页借出并映射，成功才登记；中途失败先逆序解除已建映射、失效翻译，再还数据页。本轮已借出却映射失败的那页也单独归还，不能只回滚数组里已经登记的部分。十六页齐备后才清零并初始化堆。
 
-**完整替换 `kernel/mm/memory.c`。** 先页池，再页表，再堆，避免让较底层初始化反过来依赖 kmalloc。
+演示分 80、128、32 三块，保存第三块尾字节。归还前两项后申请 208，应回到第一个地址，第三项仍不变。最后还完所有对象，payload 恢复 65504，而 backing 仍由堆持有。零请求、SIZE_MAX、超过 backing、内部指针与重复释放也都在对应作用处拒绝。
+
+**完整替换 `kernel/mm/memory.c`，保持页池→页表→堆的初始化顺序：**
 
 <!-- write: kernel/mm/memory.c -->
 ```c
@@ -333,11 +344,14 @@ void airi_memory_snapshot(struct airi_memory_stats *stats) { // 目前单核不�
 ```
 
 <a id="memory-consumer"></a>
-## 同一个 mem 命令接入真实状态
 
-console 新增一个可选的同步函数指针 read_memory，形参指向调用者栈上的快照。main 在内存初始化和 console_init 之后绑定它，防止初始化清零掉刚写入的回调。mem 在回调返回后只格式化复制出的数字，不保留局部快照指针。宿主纯命令模型和早期检查点未绑定时，继续明确报告尚无分配统计。
+## 同一次 mem 如何拿到当前状态
 
-**完整替换 `include/airi/console.h`。** 引入的是快照的数据声明，文本模型不直接调用或链接分配器实现。
+console 新增可选 read_memory 回调，参数指向调用者局部快照。main 必须在 memory_init 与 console_init 以后绑定，否则初始化清零会覆盖回调。执行 mem 时同步填数字，返回后再格式化，不保留局部快照地址。
+
+未绑定的主机纯文本模型和早期检查点仍报告没有分配统计，不编造页池数。头文件只引入快照声明，不让文本模型直接链接分配器。
+
+**完整替换 `include/airi/console.h`：**
 
 <!-- write: include/airi/console.h -->
 ```c
@@ -395,7 +409,9 @@ int airi_keyboard_decode(uint8_t code);  // 保留修饰键状态并把一个扫
 #endif  // 结束当前条件编译范围
 ```
 
-**完整替换 `kernel/console/console.c`。** 原启动地图仍可查询，新页池与堆统计另行输出。
+原启动分类依然可查，新快照另输出物理池与堆运行状态。mem 不修改块链，显示值也不取代分配器自己的所有权判断。
+
+**完整替换 `kernel/console/console.c`：**
 
 <!-- write: kernel/console/console.c -->
 ```c
@@ -652,7 +668,9 @@ bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑�
 }
 ```
 
-**完整替换 `kernel/main.c`。** 绑定快照并在所有初始化之后发布 AIRI_P2_READY；P1 标记保留给既有输入工具。
+入口完成所有初始化、绑定快照后发布 AIRI_P2_READY。原 P1 标记继续供既有输入工具使用，但 P2 等待者不能只看到较早那行就判断新增设施已就绪。
+
+**完整替换 `kernel/main.c`：**
 
 <!-- write: kernel/main.c -->
 ```c
@@ -740,11 +758,14 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 ```
 
 <a id="heap-lifetimes"></a>
-## 交错分配时检查仍然活着的对象
 
-主机观察先运行和 guest 相同的可控合并情形，再用固定种子的两千步交错操作维护十六个对象槽。每次操作后检查所有活对象的每一个请求字节，既能发现重复借出，也能发现分割或合并覆盖了邻居。最后归还所有槽，空闲 payload 必须恢复。固定种子让出现问题时能重复相同操作顺序；这组作者验证没有要求读者另写测试。
+## 继续使用的第三项，能揭示错误合并
 
-**新建 `tests/unit/heap_test.c`。** arena 是宿主已拥有的独立空间，不把内核高地址交给宿主。
+主机先执行相同的三对象合并，再以固定种子交错两千步、维护十六个对象槽。每步核对全部活对象的每个请求字节：重复借出或合并覆盖邻居都会留下变化，不只看当前分配是否成功。最后全部归还，容量恢复；种子使同样顺序可重复。
+
+arena 是主机实际拥有的数组，与 guest 高地址无关，算法在两种已映射空间上共用，不把内核地址交给宿主。完整观察已由代码提供。
+
+**新建 `tests/unit/heap_test.c`：**
 
 <!-- write: tests/unit/heap_test.c -->
 ```c
@@ -807,7 +828,9 @@ int main(void) { // 独立验证对象生命周期和碎片回收。
 }
 ```
 
-**完整替换 `Makefile`。** guest 加入纯字节堆实现，host-test 增加 ASan/UBSan 运行。
+guest 增加纯字节 heap.c，host-test 对同一算法运行 sanitizer。主机没有安装内核映射，所以 backing 建立仍需 guest 路径验证。
+
+**完整替换 `Makefile`：**
 
 <!-- write: Makefile -->
 ```make
@@ -962,9 +985,9 @@ lab-boot-info:
 	./build/labs/boot-info
 ```
 
-启动观察改为等完整的 AIRI_P2_READY，不提前看到 P1 标记就检查尚未写完的 P2 行。UART 的真实输入回归增加 mem 查询，PS/2 的旧 mem 预期同步换成页池输出。其他超时、进程清理、无帧缓冲与必需信息缺失路径保持。
+启动检查改等完整 AIRI_P2_READY，避免较早 P1 行已到、P2 行尚未写完就读取字段。故障仍等对应 PANIC，无显示描述也继续保留串口观察；截止与回收不变。
 
-**完整替换 `scripts/boot.py`。** 正常镜像等待本轮 P2 完成；故障镜像仍等待对应 PANIC。
+**完整替换 `scripts/boot.py`：**
 
 <!-- write: scripts/boot.py -->
 ```python
@@ -1071,7 +1094,9 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
-**完整替换 `scripts/console_test.py`。** 查询结果必须属于当前命令后的新日志。
+UART 增加 mem 的真实统计，PS/2 旧 mem 预期同步为页池输出。查询必须在当前命令的新尾部，不能用启动时打印过的相同数字通过。
+
+**完整替换 `scripts/console_test.py`：**
 
 <!-- write: scripts/console_test.py -->
 ```python
@@ -1257,13 +1282,15 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
+用统一入口执行本章主机与 guest 检查，再在交互模式查看同一 mem 快照。
+
 <!-- run -->
 ```sh
 ./airios test  # 真正构建全部配置，运行主机边界、五次启动和三种设备输入。
 ```
 
-正常串口新增 `[HEAP_DEMO_OK] mapped_pages=16 bytes=65536 free_payload=65504 aligned=16 coalesced=1` 和 `[AIRI_P2_READY] exceptions=1 pages=1 own_cr3=1 heap=1`。运行 `./airios run` 后输入 mem，应看到 page pool 的 total/free/held 和 kernel heap 的 bytes/free_payload。held 包含长期页表与堆 backing，不等于用户对象使用量。
+应新增 HEAP_DEMO_OK 的 mapped_pages=16、bytes=65536、free_payload=65504、aligned=16、coalesced=1，随后 AIRI_P2_READY。交互 mem 分开显示 page pool 与 kernel heap，held 包括长期页表/backing，不等于用户对象大小。
 
-这里完整的修改演示已经在 guest 的三对象序列中完成：80与128分别不够208，相邻归还并合并后，同一地址能容纳208，仍活着的32字节对象不变。主机还实际执行内部地址、重复释放、溢出和耗尽等失败情况。调试可在 airi_heap_alloc 的分割处分步看 b、tail 与 next，在 airi_heap_free 合并后看块头数量减少；实际指针必须指向当前 guest 映射，不能拿宿主 arena 地址混用。
+三对象序列说明相邻空闲合并后可重新容纳 208，同时活着的 32 字节项不变；主机另覆盖内部地址、重复释放、溢出和耗尽。调试分割时看 b/tail/next，合并后看头数量减少，注意 guest 指针与宿主 arena 属于不同进程。
 
-对应 Linux，malloc 返回对象与 mmap 建立映射同样处在不同层；free 一个对象也不保证 RSS 立即下降。本节没有实现完整 libc malloc、按需扩大/收缩堆、用户堆、并发分配器或物理页回收策略。P2 的核心内存链已经连通，Linux 对照接着观察“地址范围存在”和“实际触碰后驻留”之间的区别，再进入定时器、任务与用户态。
+Linux malloc 与 mmap 也在对象和映射的不同层，free 对象不保证 RSS 立刻下降。这里还不是完整 libc malloc，没有动态扩大/收缩、用户堆、并发分配和 backing 回收策略。接下来的 Linux 对照将分开观察虚拟范围与实际触碰，再继续时钟和任务。

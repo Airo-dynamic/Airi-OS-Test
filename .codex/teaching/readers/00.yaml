@@ -12,7 +12,7 @@ first_use:
   establishes: 可执行文件与一次运行不同；PATH 搜索返回路径字符串或 None；异常把失败交回入口
 - concept: 参数列表、子进程与退出码
   at: ../../../dev-log/00-first-tool.md#process-arguments
-  establishes: sys.argv 取用户参数，subprocess.run 按列表边界启动路径；失败交入口，进程退出状态由父进程消费
+  establishes: shell先启动解释脚本的Python；sys.argv选择探测对象，run才启动子进程；默认名称虽同为Python但有两次运行；main返回值经SystemExit成为shell退出码
 borrowed:
 - component: Python 与主机进程接口
   contract: 按显示的文件路径启动子进程，输出继承当前终端，失败与超时返回入口
@@ -26,3 +26,8 @@ source_reading:
   at: ../../../dev-log/00-first-tool.md#code-scripts-probe-py-2
   establishes: 列表保留程序名和每项参数的边界；sys.argv[1] 取得第二项即用户给出的工具名，None 表示未找到，SystemExit 把失败交回 Shell
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/00-first-tool.md#kernel-model
+  establishes: 保留已认可完整稿，复查外层解释脚本、默认内层探测、入口异常和退出码，并接到新 01 的工具选择；实现、命令和局部语法说明保持。

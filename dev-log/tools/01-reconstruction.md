@@ -2,27 +2,27 @@
 
 串口主线K13已经能独立构建，L01又写出了Linux对照程序和调试脚本；远端观察是否完成仍取决于实际连接结果。现在要另存一份K13源码作对照：工具从00开始读到K13，把每章写入与追加的内容合成文件，再写到新目录。以后显式组合K13和图形G13时，共享的旧K11也只能应用一次，避免把较新的入口覆盖回去。
 
-从L01结束的源码继续新建工具文件。参考工程提供课程正文、说明、读者资料和检查点JSON；正文里的完整源码块是重建输入，脚本将它们解析出来，而不是复制参考工程中的实现目录。自己的学习目录继续保留原有修改，对照版本写入另一个尚不存在的目录。
+从L01结束的源码继续新建工具文件。参考工程提供课程正文、说明、读者资料和检查点JSON；正文里明确的编辑动作是重建输入，脚本将它们解析出来，而不是复制参考工程中的实现目录。自己的学习目录继续保留原有修改，对照版本写入另一个尚不存在的目录。
 
 <a id="route-reconstruction"></a>
 <a id="t01-inputs"></a>
 ## 先把章节资料读成数据
 
-主线清单`.codex/teaching/checkpoints.json`最外层是字典，`chapters`对应章节记录组成的列表。以02为例，记录中的`id`是字符串`"02"`，`requires`是身份列表`["01"]`，`document`保存正文相对路径。`files`也是字典，把截至02已经形成的每个源码路径映射到SHA-256摘要字符串；它记录累计状态，不只记录02改过的文件。最外层的`owned`列出本集合负责的实现路径，`endpoints`列出要组合成完整参考工程的终点身份。
+先把目标缩到 02：导出器拿到字符串 "02"，必须知道它的前置、去哪里找正文，以及重建后怎样核对。它消费的是课程声明，而不是根据当前磁盘上已有几个文件猜进度。主线清单 `.codex/teaching/checkpoints.json` 最外层是字典，`chapters`对应章节记录组成的列表。以02为例，记录中的`id`是字符串`"02"`，`requires`是身份列表`["01"]`，`document`保存正文相对路径。`files`也是字典，把截至02已经形成的每个源码路径映射到SHA-256摘要字符串；它记录累计状态，不只记录02改过的文件。最外层的`owned`列出本集合负责的实现路径，`endpoints`列出要组合成完整参考工程的终点身份。
 
 磁盘中的JSON是一份文本，`read_text()`先读成字符串，`json.loads`再把其中的对象、数组和字符串转换为Python字典、列表和字符串。它只读取数据，不像导入Python模块那样执行代码。反向保存声明时，`json.dumps`把这些Python值编码回JSON文本。
 
-GUI分支另外提供`.codex/teaching/graphics.json`。没有这份文件时，读取器只读主线清单；有它时，把两份清单的章节、源码归属和终点分别连接成新列表。`set(...)`将路径列表转换为不重复的集合，`&`取得两集合共同包含的路径。两份`owned`有交集，就意味着同一路径被两条路线同时归属，读取器会在创建输出目录前拒绝它。
+同样的声明方式也支持可选路线，但组合不能让两个所有者都负责同一实现。GUI 分支另外提供`.codex/teaching/graphics.json`。没有这份文件时，读取器只读主线清单；有它时，把两份清单的章节、源码归属和终点分别连接成新列表。`set(...)`将路径列表转换为不重复的集合，`&`取得两集合共同包含的路径。两份`owned`有交集，就意味着同一路径被两条路线同时归属，读取器会在创建输出目录前拒绝它。
 
-Python的正则表达式用于取出本项目约定的围栏。`r'...'`使Python保留字符串中的反斜杠，再交给正则解释；`re.S`让点号也匹配换行。`BLOCK`中三个括号依次捕获动作、相对路径和代码正文，`.*?`取到最近的收尾围栏便停止。`RUN`只匹配带run标记的Shell块；普通展示输出和未标run的操作命令都不会被自动执行。
+取得正文路径以后，还不能把其中每个代码块都写盘：演算、错误演示和真正编辑混在同一篇文章中。重建器只处理正文中明确标注的编辑，不执行普通展示。`BLOCK` 识别独占一行的 write、append 或 replace 标记，`FENCE` 取得紧随其后的完整代码围栏；`RUN` 单独收集带 run 标记的 Shell 命令。`re.M` 让行首行尾按每行判断，`re.S` 使点号能收集多行源码；非贪婪的 `.*?` 在下一条合法收尾围栏停下。
 
-模式中的`write|append`选择两个动作之一，`[^\n]+`取得至少一个非换行字符，`\n`本身匹配换行。于是路径停在标记这一行内，代码正文才由允许跨行的`.*?`收集。
+编辑标记也可能作为文字出现在演算代码里，所以不能先搜索全篇所有标记。读取器从一行起点前进，遇到普通围栏就整块跳过，只在围栏外解释编辑。没有标 run 的展示命令不会自动执行。
 
 **新建`scripts/course.py`，先写导入与两种围栏模式：**
 
 <!-- write: scripts/course.py -->
 ```python
-"""Reconstruct independent teaching routes from complete write/append blocks."""  # 从教程编辑动作重建，不复制终点实现。
+"""Reconstruct teaching routes from explicit write, append and exact replacement edits."""  # 从教程编辑动作重建，不复制终点实现。
 import argparse  # 解析目标目录、路线与执行选项。
 import hashlib   # 核对每个检查点的累计源码字节。
 import json      # 读取依赖图并保存实际运行记录。
@@ -31,7 +31,8 @@ import re  # 提取完整源码块及运行块。
 import subprocess  # 隔离执行教程命令并保留退出状态。
 from tools import ROOT  # 根目录由本脚本位置决定。
 
-BLOCK = re.compile(r'<!-- (write|append): ([^\n]+) -->\n```[^\n]*\n(.*?)\n```', re.S)  # 每项依次捕获动作、路径和完整源码。
+BLOCK = re.compile(r'<!-- (write|append|replace): ([^\n]+) -->\n')  # 只识别独占一行的编辑起始标记。
+FENCE = re.compile(r'^```[^\n]*\n(.*?)^```[ \t]*(?:\n|$)', re.S | re.M)  # 完整围栏包括代码的末尾换行。
 RUN = re.compile(r'<!-- run -->\n```sh\n(.*?)\n```', re.S)  # 只执行显式标注的命令，忽略展示输出。
 
 
@@ -62,9 +63,9 @@ def plan(source=None):  # 主线资料始终存在，GUI资料只在合并支线
 
 调用`ordered(["02"])`时，先把章节列表整理为按身份查找的`nodes`字典，`nodes["02"]`就是02的整份记录。字典推导式中的`item['id']: item`分别指定键和值；同名键会覆盖前项，所以还要比较字典与原列表的长度，拒绝重复身份。
 
-内部函数`visit`可以读取外层的`nodes`和三个结果容器。进入02后，它先访问01，再访问00；00没有前置，先加入结果，返回01后加入01，最后加入02。结果中依次是00、01、02三份记录。每次递归调用保留自己的`name`，这些调用共享外层创建的`result`、`visiting`和`visited`。
+02 的追加依赖 01 已有文件，01 又依赖 00 创建起点，因此读取当前章之前必须先走完前置。内部函数 `visit` 可以读取外层的 `nodes` 和三个结果容器。进入02后，它先访问01，再访问00；00没有前置，先加入结果，返回01后加入01，最后加入02。结果中依次是00、01、02三份记录。每次递归调用保留自己的`name`，这些调用共享外层创建的`result`、`visiting`和`visited`。
 
-`visiting`保存尚未返回的身份。例如访问02、01、00的最深处，它包含三个身份；00处理完后从中移除，再进入`visited`。尚未返回就再次进入同一身份，才是依赖环；已经处理完的身份只需跳过。
+共享前置和依赖环看起来都像“又遇到同一编号”，处理却相反：前者应跳过，后者必须报错。`visiting` 保存尚未返回的身份。例如访问02、01、00的最深处，它包含三个身份；00处理完后从中移除，再进入`visited`。尚未返回就再次进入同一身份，才是依赖环；已经处理完的身份只需跳过。
 
 组合K13和G13时，K13先完成共享K11；G13再走到K11会命中`visited`，于是这次不重复应用K11。排序只保证同一节点处理一次，各图形章节还必须遵守只添加自己文件的约定，才不会改写主线。`result`的元素始终是整份记录，下一步用其中的`document`读取正文。
 
@@ -101,24 +102,80 @@ def ordered(names, data=None):  # 沿显式前置关系取得一次组合所需�
 <a id="t01-edits"></a>
 ## 让一次编辑改变一份完整文件
 
-`BLOCK.findall(document)`返回匹配项组成的列表，每项是三个值组成的元组。处理`<!-- write: scripts/probe.py -->`后面的围栏时，`mode`得到`"write"`，`name`得到`"scripts/probe.py"`，`code`得到围栏内的完整源码字符串。`for mode, name, code in ...`把同一元组的三项分别交给这三个变量。
+顺序已得到 00→01→02，接下来要让每章动作改变同一份累计文件。例如 00 首次写 probe.py，后面的 write 可以换整份实现，append 只能延长已经存在的文件。`state` 是“相对文件名 → 完整源码字符串”的字典。write 创建或完整替换一项，append 在已有内容后继续；replace 只改变已有文件中的一个确定窗口。三种动作都来自读者实际看到的编辑，不读取参考工程的终点实现。
 
-`state`是“相对文件名→完整源码字符串”的字典。第一次write给它增加一项；后续write替换该项，append则把内容接到已有字符串末尾。没有起点就append会报错。每块末尾补一个换行，与实际文本文件一致。`state_for`从空字典开始，按刚才的章节顺序反复调用apply，返回累计结果；这一阶段只改变内存字典，尚未写磁盘。
+精确替换按如下格式书写：独占一行的 `<!-- replace: 相对路径 -->`，下一行是 `<!-- before -->` 和旧源码围栏，再接 `<!-- after -->` 和新源码围栏。旧文本必须含真实源码，而且在当前文件里恰好匹配一次；新文本可以为空，表示删除旧窗口。两块之间只放标签和空行，定位与替换说明写在动作前。代码块最后一个换行也是匹配的一部分，不按行号或忽略空白寻找。
 
-`Path(name)`用于检查绝对路径、上级跳转及`a//b`一类别名。规范路径必须与原文相同，避免两个不同名字最终写进同一个位置。摘要函数先把字符串编码为UTF-8字节，`hexdigest()`再把SHA-256结果变成可保存的十六进制字符串。
+`source_block` 从指定位置读取一份完整围栏，`edits` 则按正文顺序交出动作、路径、旧文本与新文本。replace 缺标签、缺围栏或旧文本只有空白都会失败。看似编辑却拼错格式的标记也报错，避免一个必要修改被静默略过。
+
+同一章可能先成功改一项，再在第二项发现旧文本不匹配。如果直接改 state，失败就会留下半章版本。apply 先浅复制 state 到 pending。字符串不可变，修改副本中的一项不会改原字典。追加和替换都要求文件已经存在；替换先找第一处旧文本，再从下一字符检查是否还有第二处，包括重叠匹配。零处表示起点版本不符，多处表示上下文不足，都应修正文案，不擅自选第一处。整章动作都有效以后才把 pending 交回 state，失败不留下半章编辑。
+
+`Path(name)` 拒绝绝对路径、上级跳转和 `a//b` 一类非规范别名。源码围栏保留真实换行，write/append 的旧空块约定仍保留。摘要函数把完整字符串编码为 UTF-8，再用 SHA-256 的十六进制结果核对。`state_for` 从空字典按章节顺序应用这些动作，只构造内存内容，尚未写磁盘。
 
 **追加编辑动作、摘要和累计状态构造：**
 
 <!-- append: scripts/course.py -->
 ```python
-def apply(document, state):  # 把一章的完整编辑动作作用于累计源码。
-    for mode, name, code in BLOCK.findall(document):  # 一项对应一个源码围栏。
-        path = Path(name)  # 使用路径段判断越界，不把输入当 shell 命令。
-        if path.is_absolute() or '..' in path.parts or not path.parts or str(path) != name:  # 禁止写出重建目录。
-            raise RuntimeError(f'Unsafe teaching path: {name}')  # 保留具体非法路径。
-        if mode == 'append' and name not in state:  # 追加必须已经有正文创建的文件。
-            raise RuntimeError(f'Append before creation: {name}')  # 不用空文件掩盖缺少的步骤。
-        state[name] = (state[name] if mode == 'append' else '') + code + '\n'  # 完整替换或继续追加，保留末尾换行。
+def source_block(document, position):  # 从指定位置取得一份明确的源码围栏。
+    while document.startswith('\n', position):  # 标记与围栏之间允许空行，不吞掉代码内空行。
+        position += 1  # 只前进到本次内容的起点。
+    match = FENCE.match(document, position)  # 不能越过普通正文去猜下一块源码。
+    if not match:  # 缺围栏或未关闭都属于不完整编辑。
+        raise RuntimeError('Teaching edit needs a closed source fence')  # 不静默跳过损坏动作。
+    return match[1], match.end()  # 非空源码保留末尾换行，空的新文本可用于删除旧窗口。
+
+
+def edits(document):  # 逐行走过正文，只在普通文本位置识别编辑标记。
+    position = 0  # 下一次检查的行起点。
+    while position < len(document):  # 文件中的编辑次序就是实际执行次序。
+        marker = BLOCK.match(document, position)  # 模式不跨行，不能把路径后面的正文当参数。
+        if marker:  # 找到write、append或replace。
+            mode, name = marker.groups()  # 同一标记提供动作与目标相对路径。
+            position = marker.end()  # 接下来必须是对应的内容。
+            before = None  # write/append没有旧文本条件。
+            if mode == 'replace':  # 替换需要两份有标签的源码，不能用行号或模糊匹配。
+                if not document.startswith('<!-- before -->\n', position):  # 旧文本标签紧跟编辑标记。
+                    raise RuntimeError('Replacement needs <!-- before -->')  # 拒绝漏写或调换标签。
+                before, position = source_block(document, position + len('<!-- before -->\n'))  # 读取旧文本本身。
+                while document.startswith('\n', position):  # 两块之间允许空行。
+                    position += 1  # 不改变旧文本内的空白。
+                if not document.startswith('<!-- after -->\n', position):  # 新文本必须有明确标签。
+                    raise RuntimeError('Replacement needs <!-- after -->')  # 不把下一章动作当新文本。
+                position += len('<!-- after -->\n')  # source_block将从新围栏开始读取。
+                if not before.strip():  # 空白不能提供可靠的局部定位。
+                    raise RuntimeError('Replacement before text must contain source')  # 增加真实上下文再编辑。
+            code, position = source_block(document, position)  # 按项目原生换行约定保留内容。
+            yield mode, name, before, code  # 调用方稍后检查路径与已有状态。
+            continue  # 这次源码内的标记不再被当成正文动作。
+        fence = FENCE.match(document, position)  # 普通演算或命令围栏也要整体跳过。
+        if fence:  # 展示代码里可以出现字面量编辑标记。
+            position = fence.end()  # 不执行展示中的嵌套内容。
+            continue  # 继续检查围栏后面的正文。
+        line_end = document.find('\n', position)  # 没有标记时只跳过当前一行。
+        line = document[position:line_end if line_end >= 0 else len(document)]  # 最后一行可能没有换行。
+        if re.match(r'<!-- (?:write|append|replace|before|after)\b', line):  # 看似编辑却未满足格式不能忽略。
+            raise RuntimeError(f'Malformed teaching edit: {line}')  # 保留损坏行便于定位。
+        position = line_end + 1 if line_end >= 0 else len(document)  # 前进到下一行或结束。
+
+
+def apply(document, state):  # 整章检查完成后才把新状态交回调用者。
+    pending = state.copy()  # 字符串不可变，浅复制足以隔离失败编辑。
+    for mode, name, before, code in edits(document):  # 从正文顺序取得确定动作。
+        path = Path(name)  # 路径不交给Shell解释。
+        if path.is_absolute() or '..' in path.parts or not path.parts or str(path) != name:  # 保护重建目录。
+            raise RuntimeError(f'Unsafe teaching path: {name}')  # 沿用原有路径约束。
+        if mode != 'write' and name not in pending:  # 追加和替换都必须已有明确起点。
+            raise RuntimeError(f'{mode.title()} before creation: {name}')  # 不读取终点文件补洞。
+        if mode == 'replace':  # 旧文本包含围栏保留的换行，按字节形状核对。
+            first = pending[name].find(before)  # 精确查找，不去空白、不猜相似函数。
+            if first < 0 or pending[name].find(before, first + 1) >= 0:  # 第二次从下一字符查找，也拒绝重叠匹配。
+                reason = 'missing' if first < 0 else 'ambiguous'  # 区分旧版本不符和缺少唯一定位。
+                raise RuntimeError(f'Replacement requires one match in {name}: {reason}')  # 不选择第一个凑合继续。
+            pending[name] = pending[name].replace(before, code, 1)  # 只改变唯一的已声明窗口。
+        else:  # write完整赋值，append在已有文件后继续。
+            pending[name] = (pending[name] if mode == 'append' else '') + (code or '\n')  # 保留旧write/append空围栏写入一个换行的约定。
+    state.clear()  # 只有全部动作有效才替换外部累计状态。
+    state.update(pending)  # 失败时原state保持，成功仍复用调用者字典。
 
 
 def digest(text):  # 文本先按 UTF-8 形成确定字节。
@@ -139,7 +196,7 @@ def state_for(names, data=None):  # 从空状态重建指定终点或组合。
 
 核对02时，`state_for(["02"])`重新应用00、01、02，得到当前累计源码。`actual`字典把这些字符串逐份转换为摘要，与02记录中的`files`比较；路径多一项、少一项或内容不同，两个字典都会不相等。正文的run块也要与`commands`列表逐项相同，才能使源码版本与执行命令对应。
 
-整个参考工程先把全部`endpoints`组合成最终状态，再盘点磁盘中的自有源码，与最外层`owned`比较。新增文件如果没有分配给任何章节，就会在这一步被发现；最后逐份核对最终状态与当前实现字节。内容相同只说明正文确实可以形成当前源码，尚未判断这些代码的行为和解释是否正确。
+逐节点摘要能发现内容不符，却还可能遗漏一份从未分配给章节的新文件。因此还要从整个工程反查归属。整个参考工程先把全部 `endpoints` 组合成最终状态，再盘点磁盘中的自有源码，与最外层`owned`比较。新增文件如果没有分配给任何章节，就会在这一步被发现；最后逐份核对最终状态与当前实现字节。内容相同只说明正文确实可以形成当前源码，尚未判断这些代码的行为和解释是否正确。
 
 普通源码后缀由目录扫描收集；`airios`、Makefile和配置等无常规源码后缀的输入显式列出。生成字体数组由G12的锁与生成配方解释，不作为手写字节盘点。选装GUI未出现时，清单和实际文件集合都不含GUI路径。
 
@@ -186,13 +243,13 @@ def audit():  # 检查依赖、每节点摘要和完整终点覆盖。
 <a id="t01-replay"></a>
 ## 写入新目录，并保留失败发生的位置
 
-`replay`先算好章节顺序，再检查目标。悬空符号链接指向一个不存在的位置，`exists()`会为它返回False，但链接本身仍存在，所以必须再用`is_symlink()`检查。已有文件、目录和链接都拒绝写入；通过检查后才用`resolve()`固定实际输出位置并创建目录。
+内存 state 核对成立以后，才把它落实到独立目录；学习者正在修改的原目录不是输出目标。`replay` 先算好章节顺序，再检查目标。悬空符号链接指向一个不存在的位置，`exists()`会为它返回False，但链接本身仍存在，所以必须再用`is_symlink()`检查。已有文件、目录和链接都拒绝写入；通过检查后才用`resolve()`固定实际输出位置并创建目录。
 
 每章开始时，`before = state.copy()`保留上一章的字典。两个字典暂时引用相同字符串，但字符串不可变，apply给`state[name]`赋一个新字符串不会改变`before[name]`。于是只要比较两边的值，就能找出本章需要写盘的文件；未变化的文件保留原字节与时间戳。`chmod(0o755)`为airios和Shell脚本恢复执行权限，`0o`表示后面的数字按八进制解释。
 
 不带`--run`时只执行正文编辑；带上它才启动run块。`sh -eu -c`在普通命令失败或读取未定义变量时停止，`if`条件等Shell例外仍然适用。外层600秒截止限制它等待整个命令块的时间，真实QEMU观察器还使用K12自己的较短截止。外层结束等待并不替代每个子工具的进程清理，QEMU仍由观察器的finally负责回收。
 
-`evidence`是按执行顺序保存记录的列表，每项包含章节身份、完整命令、退出状态与实际输出。超时的输出可能仍是bytes，即使正常返回指定了text模式；脚本按实际类型解码，把`exit: null`、`timed_out: true`及已收到的输出写入`replay.json`，再报告失败。失败目录留在原处，修正原因后换一个新目录重跑，原目录中的记录和修改继续保留。
+文件已写出与命令已成功是两种结果。启用 --run 后，还需为每次真实命令保留结果；不能只留下最终一行 REPLAY。`evidence` 是按执行顺序保存记录的列表，每项包含章节身份、完整命令、退出状态与实际输出。超时的输出可能仍是bytes，即使正常返回指定了text模式；脚本按实际类型解码，把`exit: null`、`timed_out: true`及已收到的输出写入`replay.json`，再报告失败。失败目录留在原处，修正原因后换一个新目录重跑，原目录中的记录和修改继续保留。
 
 **追加实际重建：**
 
@@ -211,7 +268,7 @@ def replay(destination, through, execute=False, alongside=None, source=None):  #
     for chapter in chapters:      # 按依赖顺序逐章写入完整状态。
         text = (source / chapter['document']).read_text()  # 读取该检查点正文。
         before = state.copy()  # 字符串不可变，浅复制足以保留前态。
-        apply(text, state)     # 执行正文中的 write/append 动作。
+        apply(text, state)     # 执行正文中的写入、追加或精确替换。
         for name, code in state.items():  # 只更新本章改变的文件。
             if before.get(name) == code:  # 支线不会重写未改变的基础文件。
                 continue  # 保持该文件原字节和时间戳。
@@ -240,7 +297,7 @@ def replay(destination, through, execute=False, alongside=None, source=None):  #
 
 ```
 
-最后给直接执行脚本建立入口。`nargs='?'`使目标目录可以省略，省略时只核对参考工程；`action='store_true'`使`--run`成为默认False的布尔选项。导入模块只建立函数，`if __name__ == '__main__'`才启动参数解析。
+前面的函数既供后续导出器调用，也供直接命令使用。最后给直接执行脚本建立入口。`nargs='?'`使目标目录可以省略，省略时只核对参考工程；`action='store_true'`使`--run`成为默认False的布尔选项。导入模块只建立函数，`if __name__ == '__main__'`才启动参数解析。
 
 **追加命令入口：**
 
@@ -266,7 +323,7 @@ if __name__ == '__main__':  # 导入本模块只建立函数。
 <a id="t01-materials"></a>
 ## 用02验证顺序，再导出串口终点
 
-先把课程资料复制到学习目录，正文、检查点JSON和说明随后供工具读取，参考工程中的实现目录不参与复制。`AIRI_TUTORIAL_SOURCE`可由环境指定；省略时采用命令中给出的桌面参考项目路径。来源与接收目录相同时跳过复制。
+重建器本身已经写在学习目录，但它读取的正文与清单还需一起接入，否则只有工具却没有输入。先把课程资料复制到学习目录，正文、检查点JSON和说明随后供工具读取，参考工程中的实现目录不参与复制。`AIRI_TUTORIAL_SOURCE`可由环境指定；省略时采用命令中给出的桌面参考项目路径。来源与接收目录相同时跳过复制。
 
 复制`.codex/teaching`时，`ignore_patterns('graphics.json')`生成一个忽略规则，copytree据此跳过来源的完整图形清单，目标中已经保存的图形声明继续保留。复制其他目录时，`ignore=None`表示不设过滤；`dirs_exist_ok=True`允许合入已有资料目录，其中同名资料会更新，手写实现目录不在复制范围内。
 

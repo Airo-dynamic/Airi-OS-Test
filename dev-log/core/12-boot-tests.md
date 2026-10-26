@@ -1,18 +1,20 @@
 # K12 · 用完成标记核对真实启动与输入
 
-K11 已经生成只选择串口实现的镜像。现在从这个镜像启动 QEMU，取得本轮启动记录，再分别通过 UART 和虚拟键盘提交命令。`mem` 应返回本次地图的统计，`echo` 应返回参数，未知命令应留下错误文字；每次都要等对应的 CONSOLE_UPDATE，随后才发送下一条。
+K11 的串口镜像已能持续处理命令。现在要自动确认两件事：本次启动确实走到就绪位置，送入的一条命令也确实处理完。仅看到 QEMU 进程存在，或仅知道主机已写出 mem 字节，都不足以证明它们。
 
-正常启动以外，还要单独构建缺显示描述、缺内存地图和修改输出三种配置。前者应继续接收命令，缺内存地图应按具体原因停机，修改输出则应显示编译时传入的新文字。它们使用不同镜像与日志，避免某次运行的结果混进另一次。
+启动与输入因此各有等待条件。启动检查等待 READY；输入检查先记旧输出尾部，送一条请求，再等新计数的 CONSOLE_UPDATE 和该项内容，完成才继续。UART 和虚拟键盘分别执行，让命令模型与两条设备通路都有实际观察。
+
+normal 之外另构建 no-framebuffer、missing-memory、edit-experiment。它们分别验证无图形仍可交互、缺必需地图按原因拒绝、修改文字进入了本次产物；镜像、日志和汇总按配置隔离。
 
 <a id="qmp-channel"></a>
 
-## 为一次运行准备独立参数与日志
+## 公共机器参数不代替一次运行的独立资源
 
 <a id="qemu-parameters"></a>
 
-第 07、10 章分别写过 QEMU 参数。将相同的机器设置集中到 `command` 后，启动检查、输入检查和后面的交互入口都能取得同一组 q35、单核、256 MiB 参数。`command` 先在 work 中复制可写固件变量，再返回参数列表，调用方才用 Popen 启动；固定模板继续作为只读输入。
+将已有 q35、单核、256 MiB 等设置集中进 command。每次调用仍接收自己的 profile/work，先复制可写固件变量，再返回参数列表；Popen 才启动机器。固定固件模板不被修改，不同观察也不借同一次进程。
 
-函数签名中 profile 与 work 必须由调用者提供，后三项有默认值：`gui=False` 隐藏主机显示窗口，`debug=False` 让 CPU 正常开始执行，`debug_port=1234` 留给调试连接。调用 `command(profile, work)` 就使用这三个默认值；后文可以通过 `debug=True` 这样的具名参数覆盖某一项。内核选择哪份显示实现仍由构建 profile 决定。
+后三个形参有默认值：gui=False 隐藏主机窗口，debug=False 正常开始执行，debug_port=1234 留给调试。`command(profile,work)` 使用默认值，具名参数可单独覆盖。这里 gui 只改变 QEMU 窗口，内核显示实现仍由构建 profile 选择。
 
 **新建 `scripts/boot.py`：**
 
@@ -44,19 +46,17 @@ def command(profile, work, gui=False, debug=False, debug_port=1234):  # 返回 Q
     return cmd  # 仅返回参数列表，调用者决定何时启动与回收进程。
 ```
 
-## 区分主机控制连接与guest设备字节
+## 控制 QEMU 和给 guest 输入，是两条连接
 
 <a id="qmp-messages"></a>
 
-自动提交 `mem` 需要把字符送给 guest；为了确认键盘转换器也工作，还需要让 QEMU 模拟实际按键。QMP 是 QEMU 接收主机控制消息的协议，`send-key` 要求它改变虚拟键盘状态，`cont` 则让暂停的虚拟 CPU 继续执行。内核随后从设备读到输入，不会接到 QMP 请求对象。
+要检查键盘转换，主机不能直接替内核调用解码函数，而要请求 QEMU 产生按键。QMP 的 send-key 控制虚拟键盘，cont 使暂停 CPU 继续，内核随后只看到设备事件，不认识 QMP 的 JSON 对象。UART socket 则直接传 mem 等字节，两者的接收者与格式不同。
 
-UNIX socket 是主机进程间的字节连接，以本机路径找到接收端点。这里 AF_UNIX 选择这种本机地址，SOCK_STREAM 选择有序字节流；connect 建立与 QEMU 的连接。UART 也可以接到另一条 socket，但其中传送的是 `mem\n` 等设备字节。QMP 和 UART 的路径、消息形式与接收者分别确定。
+两条连接都可用主机 UNIX socket 的路径定位。AF_UNIX 选本机地址、SOCK_STREAM 选有序字节流；connect 建立连接，字节流没有自带消息边界。QMP 以换行分 JSON：dumps 形成文字，追加换行、encode 送字节，readline 收一行，loads 还原对象。
 
-连接先收到问候，再协商 qmp_capabilities。例如继续执行的请求字典为 `{'execute': 'cont'}`。字节流没有自动分包边界，QMP 用换行分隔 JSON 消息：json.dumps 形成文字，补换行，再 encode 为字节；readline 取得一行，json.loads 还原对象。返回中可能夹有 event，所以收到 return 或 error 才结束当前请求。
+连接先消费服务器问候，再发送 qmp_capabilities 与本次请求，如 `{'execute':'cont'}`。回复可能夹有 event，只有 return/error 才结束当前请求。arguments=None 表示不提供字段，空字典仍是显式参数，不能一并略掉。
 
-`arguments=None` 表示本次动作没有参数；空字典也是明确提供的参数，要保留在请求中。`sock.makefile('rb')` 为同一连接建立按行读取的二进制包装，和 Makefile 构建规则无关。嵌套 with 先关闭包装，再关闭 socket，异常离开时也按同样顺序释放。
-
-qmp_screenshot 为可选图形支线保留 screendump 操作，把输出路径交给 QEMU 的显示设备；本章串口检查不会调用它。
+makefile('rb') 是 socket 的按行二进制包装，与构建 Makefile 无关。嵌套 with 先关包装再关连接，异常也一样。screendump 另给可选图形路线输出主机图像，本章串口不调用它。
 
 **追加到 `scripts/boot.py` 末尾：**
 
@@ -87,15 +87,15 @@ def qmp_screenshot(sockpath, output):  # 把本轮截图目标路径交给QEMU�
     qmp_execute(sockpath, 'screendump', {'filename': str(output)})  # 控制显示设备保存PPM，不向UART发送命令。
 ```
 
-## 成功必须来自这次运行的完整记录
+## 用配置的预期结果判断本次启动
 
 <a id="boot-observation"></a>
 
-启动前删除旧serial.log与result.json，避免旧成功掩盖新失败。控制端点放在短临时路径，规避macOS的UNIX socket路径长度限制。单调时钟只计算经过时间，不受墙上时间调整影响。
+每次先删旧 serial.log/result.json，再启动自己的 QEMU，避免旧 READY 或旧成功 JSON 留下误证。UNIX 端点放短临时目录，规避 macOS 路径长度限制；等待采用单调时钟，不受墙上时间校准影响。
 
-normal、no-framebuffer 和 edit-experiment 都要有换行结束的 READY 记录，且没有 PANIC；当前串口三者都应报告 graphics=0。missing-memory 则必须报告缺少内存地图的具体 PANIC，并且没有 READY。edit-experiment 另核对修改后的日志文字。desktop- 前缀只选择可选显示实现，去掉前缀后仍使用同一故障含义。
+normal、no-framebuffer、edit-experiment 都需完整换行的 READY 且无 PANIC，当前串口均为 graphics=0；修改版还需新文字。missing-memory 则相反，必须有具体缺地图 PANIC 且无 READY，拒绝启动才是预期结果。desktop- 只选择显示实现，去掉前缀仍按相同故障含义判断。
 
-`expected` 根据这次配置选择要等的记录。循环逐行检查，尾部尚无换行时继续等待；取得预期记录后才写 result.json。超时与提前退出会保留已经收到的 serial.log 和 QEMU 诊断，且不会留下上一轮的成功汇总。
+expected 据配置确定，逐行等到完整记录后才保存 result.json。半行继续等，超时或提前退出都失败，已收到的串口与 QEMU 诊断保留，不能写成功汇总。
 
 **追加到 `scripts/boot.py` 末尾：**
 
@@ -153,19 +153,17 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
-finally中terminate只是发出终止请求，随后wait回收进程；超过五秒再kill并wait。成功、超时和提前退出都经过这条清理路径。它只处理本次Popen返回的进程，不根据全机进程名称查找和结束QEMU。
+finally 请求终止本次 Popen 进程，随后 wait；五秒未退出再 kill/wait。它回收的是自己启动的实例，不按全机进程名字结束其他 QEMU。成功与失败都走清理，保存的日志则留在 artifacts。
 
 <a id="console-observation"></a>
 
-## 输入后只等新的命令结果
+## 发送以后，结果必须来自旧尾部之后
 
-发送 mem 后，设备还要等待内核轮询，再在回车时分派命令。检查先记录已有日志的字符长度 offset，之后只在 `text[offset:]` 中寻找 commands 计数相符的 CONSOLE_UPDATE。比如当前已有两次提交，下一条必须等待 commands=3，先前的完成记录不能使它提前通过。
+假设会话已处理两项，下一条命令只接受 commands=3。发送前记 offset，再在 `text[offset:]` 搜索完整记录和本条结果；原来 commands=2 的日志无论出现多少次都不能证明这项完成。
 
-UART 检查在 -S 暂停 CPU 时先连接设备 socket，再通过 QMP 执行 cont，避免丢失早期输出。socket 设为非阻塞，recv 暂时无数据会给出 BlockingIOError，和返回空 bytes 表示连接结束不同；已经取得的字节进入可增长的 bytearray，decode 后才成为要核对的文本。
+UART 模式先用 -S 暂停 CPU，连好设备 socket，再经 QMP cont，避免启动字节在接收方未准备时丢失。非阻塞 recv 暂无数据给 BlockingIOError，空 bytes 表示连接结束；读到的块加进 bytearray，再 decode 为文本。4096 是一次最多读取的字节数，after 则是解码文本里的字符偏移。
 
-`output` 和 `wait` 定义在 check_console 内，直接使用本次 wire、received、serial 与 process。output 先收取当前已有字节并保存 serial.log，wait 再调用它检查新结果；两者使用同一份累计输出。after 是文本字符偏移，recv 的 4096 则是单次最多读取的字节数。每次 wait 都有自己的截止时间，QEMU 提前退出也立即失败。
-
-wait 保留每行结束符，只有收到换行才比较。它只移除确定的 airi> 提示符和 CRLF：CONSOLE_UPDATE 的全部字段必须与预期整行相同，page=1 不会接受 page=10；READY 后还有启动字段，因此检查独立标记之后的空格边界。两类记录都只能来自 after 之后的新输出。
+嵌套 output/wait 使用同一次 wire、received、serial、process。output 收取并保存累计字节，wait 反复检查新尾部，每次有自己的截止点，进程提前退出立即失败。它保留换行，只移除确定提示符和 CRLF，再按完整 CONSOLE_UPDATE 比较；page=1 不会误接受 page=10。READY 带后续字段，则检查标记后的空格边界，同样只用 after 之后记录。
 
 **新建 `scripts/console_test.py`：**
 
@@ -254,17 +252,17 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                     qmp_screenshot(qmp, path)  # 在命令完成后保存本轮画面。
 ```
 
-## 用同一计数核对UART与键盘
+## 两条设备通路共用“发出、等待、核对”的过程
 
 <a id="qmp-keys"></a>
 
-按键辅助函数 `key(*codes)` 把实参收集为元组：`key('shift', 'a')` 得到 `('shift', 'a')`。`[{'type': 'qcode', 'data': c} for c in codes]` 逐个取得键名 c，形成 QMP 所需的字典列表。spc、ret 和 shift 分别表示空格、回车与修饰键；hold-time=20 的单位为毫秒，调用后再等待 0.12 秒，让内核逐次消费设备事件。
+key(*codes) 将多个键名收为元组，例如 shift/a，再用列表推导为每个名字生成 qcode 字典。spc、ret、shift 分别是空格、回车、修饰键，hold-time=20 以毫秒计，调用后再留 0.12 秒给轮询内核处理。通过主机控制产生的仍是虚拟键盘事件。
 
-嵌套函数 run 将一条文字逐字符送入 key，再发送回车。commands 属于外层 check_console，`nonlocal commands` 使 `+=1` 修改同一个计数；没有这个声明，赋值会被当作 run 自己的局部变量。发送前先取 offset，再以新计数等待结果，最后检查本次尾部包含相应的查询文字。
+嵌套 run 将命令逐字符送给 key，再发送回车。nonlocal commands 使递增作用于外层同一个计数；没有它，赋值会创建局部变量。发出前先取 offset，发出后用新计数等记录，再核对尾部的查询文字。
 
-UART 分支直接发送字节，依次检查 echo、devices 和未知命令。PS/2 分支通过 QMP 按键检查 mem、帮助、地图、历史、退格和 Shift 等路径；F1–F4 与分页只核对会话中的状态编号。capture 在 graphics 为 false 时直接结束，当前不生成截图。只有以后选择图形目标，才会增加日夜切换并保存帧缓冲画面。
+UART 分支直接送字节，依次检查 echo、devices、未知命令；第一项就必须同时有 commands=1 与 uart-receive-ok。PS/2 分支另查 mem、帮助、地图、历史、退格与 Shift。F1–F4/分页只核对模型编号，graphics=false 时 capture 不截图；以后图形目标才增加日夜切换和画面。
 
-例如 UART 的第一条 echo 完成后，新尾部既要出现 commands=1，也要包含 uart-receive-ok；第二条查询完成后才送第三条。所有结果符合后，cases 记录本次实际执行的输入路径并写入汇总。退出时关闭 UART，再结束和回收本次 QEMU，最后删除短路径中的两个端点。
+所有路径符合才将实际 cases 写入汇总。结束时先关 UART，终止并回收该进程，再删两个临时端点；一次调用的资源不会交给下一次观察继续使用。
 
 **追加到 `scripts/console_test.py` 末尾：**
 
@@ -367,9 +365,9 @@ UART 分支直接发送字节，依次检查 echo、devices 和未知命令。PS
             endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
 ```
 
-## 运行正常与故障路径
+## 分开运行正常、受限与故障配置
 
-先为四种配置分别执行 Make 和启动检查，再启动三次输入观察：normal 的 UART、normal 的 PS/2，以及缺显示描述时的 UART。每次 check_console 都新建 guest，命令计数从零开始。四种配置分别构建到不同目录，修改输出的宏只作用于自己的镜像。
+先为四种 profile 分别构建并检查启动，再创建三次独立输入观察：normal UART、normal PS/2、no-framebuffer UART。每个 guest 的会话计数从零开始，宏与产物只属于所选目录，不能跨实例拼接成功记录。
 
 **在学习目录根目录运行：**
 
@@ -389,6 +387,6 @@ check_console('no-framebuffer')  # 没有显示设备仍可输入。
 PY
 ```
 
-完成后应出现四次 PASS boot 与三次 PASS console。artifacts 各目录的 serial.log 和 result.json 分别保存这次启动与交互的结果。mem 输出的 usable 来自 BootInfo 中可用区域的长度相加；256 MiB 是整台机器配置的内存，包含内核、固件及保留范围。缺内存配置的通过表示内核已按具体原因拒绝启动，缺显示描述配置则仍应接受 UART 命令。
+应得到四次 PASS boot 和三次 PASS console，各 artifacts 目录保留对应 serial.log/result.json。missing-memory 的通过表示正确拒绝，no-framebuffer 的通过表示串口仍可处理命令，它们的成功含义不同。
 
-启动、提交和错误路径都有了可调用的观察函数。接下来统一命令入口将直接调用它们，日常运行便无需再手工组合这几段 Python。
+mem 的 usable 仍由 BootInfo 分类长度相加；256 MiB 是整机容量，还包含内核、固件和保留范围。现在启动、命令与拒绝路径都有可调用观察，下一章将它们收拢到日常入口，避免每次手工组合 Python 调用。

@@ -27,3 +27,8 @@ not_assumed:
 limits:
 - 八槽与64用户页有界，会话结束统一回收未被wait收拢的剩余资源
 - 运行不记录为读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/22-processes.md#process-state
+  establishes: 以 42/99 的父子数据、同一 fork 返回点、等待调用和僵尸占槽组织进程机制；当前执行者与状态写入目标分开，保留离栈后回收条件。

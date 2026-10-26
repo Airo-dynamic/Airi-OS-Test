@@ -1,26 +1,29 @@
 # L07 · 把请求交给Linux，再按cookie取回真实完成
 
-从L06继续。epoll告诉应用某个FD现在值得读，io_uring则接收一次具体读操作，稍后把这次操作的结果写进CQ。K32已经实现自己的有界队列，本节用liburing对照Linux SQ/CQ；两套接口不兼容，AiriOS注册缓冲是内核副本，本例Linux缓冲则是整个批次一直存活的普通数组。
+L06 的 epoll 告诉应用某个 FD 现在值得尝试读取，真正的读仍由应用调用。io_uring 接收的是一次具体操作：文件、目标数组、长度与偏移已经给出，Linux 执行后再把这次操作的结果放进完成队列 CQ。K32 已有自制提交/完成接口，本章用 liburing 接入 Linux，沿实际请求辨认两者相同的交接问题与不同的资源约定。
+
+本例先完整写入一个 1536 字节临时文件，再准备五次读取。前三次读完整区间，第四次正常短读，第五次得到错误完成；它们使用同一套提交与收取代码。FD 打开后 unlink 移除临时名称，仍可沿 FD 访问文件，最后关闭才结束这份引用并回收文件，不在磁盘上留下实验路径。
 
 <a id="uring-submit"></a>
-## SQE保存操作参数，提交数不保证等于准备数
+## 先确定每条请求读哪里、写到哪一份数组
 
-queue_init(8)建立能容纳本批五个请求的环，不使用后台SQ轮询或更改宿主策略。临时文件先完整写入1536个有规律字节；unlink只移除名称，已打开FD继续拥有文件，结束关闭后自动回收。
+`queue_init(8)` 建立本批五项能放下的环，不启用后台 SQ 轮询，也不修改主机策略。下面的 source 保存已写入文件的模式字节，buffers 为各请求提供独立目标：
 
-get_sqe取得尚未提交的SQ项，prep_read写入FD、缓冲地址、长度和文件偏移，set_data64附上100–104这五个整数cookie。前三个读512字节，第四个从1530读16字节，文件只剩6字节；第五个FD=-1，提交可被接受，执行结果应由CQ返回-EBADF。显式偏移读不依赖共享文件位置，不能与普通read的偏移推进混同。
+| cookie | FD 与文件偏移 | 请求长度 | 目标与预期结果 |
+| --- | --- | --- | --- |
+| 100 | 有效 FD，0 | 512 | buffers[0]，512 字节 |
+| 101 | 同一 FD，512 | 512 | buffers[1]，512 字节 |
+| 102 | 同一 FD，1024 | 512 | buffers[2]，512 字节 |
+| 103 | 同一 FD，1530 | 16 | buffers[3]，只剩 6 字节 |
+| 104 | −1，2048 | 512 | buffers[4]，−EBADF |
 
-submit_count累计实际返回的提交数量；部分提交继续交剩余项，EINTR在同一两秒预算内重试，零进度明确失败，不能无限空转。liburing函数的负返回值本身是负错误码；代码只为perror设置errno=-rc，不拿别的调用留下的errno解释它。
+前四项的 FD 相同，前三项连长度也相同，不能靠这些值判断某条完成属于谁。应用选择 100–104 作为 cookie，经 `set_data64` 放进 SQE 的 user_data；Linux 在 CQE 中带回这个数值，应用再映射到对应数组下标。这里的 cookie 不是内核替我们生成的 FD，也不要求 CQE 按提交位置出现。
 
-<a id="uring-completion"></a>
-## CQE同时给身份和结果，缓冲区必须活到完成
+读请求各自给出显式文件偏移，不推进或依赖普通 read 的共享当前位置。第四项的 `1536−1530=6` 决定正常有效前缀；第五项虽然准备和提交可以成功，执行时无效 FD 的错误仍应由 CQ 返回。接收请求和执行结果要分别处理。
 
-wait_cqe_timeout最多等两秒；超时是失败，不是一个零字节读。CQE的user_data先解码为缓冲区索引，范围和重复检查通过后再验证对应结果。完成顺序按本轮真实内核记录，可以恰好等于提交顺序；顺序相同不能证明未来也相同，顺序不同也不是程序成功的必要条件。
+本例 source 与 buffers 都是静态数组，在整个队列生命期内存在。它们不是 Linux 固定注册缓冲，也没有 AiriOS 的注册 handle；自制接口到 pop 才解除 BUSY 是那套接口的约定，这里需要应用自己保证数组在相关完成之前不失效或提前复用。
 
-前三个结果512、第四个6、第五个-EBADF。只有正数结果才有相应有效字节前缀可比较，零表示该读遇到EOF，负数是请求错误。CQ的错误不通过线程errno另行发布。程序复制cookie和result、核对内容之后才cqe_seen，释放这个CQ槽。cqe_seen管理完成槽，不替你释放用户内存；source和buffers是静态数组，整个队列生命期都在，不会把循环栈上的临时数组提前返回。
-
-所有读完成后，再独立准备一个FSYNC，cookie900，等结果0后拆队列和关闭FD。这展示同步也要等完成，但没有目录持久化或物理断电实验。文件初始写入可能仍在页缓存，当前批量读取不是裸盘吞吐测试，也不使用O_DIRECT或固定缓冲注册。
-
-**新建 `labs/linux/p5-uring/uring.c`。** 完整程序包含准备、部分提交、身份核对、错误完成和正常清理。
+**新建 `labs/linux/p5-uring/uring.c`，先准备固定数据、错误报告和单调时间：**
 
 <!-- write: labs/linux/p5-uring/uring.c -->
 ```c
@@ -43,6 +46,22 @@ static long long now_ms(void) { // 单调时间限制反复提交。
     struct timespec t; require(clock_gettime(CLOCK_MONOTONIC,&t)==0,"clock"); // 不使用墙上时间。
     return (long long)t.tv_sec*1000+t.tv_nsec/1000000; // 转毫秒便于截止比较。
 }
+```
+
+## 分别处理提交进度与取得完成记录
+
+`get_sqe` 取得可填写的 SQ 项，`prep_read` 写入 FD、缓冲地址、长度和偏移，`set_data64` 加入 cookie。填好描述还没有读取结果；`io_uring_submit` 才推进提交，其正返回值表示本次交出的项数，不是字节数，更不是五项已经完成。
+
+例如本次若只提交三项，`submit_count(5)` 累计到 3，再继续交剩余项，不重建已经交出的请求。这个数量只是解释分支，实际由本轮内核返回。EINTR 可在同一两秒总预算内重试，预算不能每次重置；零进度或截止前未提交齐都明确失败，不能无限空转。
+
+`wait_one` 解决另一件事：最多等两秒，取得一条可读的 CQE。等待函数返回 0 表示取得记录，记录中的 res 才是具体 I/O 结果；等待超时是失败，不能当成一次读返回零字节。
+
+liburing 函数的负返回值本身就是负错误码。为了使用 perror，代码将它转换成 `errno=-rc`，不能借用其他调用留下的线程 errno。随后从 CQE 读到的负 res 也代表请求错误，不会另外通过线程 errno 发布。
+
+**追加两个有界辅助函数：**
+
+<!-- append: labs/linux/p5-uring/uring.c -->
+```c
 static void submit_count(unsigned expected) { // io_uring_submit可能只接受部分SQE。
     unsigned submitted=0; long long end=now_ms()+2000; // 预算不在每次重试时重置。
     while (submitted<expected && now_ms()<end) { // 仅重交尚未接受的SQ尾部。
@@ -60,6 +79,18 @@ static struct io_uring_cqe *wait_one(void) { // 等待有界，不以队列存�
     if (rc<0) { errno=-rc; require(0,"CQ wait (timeout is failure)"); } // -ETIME也是明确失败，不是EOF。
     require(cqe!=NULL,"CQ pointer"); return cqe; // 只有成功后才能读结果。
 }
+```
+
+## 准备同一批输入，再把五项交给 Linux
+
+main 先建环。ENOSYS、EPERM 或 EACCES 表示内核不支持或策略拒绝，程序说明不可用并返回 77，不会因此更改策略。其他初始化错误也停止。文件写入要处理短写，只把尚未写入的后缀继续交给 write；全部 1536 字节形成以后才准备读取，比较才有确定的基线。
+
+循环下标 i 同时选择 buffers[i] 与 cookie100+i，长度、偏移和无效 FD 分支按上表形成五份描述。`io_uring_get_sqe` 返回空指针时不能继续写请求。填写后调用 submit_count，成功只说明这批提交已经交齐，所有数组仍要保留，结果处理接在下一块中。main 在下一块结束以前尚未闭合，中途不编译。
+
+**追加初始化、文件输入和五条提交：**
+
+<!-- append: labs/linux/p5-uring/uring.c -->
+```c
 int main(void) { // 单线程提交五个读，再独立提交同步请求。
     int rc=io_uring_queue_init(8,&ring,0); // 不使用SQPOLL，不擅自更改系统策略。
     if (rc==-ENOSYS || rc==-EPERM || rc==-EACCES) { // 内核缺能力或策略禁用不能伪装成库测试成功。
@@ -81,6 +112,23 @@ int main(void) { // 单线程提交五个读，再独立提交同步请求。
         io_uring_sqe_set_data64(sqe,100+i); // 数字cookie映射到独立缓冲区，不按完成顺序猜身份。
     }
     submit_count(5); unsigned seen=0; // 完成顺序由实际内核决定。
+```
+
+<a id="uring-completion"></a>
+## 从 cookie103 找回六个有效字节
+
+假设下一条 CQE 带回 cookie103。程序先核对它在 100–104 范围内，再用 `103−100=3` 找到请求下标；seen 位集合拒绝重复身份，避免把同一请求算两次而漏掉另一条。第四项应得到 res=6，因而只比较 buffers[3] 前六字节与 source 从偏移 1530 开始的六字节。请求长度是 16，不代表后十字节也有本次读取结果。
+
+前三项应各为 512，第五项为 −EBADF。只有正结果才有相应有效前缀可比较；本批读请求返回 0 意味着 EOF，负数是请求错误。完成顺序由实际内核决定，可以恰好与提交相同，程序不把强制乱序作为成功条件，也不保证将来始终同序。
+
+程序复制 cookie 与 result、核对内容以后，才用 `cqe_seen` 归还这个 CQ 槽。此后不能继续借那个 CQE 指针读取旧记录；缓冲数组却是另一份应用持有的内存，cqe_seen 不替应用释放它。数组跨整个批次存活，避免把循环中的临时地址交出去后提前离开作用域。
+
+五条读取收完后，另交一条 cookie900 的 FSYNC，等待 res=0 再退出队列并关闭 FD。这里 0 表示同步成功，不能套用“读的 0 是 EOF”。它展示文件同步也有完成点，没有做目录持久化或物理断电实验。初始文件可能仍在页缓存，本批不使用 O_DIRECT，也不是裸盘吞吐测试。
+
+**追加收取、核对与正常清理，并闭合整个程序：**
+
+<!-- append: labs/linux/p5-uring/uring.c -->
+```c
     for (unsigned order=0;order<5;++order) { // 每个普通SQE期望一个CQE。
         struct io_uring_cqe *cqe=wait_one(); // 缓冲区仍然在静态数组中存活。
         uint64_t cookie=io_uring_cqe_get_data64(cqe); int result=cqe->res; // 先保存值再释放CQ槽。
@@ -103,14 +151,18 @@ int main(void) { fputs("x86-64 Linux with liburing is required.\n",stderr); retu
 #endif // 完成平台分支。
 ```
 
+本例的 `require` 在检查不符时仍用 perror 打印标签。提交和等待函数的负 rc 已先转换为 errno；但 CQ 的 res 不会自动写 errno，所以“CQ exact result”或“fsync CQ”失败后附带的系统错误文字可能是旧值，甚至为 Success。这里非零退出能证明观察不符，不能据该尾部文字判断请求错误；正常完成记录也在比较通过后才打印，失败项的实际 cookie/res 不一定已保存。这是当前错误诊断的限制，不能把它说成已完整记录了每条意外完成。
+
 <a id="uring-environment"></a>
-## 内核策略可能拒绝建环，失败保持原样
+## 把 Linux 环境、程序结果和观察证据分别留下
 
-liburing是用户库，安装它不保证内核允许io_uring_setup。ENOSYS、EPERM或EACCES返回77并说明不可用，不自动修改sysctl、容器权限或安全策略。缺开发库时脚本给出Debian/Ubuntu liburing-dev与Arch/CachyOS liburing的包名；不会在个人主机擅自安装。
+liburing 是用户库，安装开发库不保证内核允许 `io_uring_setup`。程序已经为内核能力或权限拒绝保留退出 77；运行脚本检查 cc、pkg-config、strace、timeout 和 liburing，缺少时给出 Debian/Ubuntu 的 liburing-dev、Arch/CachyOS 的 liburing 等包名，不自动安装或修改 sysctl、容器权限、安全策略。
 
-run.sh保存内核、编译器、liburing和strace实际版本，用strace观察setup/enter/register。普通read SQE不一定需要io_uring_register，日志里没有register也不表示失败。缺工具、初始化拒绝、等待超时和错误CQ都保留false；只有实际程序和所需观察完成，统一执行器才写verified=true。
+run.sh 用 pkg-config 取得库的编译和链接参数，将内核、编译器、liburing 与 strace 的实际版本写进环境文件，再在三十秒总上限内运行并观察 setup/enter/register。普通 read SQE 不要求注册缓冲，追踪中没有 io_uring_register 并不表示失败。
 
-**新建运行脚本。** pkg-config输出编译和链接参数，实验有三十秒总上限。
+每次先将 result.json 置为 false，防止旧成功留下；缺工具、初始化拒绝、超时或结果不符都不能改成 true。只有程序核对全部预期 CQ 并出现成功标记，脚本才报告 passed，后续统一执行器再依据取回的实际结果写 verified=true。版本文件、CQ 输出和系统调用观察因此都对应本次运行。
+
+**新建 `labs/linux/p5-uring/run.sh`：**
 
 <!-- write: labs/linux/p5-uring/run.sh -->
 ```sh
@@ -147,226 +199,67 @@ grep -q '^\[LINUX_URING_OK\]' artifacts/uring.log # 所有预期CQ都被核对�
 printf '{"passed":true,"phase":"p5-uring","registered_buffers":false}\n' > artifacts/result.json # 普通持久数组不冒充固定注册缓冲。
 ```
 
-**更新阶段映射加入p5-uring。** 仍在个人主机独立目录执行。
+## 让阶段名选择这份实验，保留已有传输和取证流程
 
-<!-- write: scripts/linux_lab.py -->
+原 Linux 执行器已经按阶段选择源码、传到个人主机的独立目录、执行 run.sh，再取回 artifacts。本次只给阶段映射增加 p5-uring，关联刚才写出的 uring.c 与 run.sh；其余传输、超时和失败记录保持。不把编写完本地文件当成已在 Linux 运行。
+
+**更新 `scripts/linux_lab.py`：**
+
+第一块定位旧文本，第二块完整替换；其余实现保留。
+
+<!-- replace: scripts/linux_lab.py -->
+<!-- before -->
 ```python
-"""Run the authorized Linux programs on the user's personal Linux host."""  # 从本机发起个人 Linux 主机上的两份实验
-import argparse  # 命令行解析器把字符串选项转换为带名称的属性。
-import io     # BytesIO 为内存字节提供文件式读写接口。
-import json   # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-import shlex  # 按 Shell 引用规则拆分或引用文本，区别于实际执行。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import tarfile     # 读取或构造 tar 归档，成员路径及类型还需单独检查。
-from tools import ROOT  # 共享 ROOT 指向项目根目录，后续路径不依赖调用位置。
-
-LAB_SOURCES = { # 阶段名到本阶段完整源码元组，新增实验不再嵌套条件表达式。
-    'p1': ('ordinary.c', 'raw_start.S', 'run.sh'), # 普通入口与原始Linux系统调用。
-    'p2': ('memory.c', 'run.sh'), # 匿名映射、驻留与权限。
+    'p3': ('process.c', 'run.sh'), # fork/exec与FD继承。
+    'p4': ('io.c', 'run.sh'), # 向量、缓存和同步替换。
+    'p5-epoll': ('epoll.c', 'run.sh'), # 本机TCP就绪与背压。
+    'p5-threads': ('threads.c', 'run.sh'), # 线程队列、原子发布与futex。
+```
+<!-- after -->
+```python
     'p3': ('process.c', 'run.sh'), # fork/exec与FD继承。
     'p4': ('io.c', 'run.sh'), # 向量、缓存和同步替换。
     'p5-uring': ('uring.c', 'run.sh'), # liburing提交、身份和完成生命周期。
     'p5-epoll': ('epoll.c', 'run.sh'), # 本机TCP就绪与背压。
     'p5-threads': ('threads.c', 'run.sh'), # 线程队列、原子发布与futex。
-}
-parser=argparse.ArgumentParser()  # 主机参数解析器提供--host选项与用法提示。
-parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')  # 个人Linux主机可以显式替换，不涉及公司机器。
-parser.add_argument('--phase', choices=tuple(LAB_SOURCES), default='p1') # 实验来源与远端目录使用同一阶段名。
-args=parser.parse_args()  # 把进程参数转为Namespace，后续通过 args.host 取得目标主机字符串。
-if args.host.startswith('-') or any(c.isspace() for c in args.host):  # 禁止选项形状和空白，避免host被外部工具误解析；生成器逐字符检查空白。
-    raise RuntimeError('Invalid SSH host')  # 无效目标在启动SSH之前拒绝。
-ssh=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=10',args.host]  # 非交互认证，连接最多十秒，最后元素是单个host参数。
-# Relative to SSH's login directory; does not overwrite any other project.
-remote='AiriOS-labs/' + args.phase  # 相对个人主机登录目录的独立实验目录。
-dest=ROOT/'artifacts'/('linux-' + args.phase) # 每阶段独立保存本轮状态。
-dest.mkdir(parents=True, exist_ok=True) # SSH失败也必须有证据目录。
-(dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'not yet verified'},indent=2)+'\n') # 先覆盖旧成功身份。
-connection=subprocess.run(ssh+[f'mkdir -p {shlex.quote(remote)}'],capture_output=True,text=True,timeout=20) # 非交互连接另有总时间上界。
-(dest/'connection.log').write_text(connection.stdout + connection.stderr) # 真实失败输出在复制源码之前也保留。
-if connection.returncode: # 未连接就不复制也不声称程序运行。
-    (dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'connection failed','exit':connection.returncode},indent=2)+'\n') # 明确本轮未验证。
-    raise RuntimeError(f'Linux SSH failed ({connection.returncode}); see {dest}/connection.log') # 路径和失败状态交回统一入口。  # 本地参数列表启动SSH，远端命令文本中的目录由quote保护。
-names = LAB_SOURCES[args.phase] # argparse已按字典键限制阶段，取得对应文件名元组。
-sources=[ROOT/'labs/linux'/args.phase/name for name in names]  # 列表推导按所选阶段名称构成Path对象。
-subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp安静且非交互传输，连接上限同SSH。
-                *[str(p) for p in sources],f'{args.host}:{remote}/'],check=True,timeout=30)  # 列表内*展开本阶段路径字符串，最后一项是远端目标。
-execution=subprocess.run(ssh+[f'cd {shlex.quote(remote)} && sh run.sh'],timeout=120)  # 远端先切实验目录，再执行shell；暂不check，失败也先下载证据。
-data=subprocess.check_output(ssh+[f'cd {shlex.quote(remote)} && tar -cf - artifacts'],timeout=30)  # tar从标准输出交回归档bytes，-f -表示不写远端归档文件。
-dest.mkdir(parents=True,exist_ok=True)  # 确保证据父目录存在。
-with tarfile.open(fileobj=io.BytesIO(data)) as tar:  # 把内存归档作为文件交给tarfile，with结束关闭归档。
-    tar.extractall(dest,filter='data')  # data过滤限制危险成员，解包到本轮证据目录。
-if execution.returncode:  # 非零远端状态意味着实验失败，即使tar传输成功。
-    (dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'program or observation failed','exit':execution.returncode},indent=2)+'\n') # 例如缺liburing或运行超时不能保留旧成功。
-    raise RuntimeError(f'Linux experiment failed; evidence downloaded to {dest}')  # 原始证据已经带回，再报告失败位置。
-result=json.loads((dest/'artifacts/result.json').read_text())  # 实际远端程序写出的JSON恢复成字典。
-if result.get('passed') is not True:  # get缺键返回None，只有布尔True才接受。
-    raise RuntimeError('Remote validation failed')  # 远端记录不满足成功合同。
-(dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':True,'status':'program and requested observations completed'},indent=2)+'\n')  # 记录本次实际host和目录，不把另一主机记录混用。
-print(f'Remote evidence downloaded: {dest}')  # 显示本轮证据可查看位置。
 ```
 
-**更新统一入口。** 新阶段不改变guest的编译依赖。
+统一入口还要接受 p5-uring 作为 --phase 取值，再传给同一个 Linux 执行器。它不增加 guest 编译依赖，也不改变 K32 自制接口。
 
-<!-- write: scripts/manage.py -->
+**更新 `scripts/manage.py`：**
+
+第一块定位旧文本，第二块完整替换；其余实现保留。
+
+<!-- replace: scripts/manage.py -->
+<!-- before -->
 ```python
-import argparse  # 命令行解析器把字符串选项转换为带名称的属性。
-import json      # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-import shlex     # 按 Shell 引用规则拆分或引用文本，区别于实际执行。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import sys  # 取得当前解释器路径、入口参数及标准错误流。
-from tools import ROOT, tool, make_command  # 复用路径、工具查找与构建参数，不另建工具选择规则。
-from deps import prepare  # 复用外部依赖下载与校验，统一入口先调用它。
-from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
-from storage_test import check_storage_restart # 跨启动恢复与真实QMP节流下的CQ等待。
-from console_test import check_console  # 复用真实键盘和UART输入验证。
-
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
-def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
-    subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
-def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。
-    # GNU Make dry-run is the single source of compiler flags, including headers.
-    command=make_command('normal','kernel')  # 局部 command 是 Make 参数列表，不是导入的QEMU command函数。
-    command.insert(1,'-Bn')  # 在可执行路径之后插入 -B强制列规则、-n只打印的选项。
-    lines=subprocess.check_output(command,cwd=ROOT,text=True).splitlines()  # 读取命令文本并按行拆分，不执行打印出的编译器命令。
-    entries=[]  # 保存编译数据库条目，每项对应一份源文件及参数。
-    for line in lines:  # 逐条检查 Make 打印的命令。
-        if ' -c ' not in line or ' -o ' not in line: continue  # 过滤目录创建与链接命令，只考虑单文件编译。
-        tokens=shlex.split(line)  # 按shell引号解析参数边界，列表值随后直接保存。
-        if '-c' not in tokens or '-o' not in tokens: continue  # 分词后再确认编译选项，排除仅字符串碰巧匹配的行。
-        source=tokens[tokens.index('-c')+1]  # index 找到-c位置，其后一个元素是被编译的源文件路径。
-        entries.append({'directory':str(ROOT),'file':str(ROOT/source),'arguments':tokens})  # 保存工作目录、绝对源路径和完整参数列表供 clangd 消费。
-    target=ROOT/'build/normal/compile_commands.json'  # 数据库放在普通配置目录，.clangd 从此处读取。
-    target.parent.mkdir(parents=True,exist_ok=True)   # 数据库父目录缺失时创建，已有目录保持。
-    target.write_text(json.dumps(entries,indent=2)+'\n')  # 列表编码为JSON数组，输出本次真实构建参数。
-
-def build(profile):  # 给指定配置调用同一Make规则，普通配置额外更新编辑器数据库。
-    run(make_command(profile))  # 组装配置及工具覆盖，执行完整内核与镜像构建。
-    if profile=='normal':  # 测试配置不替换日常编辑参数。
-        compilation_database()  # 普通配置才导出clangd数据库。
-def inspect_elf(profile='normal'):  # 核对独立内核目标，不接受宿主解释器、动态依赖或未解析符号。
-    binary=ROOT/'build'/profile/'airios.elf'  # 定位本次配置的ELF，避免检查另一目录的旧产物。
-    readelf=tool('llvm-readelf','llvm')  # 按既定规则找到 LLVM ELF 检查器。
-    report=subprocess.check_output([readelf,'-h','-l','-d','-s',str(binary)],text=True)  # 合并ELF头、程序段、动态信息和符号表的文本报告。
-    nm=subprocess.check_output([tool('llvm-nm','llvm'),'-u',str(binary)],text=True)  # -u 只列未定义符号，独立内核应没有内容。
-    if nm.strip() or 'INTERP' in report or '(NEEDED)' in report:  # 非空未定义项、解释器段或动态依赖任一存在就拒绝。
-        raise RuntimeError('Kernel is not a fully resolved freestanding executable')  # 报告不满足完全解析的独立目标约定。
-    if 'X86-64' not in report and 'x86-64' not in report:  # 兼顾工具文字大小写，必须出现x86-64机器类型。
-        raise RuntimeError('Wrong ELF target')  # 错误机器目标不能作为此次内核成功结果。
-    if 'EXEC (Executable file)' not in report:  # 要求固定地址静态ET_EXEC，与链接脚本装载方式一致。
-        raise RuntimeError('Expected a static ET_EXEC ELF')  # PIE或其他ELF种类不满足目前启动路径。
-    (ROOT/'artifacts').mkdir(exist_ok=True)  # 建立检查报告目录。
-    (ROOT/'artifacts/kernel-elf.txt').write_text(report)  # 保存实际ELF检查输出，便于后续调试查看。
-    print('PASS ELF: x86-64 ET_EXEC, no interpreter/dependencies/undefined symbols')  # 只在机器、类型、依赖和符号全部符合后打印通过。
-
-def doctor():  # 查工具与版本，再实际准备和构建内核以验证环境。
-    record={}  # 字典以工具名称为键，值保存路径和首行版本。
-    for name,formula in [('clang','llvm'),('ld.lld','lld'),('qemu-system-x86_64','qemu'),  # 每项二元组给可执行名称与对应软件包标识。
-                         ('xorriso','xorriso'),('gmake','make'),('llvm-readelf','llvm')]:  # 继续列镜像制作、GNU Make和ELF检查器；循环解包到name/formula。
-        executable=make_command()[0] if name=='gmake' else tool(name,formula)  # GNU Make沿用gmake再make的选择，其余工具按既有规则查找。
-        flag='-version' if name=='xorriso' else '--version'  # xorriso 使用单横线，其余工具使用双横线版本参数。
-        result=subprocess.run([executable,flag],capture_output=True,text=True)  # 启动版本命令，分别收集标准输出与错误文本。
-        version=(result.stdout+result.stderr).splitlines()[0]  # 版本可能写在任一流，取合并后的第一行。
-        record[name]={'path':executable,'version':version}     # 工具键映射到实际路径和版本，不只有安装包名称。
-        print(f'OK {name}: {version}')  # 显示本轮查到的工具身份和版本。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    run(make_command(target='kernel'))  # 通过真实内核编译和链接验证环境，不仅看工具是否存在。
-    compilation_database()  # 使用同一规则生成编辑器参数。
-    inspect_elf()  # 检查刚构建出的普通配置ELF。
-    (ROOT/'artifacts/toolchain.json').write_text(json.dumps(record,indent=2)+'\n')  # 保存本次实际工具路径和版本。
-def main():  # 解析统一入口动作，并把它交给先前实现的脚本。
-    if len(sys.argv)>1 and sys.argv[1]=='learn':  # 先检查有动作参数，再识别采用独立子解析器的learn。
-        from learning import main as learn  # 只进入learn时导入后续提供的学习模块，别名避免与当前main混淆。
-        learn(sys.argv[2:])  # 切片丢掉程序名和learn，把余下参数交给子入口。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    parser=argparse.ArgumentParser(description='AiriOS build and learning tools')  # 建立动作解析器，不合法参数由argparse给出用法。
-    parser.add_argument('action',choices=['doctor','build','run','test','debug','kernel-debug','linux-lab','clean','ui-preview','ui-test','docs-check','snapshots'])  # 位置参数限定动作集合，拼错动作不能落到默认运行QEMU。
-    parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
+    parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
+    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
+    parser.add_argument('--phase',choices=('p1','p2','p3','p4','p5-threads','p5-epoll'),default='p1') # Linux阶段显式选择，默认保持P1。
+    parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
+    parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
+```
+<!-- after -->
+```python
     parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
     parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
     parser.add_argument('--phase',choices=('p1','p2','p3','p4','p5-threads','p5-epoll','p5-uring'),default='p1') # Linux阶段显式选择，默认保持P1。
     parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
     parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
-    args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
-    if args.action=='snapshots':  # 只有导出动作需要读取Git教学提交链。
-        from snapshots import generate  # 局部导入后续提供的快照模块。
-        generate()  # 核对固定main提交链和旧目录保护后导出阶段源码。
-        return      # 当前动作完成，不继续后面的构建或分派。
-    if args.action=='docs-check':  # 只检查重建与导航时无需启动QEMU。
-        from docs_check import check_docs  # 只有明确来源检查才读取全部课程。
-        check_docs()  # 核对正文重建与本地导航，不阻塞默认 test。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    if args.graphics:  # G24已提供纯标准库资产检查，运行图形不依赖G26的截图工具。
-        from graphics_assets import verify_fonts  # 显式选择后才读取图形目录。
-        verify_fonts()  # 不导入Pillow或Cocoa。
-    if args.action in ('ui-preview', 'ui-test') or (args.action == 'test' and args.graphics):  # 完整图形回归在G26后使用。
-        from ui_preview import preview, check_frontend  # 主线不会导入这份可选工具。
-    if args.action=='ui-preview':  # 主机窗口无需内核启动依赖。
-        preview(args.app,args.state)  # 打开指定应用和服务状态。
-        return  # 此动作已完成。
-    if args.action=='ui-test':  # 主机行为与图像观察采用前章接口。
-        check_frontend()  # 运行共享C测试与平台可用快照。
-        return  # 此动作已完成。
-    if args.action=='clean':  # 清理不需要再构建内核。
-        run(make_command(target='clean'))  # 调用Make既有删除规则。
-        return  # 清理结束。
-    if args.action=='linux-lab':  # Linux对照程序由独立脚本传到个人主机运行。
-        run([sys.executable,str(ROOT/'scripts/linux_lab.py'),'--host',args.host,'--phase',args.phase])  # 当前解释器执行个人主机实验。
-        return  # 远程实验结束后不启动另一台虚拟机。
-    if args.action=='doctor':  # doctor自己按需准备和构建。
-        doctor()  # 查工具、构建、生成编辑器参数并检查ELF。
-        return    # 环境检查结束。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    if args.graphics:  # 图形和串口使用不同产物目录，不复用旧目标。
-        args.profile = 'desktop-' + args.profile  # 如 normal 变为 desktop-normal。
-    if args.action=='kernel-debug':  # 内核GDB观察需要先得到普通配置带符号ELF。
-        build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
-        run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
-        return  # 调试记录完成后结束本动作。
-    if args.action=='test':  # 完整验证串联主机算法、可选前端、九种启动和三条设备输入。
-        run(make_command(target='host-test'))  # 编译同一纯C实现并运行带ASan/UBSan的主机边界检查。
-        if args.graphics:  # 普通 test 不导入或验证前端。
-            check_frontend(screenshots=False)  # 图形模型检查仍有自己的一组断言。
-        results=[]  # 列表依次保存各配置的实际启动结果。
-        profiles = [('desktop-' + p) if args.graphics else p for p in PROFILES]  # 呈现方式和故障场景正交。
-        for profile in profiles:  # 按固定九种配置独立编译与启动。
-            build(profile)  # 生成对应配置的ELF和镜像，产物目录彼此隔离。
-            if profile.endswith('normal'):  # 普通目标额外检查ELF结构。
-                inspect_elf(profile)  # 保存机器、类型、依赖与符号报告。
-            results.append(check(profile))  # 等待该配置完成标记并保存结果，任一失败异常中止。
-        (ROOT/'artifacts'/('desktop-boot-tests.json' if args.graphics else 'boot-tests.json')).write_text(json.dumps(results,indent=2)+'\n')  # 九种启动结果编码为JSON数组。
-        prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
-        console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
-        (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
-        check_storage_restart('desktop-normal' if args.graphics else 'normal') # 正式日志双启动恢复，另以第三个guest验证慢设备CQ等待。
-    else:  # 普通build/run/debug共用指定配置构建路径。
-        build(args.profile)  # build/run/debug先构建调用者选择的配置。
-        if args.action!='build':  # 单独构建到此结束，run和debug继续启动虚拟机。
-            work=ROOT/'artifacts'/('interactive-'+args.profile)  # 交互日志按配置分开保存。
-            if args.action=='debug':  # debug把CPU停在复位并打开回环GDB端点。
-                print('QEMU waits at reset. Remote GDB: target remote localhost:1234\n'  # 告诉调试者当前CPU尚未前进及连接地址。
-                      'Then hbreak _start; continue. See dev-log/linux/01-entry.md.',flush=True)  # 提示入口硬件断点，flush保证运行虚拟机前已打印。
-            if args.graphics:  # 图形交互仍将UART写入本轮文件。
-                print(f'Serial log: {work/"serial.log"}',flush=True)  # 显示本次实际串口日志路径，立即刷新输出。
-            cmd = command(args.profile,work,gui=args.graphics,debug=args.action=='debug')  # 先形成具体 QEMU 参数。
-            if not args.graphics:  # 串口交互直接连接当前主机终端。
-                cmd[cmd.index('-serial')+1] = 'mon:stdio'  # QEMU 用 Ctrl-A X 退出，Ctrl-A C 切监视器。
-                print('Serial console: this terminal. Exit QEMU with Ctrl-A X.', flush=True)  # 字节不再写入文件。
-            run(cmd)  # 启动所选串口或图形QEMU，debug动作才带-S和GDB。
-
-if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义接口。
-    try:  # 入口错误统一转成明确的失败状态。
-        main()  # 执行解析和分派，异常留给下面处理。
-    except (RuntimeError,subprocess.CalledProcessError,AssertionError) as error:  # 三类异常都保留具体原因并转成非零退出。
-        print(f'ERROR: {error}',file=sys.stderr)  # 错误文字送标准错误，不混入正常结果流。
-        sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
 ```
+
+## 运行并区分预期结果与实际验证状态
+
+下面命令选择个人 Linux 主机的 p5-uring 独立目录，编译并运行真正的 Linux 分支，再取回版本、提交数量和 CQ 记录：
 
 ```sh
 ./airios linux-lab --phase p5-uring # 编译实际Linux分支并取回SQ/CQ、错误与版本记录。
 ```
 
-2026-10-16本轮SSH仍返回255，Linux分支、liburing依赖、内核支持和CQ运行均未验证。Mac仅编译拒绝分支，执行77，脚本语法通过。真实失败保存在artifacts/linux-p5-uring/remote.json与connection.log。不能把正文列出的预期结果当成本轮实际输出。
+可用环境中应收到 cookie100–104 对应的 `512、512、512、6、−EBADF`，再收到 cookie900 的同步成功 0。URING_SUBMIT 中的数量是提交进度，URING_CQ 中的 result 是各操作结果；最终标记只在这批结果和内容均符合时出现。若连接、依赖、策略或等待失败，沿保存的阶段状态定位，不把预期表格当作已有输出。
 
-回看BOSS批量读取时，按请求身份关联目标页、结果长度和错误；检查部分提交后哪些缓冲区已经归内核使用、哪些仍待提交。退出、超时或取消也不自动说明内核再不会访问缓冲区，回收必须依据具体API的完成语义。AiriOS用请求私有副本避免退出后DMA踩用户页，代价是复制与固定容量，这与Linux固定缓冲注册的所有权不同。
+2026-10-16 的既有记录中 SSH 返回 255，Linux 分支、liburing 依赖、内核支持和 CQ 运行均未验证。Mac 只编译了拒绝分支、执行返回 77，并通过脚本语法检查；失败记录保存在 `artifacts/linux-p5-uring/remote.json` 和 `connection.log`。本次文字修订没有重新执行远端实验，不更新这份运行结论。
 
-依据：[liburing提交手册](https://github.com/axboe/liburing/blob/master/man/io_uring_submit.3)、[有界CQ等待](https://github.com/axboe/liburing/blob/master/man/io_uring_wait_cqe_timeout.3)与[Linux io_uring](https://man7.org/linux/man-pages/man7/io_uring.7.html)。库版本以运行环境文件为准，引用master用于接口说明，不声称已锁定并实际运行该源码版本。
+回到 BOSS 的批量读取，关联目标页、长度与错误依靠每条请求自己的身份；部分提交以后还要辨认哪些已经交出、哪些仍未提交。超时、退出或取消不能单独证明内核再不会访问缓冲，回收依据具体接口的完成语义。AiriOS 请求副本将退出后的设备目标与用户页分开，代价是复制和固定容量；Linux 本例则由应用保留普通数组，不能混称固定缓冲注册。
+
+接口依据：[liburing 提交手册](https://github.com/axboe/liburing/blob/master/man/io_uring_submit.3)、[有界 CQ 等待](https://github.com/axboe/liburing/blob/master/man/io_uring_wait_cqe_timeout.3)与[Linux io_uring](https://man7.org/linux/man-pages/man7/io_uring.7.html)。库版本以实际环境文件为准，master 链接用于接口说明，不代表已锁定并运行该版本。

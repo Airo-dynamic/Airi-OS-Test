@@ -26,3 +26,8 @@ source_reading:
   at: ../../../dev-log/01-tools.md#code-scripts-tools-py-2
   establishes: Path 的 / 拼出候选路径；os.environ 按变量名提供主机环境字符串，候选元组列出两个 Homebrew 安装前缀；显式环境覆盖无效时失败，不自动改选其他工具
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/01-tools.md#tool-paths
+  establishes: 从主机观察与内核两种产物说明 CC/LD/HOST_CC 的消费关系；工具选择、参数组成与 Make 执行分别成立。保留覆盖优先级、符号链接与错误条件。

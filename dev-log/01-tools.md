@@ -1,16 +1,20 @@
 # 01 · 让构建使用正确的一份工具
 
-版本命令已经能运行，但“找到一个叫 clang 的程序”还不能确定它适合内核构建。macOS 自带的 Clang 和 Homebrew 安装的 LLVM 可以同时存在。Homebrew 是安装工具的软件包管理器，LLVM 是编译工具集合，Clang 负责 C 源码编译，LLD 负责链接。内核需要生成供虚拟 x86-64 CPU 执行的程序，而不是生成一个普通 Mac 应用。
+上一章已能找到一个程序并运行版本命令。接下来要让编译器处理我们写的 C 文件，但同一份工程会产生两类程序：主机观察程序直接在当前 Mac 或 Linux 上运行，内核则交给 QEMU 中的 x86-64 CPU。即使源码相同，目标环境也不同，不能把生成 Mac 应用的默认选项直接用于内核。
 
-这种在当前主机运行编译器、为另一种机器或运行环境生成代码的方式称为交叉编译。后面会明确传入目标架构；现在先把需要使用的编译器和链接器选出来。主机观察程序仍由 HOST_CC 构建，两种产物分别存放。
+编译器本身仍运行在主机上，为另一种机器或环境生成代码，这称为交叉编译。LLVM 是一组编译工具，Clang 把 C 变成目标代码，LLD 将目标文件连成可装载的程序。macOS 系统 Clang 和 Homebrew 安装的 LLVM 可以同时存在；Homebrew 是主机的软件包管理器，本章用它的安装位置优先选择内核工具，目标架构与具体选项稍后进入构建规则。
 
-## 先确定源码与工具的位置
+两类产物需要把工具角色分开保存：CC 是内核 C 编译器，LD 是内核链接器，HOST_CC 构建直接在主机运行的观察程序。Make 将根据所选目标消费这些变量；当前先组成它将收到的路径和参数，尚不编译内核。
+
+## 先让脚本定位到自己的工程
 
 <a id="tool-paths"></a>
 
-新模块 tools.py 保存项目根目录和查找函数。绝对路径从 `/` 起算，例如 `/Users/airi/AiriOS-work`；相对路径则从当前工作目录起算。终端在哪个目录调用脚本可以变化，源码根目录却应继续指向这份工程。
+查找工具以后还要读取锁文件、写 build 目录，因而脚本需要知道工程在哪里。终端的当前工作目录可以改变，模块自己的源码位置却仍属于这份工程。`tools.py` 将从后者建立 ROOT，其他脚本再复用它。
 
-`__file__` 是 Python 为当前模块提供的源码文件名。`Path(__file__)` 将它包装成路径对象，`resolve()` 取得实际位置，`parents[0]` 是 scripts，`parents[1]` 是 AiriOS-work。ROOT 因而不依赖启动脚本时的工作目录。Path 的 `/` 被库定义为路径拼接：`Path("/opt/homebrew") / "opt" / "llvm" / "bin" / "clang"` 得到 `/opt/homebrew/opt/llvm/bin/clang`，这里没有做除法。
+绝对路径从 `/` 起算，如 `/Users/airi/AiriOS-work`；相对路径从当前工作目录起算。`__file__` 是 Python 给当前模块的源码文件名，`Path(__file__)` 将它包装为路径对象，`resolve()` 找到实际位置。若文件是工程下的 `scripts/tools.py`，`parents[0]` 就是 scripts，`parents[1]` 才是工程根目录。
+
+Path 还负责组合后续候选位置：`Path("/opt/homebrew") / "opt" / "llvm" / "bin" / "clang"` 得到 `/opt/homebrew/opt/llvm/bin/clang`。这里 `/` 是路径拼接操作，不执行文件，也不做数值除法。
 
 **新建 `scripts/tools.py`：**
 
@@ -27,17 +31,19 @@ import shutil  # 复用标准库的 PATH 查找
 ROOT = Path(__file__).resolve().parents[1]  # 当前文件在 scripts 中；第二层父目录就是工程根目录
 ```
 
-以 Clang 为例，命令名是 `clang`，Homebrew 配方名是 `llvm`。查找函数分别接收这两个名字，按以下次序选择可执行文件：
+## 同名工具存在多份时，明确采用哪一份
 
-1. 用户设置了对应 AIRI 环境变量时，采用其中的路径；路径无效则立即报错。
-2. 当前平台为 macOS 且给出了配方时，依次检查 `/opt/homebrew` 与 `/usr/local` 下的配方目录。
-3. 前两项均未选中时，使用 PATH 搜索。
+现在选择 Clang。启动文件名是 clang，Homebrew 安装这一组文件的配方却叫 llvm，因此调用为 `tool("clang", "llvm")`。两个参数共同形成上面的候选路径；没有配方时，默认的 `formula=None` 就跳过这一步。
 
-命令名是启动时要找的文件名，配方名是 Homebrew 安装一组文件时使用的名称。安装 llvm 得到 clang，并不意味着应该启动名为 llvm 的文件。函数因此接收 `tool("clang", "llvm")`，分别用它们组成候选路径。
+查找顺序决定了两份工具同时存在时的结果：
 
-显式覆盖是一次用户选择，例如环境变量 AIRI_CLANG 保存 `/some/llvm/bin/clang`。函数若发现这个变量存在，就必须验证这条路径；否则设置写错时悄悄退回另一份编译器，日志显示成功却没有使用指定工具。
+1. 对应 AIRI 环境变量已经设置时，只验证并使用这条路径；无效就报错。
+2. macOS 且给出了配方时，依次检查 `/opt/homebrew`、`/usr/local` 下的配方目录。
+3. 尚未选中才交给 PATH 搜索。
 
-`formula=None` 表示没有 Homebrew 配方。环境变量名由命令名变换而来，例如 `ld.lld` 变成 `AIRI_LD_LLD`。`os.environ` 是保存“变量名 → 字符串值”的映射，`in` 检查键是否存在；空字符串也算一次显式设置，随后会被拒绝。`is_file()` 与 `os.access(..., os.X_OK)` 分别检查文件和执行权限，错误消息中的 `!r` 保留值的引号，便于看清空值。
+这扩展了上一章仅按 PATH 查找的策略。比如 PATH 先出现系统 Clang，Homebrew 中另有可执行的 Clang，本章仍优先采用后者；设置 `AIRI_CLANG=/some/llvm/bin/clang` 后，则连 Homebrew 也不再尝试。Linux 跳过 Homebrew 分支。
+
+`os.environ` 是“环境变量名 → 字符串值”的映射，`in` 判断键是否存在。变量名由命令名转换，`ld.lld` 对应 `AIRI_LD_LLD`。空字符串也表示设置过变量，所以必须拒绝，而不能悄悄改选另一份工具。候选路径用 `is_file()` 与 `os.access(..., os.X_OK)` 分别检查文件和执行权限；错误中的 `!r` 保留引号，让空值也能看清。
 
 **追加到 `scripts/tools.py` 末尾：**
 
@@ -67,13 +73,13 @@ def tool(name, formula=None):  # name 是命令名；formula 默认 None，表�
                        'Firmware must also match config/deps.lock.json.')  # 工具安装之外，固件还须匹配项目锁
 ```
 
-现在同时安装系统 Clang 和 Homebrew Clang 时，会选 Homebrew 那份；设置 `AIRI_CLANG` 后则采用显式路径。这是对上一章仅搜索 PATH 的策略扩展。Linux 跳过 Homebrew 检查，直接使用显式覆盖或 PATH；缺少工具时，错误消息给出 macOS、Debian/Ubuntu、Arch/CachyOS 的安装包名。
+查找成功后拿到的是启动路径，不是已经运行的进程。这里保留工具的符号链接名称：例如 ld.lld 可能指向通用 lld，而启动时使用的名称又参与链接模式选择。ROOT 要追溯源码真实位置，工具路径却只补成绝对路径；两处对路径的处理服务不同目的。缺少工具时，异常同时给出 macOS、Debian/Ubuntu 与 Arch/CachyOS 的安装包名。
 
-符号链接是一个指向另一条文件路径的文件系统对象。这里 `ld.lld` 可能指向 `lld`，但启动名称还参与链接模式选择。源文件位置可以跟随链接求实际目录；工具执行路径则保留 ld.lld 这个名字，只补成绝对路径。两个路径看似指向同一文件，交给程序启动时仍可能有不同含义。
+## 把三种角色交给同一次 Make 调用
 
-## 将工具路径组成构建参数
+工具分别选好以后，要把它们带到构建执行器。GNU Make 读取 Makefile 中的目标和规则：目标说明这次要形成哪种产物，规则中的变量决定采用哪些工具。调用 `make_command("normal", "kernel")`，意味着选择 normal 配置下的 kernel 目标；随后规则用 CC 编译内核、用 LD 链接，主机观察规则则用 HOST_CC。一个参数列表可以提供三者，不表示三者都在每个目标中执行。
 
-Make 调用需要同时得到编译器、链接器、主机编译器和构建目标。`make_command` 先选 GNU Make，再把各项放进一张参数列表。若明确设置了 `AIRI_GMAKE`，路径错误会停止；否则先尝试 `gmake`，找不到再尝试 `make`。
+`make_command` 先选择 Make 自己。显式设置了 AIRI_GMAKE 时，错误路径立即失败；没有设置才尝试 gmake，找不到再试 make。后者也是 Linux 常见的 GNU Make 命令名。随后把各条工具路径、变量赋值和目标组成与上一章相同的 argv 列表。
 
 **追加到 `scripts/tools.py` 末尾：**
 
@@ -93,11 +99,9 @@ def make_command(profile='normal', target='all'):  # 两个默认参数分别选
             f'LD={tool("ld.lld", "lld")}', f'HOST_CC={tool("cc")}', target]  # argv 后半：链接器、主机编译器和目标；尚未执行
 ```
 
-调用 `make_command("normal", "kernel")` 得到一个以 Make 文件路径开头的列表。`-j4` 允许最多四项构建任务并行，`PROFILE=normal` 和 `CC=...` 等元素是交给 Make 的变量赋值，末项 `kernel` 是目标。返回这张列表时尚未启动 Make，后面的脚本会用 `subprocess.run` 执行它。
+返回列表的第一项是 Make 可执行文件路径，`-j4` 允许最多四项构建任务并行。`PROFILE=normal`、`CC=/opt/homebrew/opt/llvm/bin/clang` 等各自占一个元素，是交给 Make 的变量赋值，末项 kernel 是目标名。调用方把列表交给 subprocess.run 等进程接口后，Make 才运行并按规则调用编译器；生成这张列表本身尚未启动 Make，也尚未生成任何产物。
 
-例如本机找到 gmake、clang、ld.lld 和 cc 后，列表中的 `CC=/opt/homebrew/opt/llvm/bin/clang` 是一个完整元素。Make 读取 CC 变量决定调用哪个编译器，kernel 则选择后面将定义的构建目标。`make_command` 当前只返回这些数据；返回参数列表与执行构建仍是两个动作。
-
-命令通过 `PYTHONPATH=scripts` 为这一次 Python 进程增加模块搜索目录，以便 `from tools import ...` 找到文件。这里的 PYTHONPATH 找 Python 模块，PATH 找可执行程序。
+下面先打印这份调用数据，再给 Clang 设置一个空路径观察拒绝分支。`PYTHONPATH=scripts` 只为这一次 Python 进程增加模块搜索目录，使 `from tools import ...` 找到刚写好的模块；PATH 搜索可执行程序，两者不能互换。Shell 的 heredoc 把两条 PY 标记间的完整程序交给 Python，末条 if 则检查失败退出码。
 
 **在学习目录根目录运行：**
 
@@ -111,6 +115,6 @@ PY
 if AIRI_CLANG='' PYTHONPATH=scripts python3 -c 'from tools import tool; tool("clang", "llvm")'; then exit 1; fi  # 显式空路径必须失败；若意外返回成功则以非零中止
 ```
 
-第一段打印主机编译器路径和内核构建参数，构建本身尚未发生。第二段设置 `AIRI_CLANG=''`，查找函数应指出它没有提供有效可执行文件，并停止在调用 Make 之前。
+第一段应显示实际找到的主机编译器路径与内核构建参数；这证明工具选择和 argv 组成已经完成，仍未执行构建。第二段的 `AIRI_CLANG=''` 应报告无效可执行路径，停止在调用 Make 之前；如果它意外成功，shell 的 then 才以 1 中止这组观察。
 
-macOS 缺依赖时执行 `brew install llvm lld qemu xorriso mtools make`。安装后重跑第一段，参数列表会显示实际采用的路径。编译工具已经选定，装载内核还需要固定版本的引导器和虚拟固件。
+macOS 缺少依赖时用 `brew install llvm lld qemu xorriso mtools make` 安装，再运行同一段观察。下一步将准备编译之外的输入：CPU 启动时先执行的固件、装入内核的引导程序，以及双方共享的协议声明。

@@ -24,3 +24,8 @@ not_assumed:
 limits:
 - 本轮SSH255，Linux运行和GDB停点未验证
 - 只记录已解释，不记录读者掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/linux/02-memory.md#linux-vma-rss
+  establishes: 同一 64MiB 范围历经保留、逐页触碰、首页只读、孩子故障、解除。补明 mprotect 拆 VMA 后快照范围变小的含义，保留 RSS/缺页统计边界与远端未验证。

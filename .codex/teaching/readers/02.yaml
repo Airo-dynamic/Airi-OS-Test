@@ -43,3 +43,8 @@ source_reading:
   at: ../../../dev-log/02-dependencies.md#code-scripts-deps-py-3
   establishes: curl 先将材料写入临时路径，重新读取其字节核对摘要；匹配后 replace 才把这份文件放入正式缓存
   status: 本版就地解释；不推断读者已掌握
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/02-dependencies.md#boot-materials
+  establishes: 锁文件记录经字典访问成为归档、展开目标与固件输入；同一个 BOOTX64.EFI 路径贯穿缓存判定和解包，with 结束仅关闭归档句柄。

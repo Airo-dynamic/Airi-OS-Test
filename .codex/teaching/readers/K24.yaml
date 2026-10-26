@@ -24,3 +24,8 @@ not_assumed:
 limits:
 - RAM文件重启丢失，平坦名字和固定容量
 - 同步副本不保留用户buffer，不代表异步缓冲生命周期已实现
+
+full_prose_review:
+  date: 2026-10-24
+  at: ../../../dev-log/core/24-files.md#fd-three-objects
+  establishes: 以 abcdef 的共享 offset 和 /notes 失败 truncate 解释三层对象，读取先保证用户可接收，再推进偏移；FD 引用转移与页所有权保持区分。
