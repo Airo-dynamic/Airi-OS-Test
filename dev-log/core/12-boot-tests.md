@@ -116,6 +116,14 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
     expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P1_READY]'  # 缺内存响应要看具体 PANIC，其他配置要看 READY。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
+```
+
+以本章 normal 调用为例，work 已定位 artifacts/boot-normal，旧结果和串口文件已删除，cmd 选择 build/normal/airios.iso；expected 为 READY。下面才启动这一实例。每次读取先取得完整行，遇到 expected 后再核对该配置的其他条件，最后形成结果；未满足条件时不能写入成功汇总。
+
+**继续追加启动等待与 finally，闭合 check：**
+
+<!-- append: scripts/boot.py -->
+```python
     with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
         process=subprocess.Popen(cmd,stdout=errors,stderr=errors)  # 启动后立即取得进程句柄，轮询 guest 标记而非等待进程退出。
         try:  # 受保护区域失败也必须进入后面的资源回收。
@@ -127,7 +135,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
                     else:  # 按当前profile的另一条完整验证路径处理。
                         assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
-                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。。
+                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。
                         assert '[MEMORY_SUMMARY]' in text  # 完成之前应已记录实际内存总计。
                         if case=='edit-experiment':  # 修改实验额外核对替换后的文字。
                             assert 'I changed the output and rebooted' in text  # 确认运行的是实验配置的输出行为。
@@ -198,6 +206,14 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
         cmd[cmd.index('-serial')+1]=f'unix:{uart},server=on,wait=off'  # 找到-serial参数后替换其值，把原文件输出改成设备socket。
         cmd+=['-S']  # 先暂停CPU，UART接收连接建好后再执行，以免丢早期输出。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
+```
+
+输入观察也已取得自己的路径与参数。UART 分支改成设备 socket 并加 -S，PS/2 分支继续用文件收串口；两者都尚未启动进程。下面用同一个 process 管住这次运行，并在 UART 接好后才请求 cont。
+
+**继续追加进程启动与 UART 连接准备；try 主体后面继续：**
+
+<!-- append: scripts/console_test.py -->
+```python
     with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
         process=subprocess.Popen(cmd,stdout=errors,stderr=errors)  # 启动后立即取得进程句柄，轮询 guest 标记而非等待进程退出。
         try:  # 受保护区域失败也必须进入后面的资源回收。
@@ -211,6 +227,14 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                 wire.connect(str(uart))  # 接收连接在CPU继续之前建好。
                 wire.setblocking(False)  # 暂无字节时立即抛BlockingIOError。
                 qmp_execute(qmp,'cont')  # 接收端准备好后通过控制连接让虚拟CPU继续。
+```
+
+现在这一实例已经在运行。UART 时 wire 指向已连接的非阻塞 socket，received 从空 bytearray 开始；PS/2 时 wire 为 None，QEMU 自己写 serial.log。output 在两种情况下都返回累计文本，供同一等待器取新的尾部。它是嵌套函数，读取当前 check_console 调用里的这些对象，下一次调用会有另一组对象。
+
+**继续追加累计收取与完整记录等待：**
+
+<!-- append: scripts/console_test.py -->
+```python
             def output():  # 取得同一次guest的累计串口文本，UART字节同时保存文件。
                 if wire:  # 有UART连接时从该连接读取；否则读取QEMU写出的日志文件。
                     while True:  # 尽量取出当前已有UART字节，无更多数据或连接结束时停止。
@@ -241,6 +265,14 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                         raise RuntimeError('Guest exited during console test')  # 报告真实guest生命周期失败。
                     time.sleep(.05)  # 暂停50毫秒给设备或日志处理时间，再重复本次检查。
                 raise RuntimeError(f'Console timeout waiting for {marker}; see {serial}')  # 明确给出缺少的标记和已有日志路径。
+```
+
+wait 已能在 after 之后找完整记录。先用默认 after=0 等本轮 READY，才允许键输入。key 把名字转为 QMP 键事件，update 只形成期望文字，capture 则在图形配置下读取已完成画面；这些助手都操作当前 qmp 与 process。
+
+**继续追加就绪等待和输入助手；后面仍在同一个 try 中：**
+
+<!-- append: scripts/console_test.py -->
+```python
             wait('[AIRI_P1_READY]',timeout=35)  # 输入前先等内核初始化与首帧结束，最多35秒。
             def key(*codes):  # 形参*把多个键名收集成元组，可同时发送ctrl或shift组合。
                 qmp_execute(qmp,'send-key',{'keys':[{'type':'qcode','data':c} for c in codes],'hold-time':20})  # 每个键名转qcode字典，列表作为keys，按住时间单位毫秒。
@@ -258,7 +290,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
 
 key(*codes) 将多个键名收为元组，例如 shift/a，再用列表推导为每个名字生成 qcode 字典。spc、ret、shift 分别是空格、回车、修饰键，hold-time=20 以毫秒计，调用后再留 0.12 秒给轮询内核处理。通过主机控制产生的仍是虚拟键盘事件。
 
-嵌套 run 将命令逐字符送给 key，再发送回车。nonlocal commands 使递增作用于外层同一个计数；没有它，赋值会创建局部变量。发出前先取 offset，发出后用新计数等记录，再核对尾部的查询文字。
+PS/2 分支稍后实际调用 `run('mem','No allocator accounting yet.')`。run 先以 len(output()) 记旧文本末尾，再把 m、e、m 和回车逐次交给 key。回车增加 guest 的提交计数，主机也通过 nonlocal commands 增加外层同一个预期计数；没有 nonlocal，赋值会另建局部变量。随后 update(0,commands) 形成这次完整状态，wait 用 offset 排除旧记录，返回的新尾部才用于检查 mem 的说明。
 
 UART 分支直接送字节，依次检查 echo、devices、未知命令；第一项就必须同时有 commands=1 与 uart-receive-ok。PS/2 分支另查 mem、帮助、地图、历史、退格与 Shift。F1–F4/分页只核对模型编号，graphics=false 时 capture 不截图；以后图形目标才增加日夜切换和画面。
 
@@ -278,6 +310,14 @@ UART 分支直接送字节，依次检查 echo、devices、未知命令；第一
                 commands+=1  # 预期累计提交数增加一。
                 tail=wait(update(0,commands),offset)  # 终端view=0且命令数匹配后才得到本次输出尾部。
                 assert expect in tail, f'Missing output: {expect}'  # 缺少当前命令预期文字时用assert明确中止。
+```
+
+run 已把一条 PS/2 命令闭合为取旧尾、发键、等新计数、核对文字。UART 不经 key，直接把 echo 字节交给 wire；但同样先记 offset，再等 commands=1 的新记录和回显，之后才能发送第二条。
+
+**继续追加两种设备的实际输入序列：**
+
+<!-- append: scripts/console_test.py -->
+```python
             if wire:  # 有UART连接时从该连接读取；否则读取QEMU写出的日志文件。
                 offset=len(output())  # 记录第一条UART命令之前的日志末尾。
                 wire.sendall(b'echo uart-receive-ok\r')  # bytes中的回车提交这条实际设备命令。
@@ -347,6 +387,14 @@ UART 分支直接送字节，依次检查 echo、devices、未知命令；第一
                 capture(work/'terminal-session.ppm')  # 保存全部命令序列结束时的实际终端画面。
                 cases=['PS/2 command dispatch','help/mem/map/echo/errors','F1-F4 guest views','memory paging',  # 记录本次PS/2通路已执行的命令、切页和分页。
                        'Ctrl-L clear','history recall','backspace','shift letters/punctuation']  # 继续记录清屏、历史、退格和Shift观察。
+```
+
+所选设备的序列全部通过后，cases 才描述本次实际做过的观察。下面保存结果并返回；finally 仍会关闭本次连接、终止回收同一 process 和短端点，下一轮不继承它们。
+
+**最后追加结果与资源清理，闭合 check_console：**
+
+<!-- append: scripts/console_test.py -->
+```python
             result={'profile':profile,'passed':True,'cases':cases,'seconds':round(time.monotonic()-started,2)}  # 各观察成立后才形成结果，耗时来自本次单调时钟。
             (work/'result.json').write_text(json.dumps(result,indent=2)+'\n')  # 结果编码为便于阅读的 JSON，并补文件末尾换行。
             print(f'PASS console/{profile} ({result["seconds"]}s)')  # 按实际路径与耗时报告本轮输入通过。

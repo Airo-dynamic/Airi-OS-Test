@@ -77,7 +77,7 @@ static void observe_eintr(void) { // 管道保留写端但不写，read必然等
     if (pipe(ends)) // 创建真正Linux管道。
         fail("pipe"); // 不能以模拟结果替代。
     struct sigaction action = {0}, old; // flags0避免SA_RESTART自动重启read。
-    action.sa_handler = alarm_handler; // 唯一异步动作是设标量。
+    action.sa_handler = alarm_handler; // 处理器设置标量并用 alarm 重设时钟，不调用普通输出或分配。
     sigemptyset(&action.sa_mask); // 不额外屏蔽其他信号。
     if (sigaction(SIGALRM, &action, &old)) // 保存旧处理方式，实验后恢复。
         fail("sigaction"); // 权限或参数错误明确失败。

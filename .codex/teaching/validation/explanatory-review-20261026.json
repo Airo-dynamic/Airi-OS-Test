@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-26",
+  "baselines": {
+    "main": "dbb30785072147d7eff63c23287b431e214f79cd",
+    "gui": "1dcf1920185fc14bfad2e96e82794b8ca42dc6f0"
+  },
+  "scope": {
+    "main": {
+      "reviewed": 81,
+      "edited_tutorials": 79
+    },
+    "gui": {
+      "reviewed": 15,
+      "edited_tutorials": 15
+    }
+  },
+  "source": {
+    "checkpoints": 96,
+    "owned_endpoints": 235,
+    "file_identities": 9159,
+    "compositions": 18,
+    "native_comment_migration": {
+      "execution_bytes_without_comments": "passed",
+      "source_line_counts": "passed",
+      "every_before_whole_line_unique": "passed",
+      "all_run_blocks": "unchanged",
+      "all_shell_fences": "unchanged",
+      "original_manifest_hashes": "passed",
+      "early_stage_precision_counterexamples": 16,
+      "old_anchors": "unchanged",
+      "00_01_02_documents_and_sources": "byte-identical",
+      "endpoint_sources_match_frozen_tutorial": "passed",
+      "no_stale_overwrite": "passed"
+    },
+    "endpoint_comment_files": [
+      {
+        "repository": "main",
+        "endpoints": [
+          "T04",
+          "K68"
+        ],
+        "source_files_changed": 24
+      },
+      {
+        "repository": "gui",
+        "endpoints": [
+          "G26"
+        ],
+        "source_files_changed": 11
+      }
+    ]
+  },
+  "checks": {
+    "main_docs_check": "81 checkpoints,194 files,337 local links",
+    "combined_docs_check": "96 checkpoints,235 files,360 local links",
+    "reader_yaml": "96 identities parsed",
+    "portable_article_replay": {
+      "04": "7 ordered edits + existing command passed",
+      "05": "5 ordered edits + existing command passed",
+      "T04": "1 ordered edit + existing command passed"
+    },
+    "course_edits_test": "9 passed",
+    "route_test": "9 passed,1 skipped (GUI not installed in standalone main)",
+    "skills_validate": "10 skills passed",
+    "diff_check": "main/gui/skills passed"
+  },
+  "reading_review": {
+    "article_order": [
+      "L04",
+      "K29",
+      "G16",
+      "L05",
+      "L08",
+      "K32",
+      "G24",
+      "K58"
+    ],
+    "limitations": "Reviewer prior exposure disclosed; not a human learning outcome or a cold read of all96. Authors reviewed all native comments, not an independent per-line technical audit of all source.",
+    "repairs": [
+      "L04 positive cache/direct I/O model",
+      "K29 current-block caption",
+      "G16 precise old-file edits",
+      "K32 remaining user ABI edit locations",
+      "G24 unified verification vs direct helper entry",
+      "K62 post-join identity comparison scoped to current implementation"
+    ]
+  },
+  "not_rerun": [
+    "QEMU",
+    "remote Linux",
+    "screenshots",
+    "full site build"
+  ],
+  "protected": [
+    "00–02 implementation bytes",
+    "all original run blocks",
+    "old anchors",
+    "execution/API behavior",
+    "original AiriOS and MBA handwritten project",
+    "historical verification entries"
+  ],
+  "committed": false,
+  "pushed": false
+}

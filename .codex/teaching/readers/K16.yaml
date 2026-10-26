@@ -31,3 +31,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/16-virtual-memory.md#four-levels
   establishes: 同一数据页贯穿 HHDM、四级别名、硬件权限故障与回收。先建立当前执行资源映射再切根；软件查表不读目标数据，NX 内部返回地址、失败回滚及共享表寿命完整保留。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/16-virtual-memory.md#install-cr3
+  establishes: 保留索引、事务回滚与NX返回层次的成熟模型，展开CPUID到NXE/WP再到CR3的实际交接；map与激活演示就近分块，继承文件以精确旧新窗口和末尾追加落地。

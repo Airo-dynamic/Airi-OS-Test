@@ -41,3 +41,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/11-serial-build.md#display-selection
   establishes: 以同一 mem 保留串口主线，链接时选显示定义；回调函数/数据指针和命令栈副本寿命分别解释。Make 条件只读取必要清单，主机检查不冒充设备证据。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/11-serial-build.md#command-extension
+  establishes: 保留成熟链接选择与同步回调模型，接口及输出改名用精确旧新窗口落地；主入口、构建和四组主机检查按完整动作分块，持续接住同一会话。

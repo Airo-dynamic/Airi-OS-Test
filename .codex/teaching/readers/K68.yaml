@@ -22,5 +22,8 @@ first_use:
 borrowed:
 - component: 内部引用入口及原子阶段夹具
   contract: 内部配对由调用方保证，不提供逐引用授权，阶段字不是条件变量实现
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 引用不授锁、释放到重取的表格和外部寿命边界成熟，ref/unref实现离说明较远且一起藏在unlock尾部替换中
+  revision: 保留引用及所有错误条件，将init/destroy与成对动作解释分离，以unlock尾部定位ref、追加unref，worker和main按释放/重取接续
 not_inferred: 不由运行推断掌握，不宣称条件变量通知、并发销毁、SMP或新Linux实测

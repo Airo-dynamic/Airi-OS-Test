@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/04-storage.md#linux-vector-io
   establishes: 由分散数据的一次总返回数进入前缀消费，再区分缓存可见、驻留、预留与同步；旧 FD/新名字支撑发布顺序，保留真实 EINTR 和 FS 能力边界。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 向量、EINTR助手、直接I/O查询、实际向量调用、预留、共享缓存与名称替换逐次接到代码；全部同步和能力限制保留。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

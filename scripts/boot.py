@@ -123,7 +123,7 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                         assert '[AIRI_P2_READY]' in text # 当前主线还必须完成页池、自有页表和堆。
                         assert '[TRAP_DEMO_OK] ud=6 gp=13 resumed=2' in text # 正常启动必须真的从两种异常栈返回。
                         assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
-                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。。
+                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。
                         assert '[MEMORY_SUMMARY]' in text  # 完成之前应已记录实际内存总计。
                         if case=='edit-experiment':  # 修改实验额外核对替换后的文字。
                             assert 'I changed the output and rebooted' in text  # 确认运行的是实验配置的输出行为。

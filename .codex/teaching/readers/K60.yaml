@@ -28,5 +28,8 @@ first_use:
 borrowed:
 - component: 既有43/44号、原子内建、LLVM静态链接
   contract: 同进程/VA、四字节键、十六执行者上限；不是Linux eventfd或完整pthread条件变量
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 旧快照与无变化通知的模型、饱和和内存序边界已经成熟，首次实现块同时承担快照与等待
+  revision: 保留原模型与全部数值，将快照/有界等待及edge饱和/changed旧新快照分成相邻代码与解释窗口
 not_inferred: 重建和运行不推断掌握，未宣称SMP、无限代次或新Linux/GUI验证

@@ -36,7 +36,7 @@ static uint32_t memory_kind(uint64_t raw) {  // 把外部协议用途值转换�
     case LIMINE_MEMMAP_BAD_MEMORY:  // 匹配已标坏的内存区域
         return AIRI_MEMORY_BAD;  // 自有分类明确不允许将此区域分配使用
     case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:  // 匹配引导器占用且以后可回收的范围
-        return AIRI_MEMORY_BOOT_RECLAIM;  // 当前仍保留此范围，P2 才安排回收
+        return AIRI_MEMORY_BOOT_RECLAIM;  // 当前继续保留；引导页回收须由明确策略安排
     case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:  // 匹配内核及引导模块的装载范围
         return AIRI_MEMORY_KERNEL;  // 按内核占用分类，不归入空闲 RAM
     case LIMINE_MEMMAP_FRAMEBUFFER:  // 匹配显示像素内存范围

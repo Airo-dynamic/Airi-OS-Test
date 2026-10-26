@@ -30,7 +30,7 @@ first_use:
   establishes: 初始RSP16对齐，函数地址先保存在RAX，参数进RDI，call压返回地址后满足C ABI，40提交完整long结果
 - concept: 结果等待与安全栈回收
   at: ../../../dev-log/core/52-shared-executions.md#thread-join-lifetime
-  establishes: 查状态和登记连贯，ZOMBIE结果交出一次后REAP_PENDING，在其他栈上归还内核资源
+  establishes: 40号形成结果时仍在工作者栈，poll交付一次结果后只登记REAP_PENDING；确认不再running才归还内核资源，查状态和等待登记连贯
 - concept: 有界并发资源策略
   at: ../../../dev-log/core/52-shared-executions.md#thread-boundaries
   establishes: 未收拢工作者期间拒绝映像/页解除，阻塞FD拒绝close，异步buffer按共享PID授权，malloc仍单线程

@@ -28,3 +28,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/15-physical-pages.md#page-ownership
   establishes: 从地图不随借出变化推导 managed/allocated；同一页经历向内取整、占位、HHDM 写读、拒绝非法归还及复用。主机编号和 guest 真地址保持区别。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/15-physical-pages.md#page-allocate
+  establishes: 保留两位图与向内取整成熟推理，沿主机夹具0x1000绑定页号及位图位；初始化、借出、归还与真实HHDM演示就近接续，继承文件只替换新增连接。

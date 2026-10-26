@@ -70,7 +70,7 @@ static void completion(int fd,unsigned char *buffer,size_t size,int writing) { /
         io_uring_sqe_set_data64(sqe,cookie); int rc=io_uring_submit(&ring); // 单个SQE仍检查真实接受数量。
         require(rc==1,"one SQE accepted"); // 本教学路径不使用SQPOLL；失败终止整次实验。
         struct io_uring_cqe *cqe=NULL; struct __kernel_timespec limit={.tv_sec=2}; // CQ等待有界。
-        rc=io_uring_wait_cqe_timeout(&ring,&cqe,&limit); if (rc<0) { errno=-rc; require(0,"CQ wait"); } // 超时不释放成功缓冲。
+        rc=io_uring_wait_cqe_timeout(&ring,&cqe,&limit); if (rc<0) { errno=-rc; require(0,"CQ wait"); } // 超时使整次进程失败退出；不能继续复用仍可能在途的缓冲。
         require(cqe && io_uring_cqe_get_data64(cqe)==cookie,"CQ identity"); int result=cqe->res; // 取回本次请求自己的结果。
         if (result<0) { errno=-result; require(0,"CQ operation"); } // 负res是请求错误。
         require(result>0 && (size_t)result<=size-done,"CQ prefix"); // 提前EOF和越界都不接受。

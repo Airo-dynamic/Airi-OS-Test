@@ -12,7 +12,7 @@ if staging.exists():  # 本轮打包前判断旧 staging 是否存在，避免�
 (staging/'EFI/BOOT').mkdir(parents=True)     # 创建 UEFI 默认启动路径的父目录
 shutil.copyfile(out/'airios.elf',staging/'boot/airios.elf')  # 把本次 ELF 放到 Limine 配置将读取的介质路径
 shutil.copyfile(ROOT/'config/boot/limine.conf',staging/'limine.conf')  # 把内核路径及交接协议配置放到介质根目录
-shutil.copyfile(ROOT/'third_party/limine/BOOTX64.EFI',staging/'EFI/BOOT/BOOTX64.EFI')  # 放入 OVMF 按 UEFI 默认路径启动的 Limine 程序
+shutil.copyfile(ROOT/'third_party/limine/BOOTX64.EFI',staging/'EFI/BOOT/BOOTX64.EFI')  # 在外层 ISO 保留同名 EFI 文件；本次光盘入口由登记的 bin 提供
 shutil.copyfile(ROOT/'third_party/limine/limine-uefi-cd.bin',  # 选择已校验的 UEFI 光盘启动映像作为复制来源
                 staging/'boot/limine/limine-uefi-cd.bin')  # 将光盘启动映像放进 xorriso 稍后登记的介质路径
 subprocess.run([tool('xorriso','xorriso'),'-as','mkisofs','-R','-r','-J',  # 选择 xorriso，使用 mkisofs 参数风格与目录命名扩展建立 ISO

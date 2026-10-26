@@ -25,3 +25,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/14-exceptions.md#trap-frame
   establishes: 沿 ud2 故障到 IDT、统一异常现场、C 精确登记与 iretq 恢复组织全文；静态表和局部描述符寿命分开，GP 错误码与未登记停止条件保留，既有实测不冒称本轮。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/14-exceptions.md#trap-frame
+  establishes: 沿真实UD的压栈次序建立C字段，分清现场指针与对齐后的调用栈，再沿登记、dispatch与iretq闭合恢复；长实现按操作分块，已有构建入口只做精确局部替换。

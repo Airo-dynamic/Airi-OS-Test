@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/29-wait-queues.md#wait-saved-request
   establishes: 父 read10 与孩子 awake 贯穿登记、目标页表重试、结果先发布再唤醒；有限就绪等待和原请求完成分开，启动服务续点的栈寿命接到纯计算者超时。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 沿父read与启动服务往返展开继续frame寿命；user.c按请求/调度/陷入/launch的实际窗口更新。
+  evidence: 全篇正文、旁注、编辑与运行说明复读；纯内存源码/命令/旧锚点保护通过，本轮不新增行为实测。

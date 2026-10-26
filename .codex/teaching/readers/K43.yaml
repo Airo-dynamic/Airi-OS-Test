@@ -18,13 +18,13 @@ first_use:
   establishes: tdata初值和tbss零尾部形成模板，TPOFF32由静态链接器解析，模板VA不是实例地址
 - concept: TP前的静态变量与最小TCB
   at: ../../../dev-log/core/43-static-tls.md#ctls-layout
-  establishes: span按模板对齐、TP至少16对齐，初值偏移为pointer-span，FS0必须含self，TCB另计页
+  establishes: 从一字节模板的TP−1与TP至少16对齐推到初值落点15，再分开span和pointer；FS0含self，TCB另计页，153字节模板的数据才从块首开始
 - concept: 模板输入校验与预算
   at: ../../../dev-log/core/43-static-tls.md#ctls-inspect
   establishes: 唯一头、范围/权限/对齐与LOAD对应关系在分配前完整检查，额外运行页也计用户预算
 - concept: 未活动新根中的TLS副本
   at: ../../../dev-log/core/43-static-tls.md#ctls-load
-  establishes: owned页先清零，再按目标页表写初值和TCB，设置fs_base后才允许main；fork复制当前值，exec重建默认值
+  establishes: 四组唯一局部替换接入运行块；owned页先清零，再按未活动目标页表写初值和TCB，设置fs_base后才允许main；fork复制当前值，exec重建默认值
 not_assumed:
 - pthread、共享地址空间线程、动态TLS/DTV、TLS析构器、C++动态本地初始化、errno或网络TLS已实现
 limits:

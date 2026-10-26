@@ -44,3 +44,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/tools/02-snapshots.md#snapshot-git-model
   establishes: 由移动资料混版引出 SHA/内存固定，再分别保护新输出和 HISTORY 交接；K13 身份、分支终点、输出清单与暂存树各自的用途连续展开。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: K13 的来源身份、提交身份与产物位置分别跟踪，完整 stage 构造后才交接 HISTORY。
+  evidence: 对照冻结正文逐篇复读，并在内存核对源码、原锚点与运行命令；不推定读者已掌握。

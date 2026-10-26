@@ -18,7 +18,7 @@ first_use:
   establishes: 0到TID只有一人成功，失败得到真实持有者供WAIT再比较
 - concept: 原子内建和锁保护普通对象
   at: ../../../dev-log/core/54-owned-mutex.md#mutex-acquire-release
-  establishes: 编译器扩展生成目标原子操作，成功acquire/释放release交接counter与checksum
+  establishes: 编译器扩展确认四字节布局和原生原子；强CAS成功以acquire交接普通数据，失败只以relaxed取得实际持有者再交WAIT，释放用release
 - concept: 固定等待预算和重试
   at: ../../../dev-log/core/54-owned-mutex.md#mutex-deadline-loop
   establishes: 通知和-11都不授锁，重试不延长截止，自持有失败，释放已发生则不倒退

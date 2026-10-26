@@ -183,7 +183,7 @@ int main(void) { // 暂停只属于本观察ELF，普通锁没有这些回调。
 
 每轮先在没有活worker时清握手和统计，再取得guard并创建worker。前三轮await parked，第四轮await started后主睡三tick：主仍持有guard，但离开CPU，让worker实际登记到内核。随后核对参与数，第1轮为0，其余为1，不能仅凭位置标签假定字段已改变。
 
-两次45号只包围主自己的unlock：第1轮差值1，只有结束查询；其他三轮差值2，分别是44号和结束查询。worker即使此时被PIT调度，也有自己的计数，不会污染主的测量。之后release打开gate并join，读取worker的实际calls和返回分类：前两轮0次WAIT，第3、4轮各1次；只有第3轮-11，只有第4轮0。最后原子读取owner/contenders确认归零，才打印DONE并进入下一轮。
+下面三块连续接在main内，for到最后一块才闭合，本章写完再构建。先写到参与数核对为止，主在这一块结束时仍持有guard。
 
 <!-- append: labs/airios/mutex-races.c -->
 ```c
@@ -200,10 +200,22 @@ int main(void) { // 暂停只属于本观察ELF，普通锁没有这些回调。
         if (stage < 4) await(&parked, 1); // 三轮分别停在不同真实语句之间。
         else { await(&started, 1); require(airi_sleep(3) == 0, "race actual waiter"); } // 主持锁睡三tick，worker有机会真正登记WAIT。
         require(__atomic_load_n(&guard.contenders, __ATOMIC_SEQ_CST) == (stage == 1 ? 0u : 1u), "race participant position"); // 握手位置必须与算法字段相符。
+```
+
+现在主仍持有guard，参与数已经核对。两次45号只包围主自己的unlock：第1轮差值1，只有结束查询；其他三轮差值2，分别是44号和结束查询。worker即使此时被PIT调度，也有自己的计数，不会污染主的测量。
+
+<!-- append: labs/airios/mutex-races.c -->
+```c
         uint64_t before = airi_thread_syscalls(); // 只测主的这次unlock，不混入另一执行者的观察回调。
         require(airi_mutex_unlock(&guard) == 0, "race primary release"); // 根据真实参与数省略、空通知或通知一位。
         uint64_t after = airi_thread_syscalls(); // 结束查询自身仍计一次。
         require(after - before == (stage == 1 ? 1u : 2u), "race release syscall count"); // 1只查询，2为44号加查询。
+```
+
+主已释放且测量结束，再release打开gate。前三轮等gate的worker从回调返回；第四轮没有gate暂停，由前面的通知恢复，可能已经在主结束测量前运行。它们最终都要回到原lock调用中的CAS，取得并释放guard。join以后才读它的统计：前两轮0次WAIT，第3、4轮各1次；只有第3轮返回-11，只有第4轮返回0。owner和contenders均归零才打印DONE、进入下一轮。
+
+<!-- append: labs/airios/mutex-races.c -->
+```c
         atomic_store_explicit(&gate, 1, memory_order_release); // 前三轮从原暂停点继续；第四轮无暂停。
         require(airi_thread_join(tid, &result) == 0 && result == 0, "race worker result"); // 继续原锁调用，不能重开一次调用绕过窗口。
         require(atomic_load_explicit(&calls, memory_order_relaxed) == (stage >= 3 ? 1u : 0u), "race wait call count"); // 第三轮立即失败也是一次实际43号。

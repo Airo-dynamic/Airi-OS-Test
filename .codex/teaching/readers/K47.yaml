@@ -15,7 +15,7 @@ first_use:
   establishes: 同一tick快照除100取秒、余数乘10ms取纳秒，纳秒单位不提高分辨率
 - concept: 查询输出的受检查交接
   at: ../../../dev-log/core/47-monotonic-clock.md#clock-boundary
-  establishes: 原始38号在内核形成16字节数值，用户库不解引用坏指针，REALTIME明确拒绝
+  establishes: timespec指针只作为输出地址传入，内核先检查时钟再形成16字节数值并核对可写跨度；用户库不先解引用，REALTIME失败不改输出
 not_assumed:
 - 可信墙钟、RTC、NTP、高精度clocksource、休眠时间或完整POSIX时钟已实现
 limits:

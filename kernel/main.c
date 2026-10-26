@@ -126,7 +126,7 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
         uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。
         bool changed = airi_console_key(&console, key);  // 按键改变命令或页面状态，返回是否需要刷新。
         if (!changed)  // 被忽略的按键不产生新帧。
-            continue;  // 跳过当前不适用项，继续检查下一项。
+            continue;  // 按键未改变可见状态，本轮不重画。
         if (key == '\n' || key == '\r') {  // 回车完成命令，才把新增输出回显到 UART。
             uint64_t first = console.total_lines - console.line_count;  // 日志环只保留 line_count 行，first 是尚可读取的最早逻辑行。
             if (before < first)  // 若本次命令挤掉旧行，先把读取起点限到仍存在的区域。

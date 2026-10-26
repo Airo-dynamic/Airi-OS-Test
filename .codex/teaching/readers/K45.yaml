@@ -18,7 +18,7 @@ first_use:
   establishes: 顺序决定gather/scatter，返回总字节数，短操作可能在一项中间结束，尾部保持
 - concept: 描述数组和数据的双层检查
   at: ../../../dev-log/core/45-positioned-vectors.md#vector-copy-check
-  establishes: 先复制最多八项，检查总长无溢出，再校验本次至多256字节前缀；坏后项不产生前项副作用
+  establishes: 沿三目标读取分开描述和数据，先复制最多八项并防总长溢出；覆盖用户描述不改内核快照，再校验至多256字节前缀，坏后项无前项副作用
 - concept: 同步聚合与一次文件层调用
   at: ../../../dev-log/core/45-positioned-vectors.md#vector-kernel
   establishes: 局部buffer只活到调用返回，文件层一次操作后只分散真实结果，流ESPIPE不建立等待

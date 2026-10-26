@@ -28,5 +28,8 @@ first_use:
 borrowed:
 - component: POSIX程序员手册DEFAULT/初始化寿命，以及既有AiriMutex和pthread线程
   contract: 只ERRORCHECK默认映射，私有非robust，无timedlock/共享/PI/递归；固定单CPU
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: DEFAULT映射、对象寿命与内部到期不变公开超时的解释成熟，属性助手/四操作与动态观察集中成块
+  revision: 保留所有诊断边界与205/200/64数值，按形状助手→构造/销毁→读取/提交属性分块，动态误用和205tick之后的收拢说明贴近代码
 not_inferred: 重建、错误与计数符合不推断掌握；无新Linux/GUI运行

@@ -18,7 +18,7 @@ already_explained:
 first_use:
 - concept: 进程资源与执行链的内嵌分离
   at: ../../../dev-log/core/50-user-execution.md#execution-owner
-  establishes: execution拥有FS/FPU/内核栈/frame和等待借用，process保留内存/FD/PID和退出结果
+  establishes: frame只记录真实栈地址，返回汇编与iretq才恢复执行；execution拥有FS/FPU/内核栈和等待借用，process保留内存/FD/PID和退出结果
 - concept: 按执行者创建陷入栈与FPU
   at: ../../../dev-log/core/50-user-execution.md#execution-stack
   establishes: create_stack显式接槽号，exec的短路条件不对局部候选计算数组内指针差，place_frame只消费执行栈

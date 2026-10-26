@@ -119,21 +119,11 @@ def download(url, path, sha):  # 取得 URL 对应材料；只有摘要为 sha �
 
 ## 从已校验归档走到实际使用的展开文件
 
-prepare 调用 download 后，archive 指向已校验的压缩包。启动介质稍后需要的却是里面的 BOOTX64.EFI 和 CD 映像，所以还要检查 dest 中这些展开文件。`dep["files"]` 保存“文件名 → 期望摘要”，`items()` 每次提供一对值，例如 name 为 `"BOOTX64.EFI"`、sha 为它的摘要，`dest/name` 就是待检查路径。
+现在把 download 接到本章真正的材料准备过程。prepare 先读 `config/deps.lock.json`：json.loads 得到外层字典，`lock['limine']` 再取出 Limine 的那份内层记录。dep 保存的正是前面写下的 12.9.2 记录，其中有下载 URL、整个归档的摘要，以及展开文件各自的摘要。
 
-先判断这份文件是否存在。缺失时 `not is_file()` 已为真，or 不再读取摘要；存在才比较实际字节。生成器按 `any(...)` 的需要逐项产生这些真假值，没有先建立完整结果列表。any 遇到第一个真值就决定重新展开，全部为假才复用已有展开文件。只缺一项也会触发整个归档的展开，而不是只下载那一项。
+本次调用把三项值交给 download：`dep['url']` 指定来源，archive 指定工程中的正式缓存位置，`dep['sha256']` 指定整个压缩包应有的摘要。archive 由 ROOT 拼接而来，终端当前目录改变也不会改掉这个目标。download 返回后，这个路径才对应符合摘要的归档；curl、校验或改名失败都会在此前中断。
 
-展开过程还必须使输出落到刚才检查的位置。假设成员名是 `发行目录/BOOTX64.EFI`，parts 将它拆为路径段，`parts[1:]` 去掉发行目录，`Path(*parts[1:])` 将剩余段逐个作为参数组成相对路径。修改 member.name 后，extract 写入 dest，得到的正是前面检查的文件；还有子目录时同样保留后续路径段。只有顶层目录本身的成员被跳过。
-
-member 是归档成员描述，不是已展开的文件。`with tarfile.open(...)` 限制归档读取句柄的寿命，关闭它不删除展开结果；每次 extract 仍使用 `filter='data'` 限制危险路径和成员。随后按独立的 protocol 记录取得 limine.h，编译器读取它，引导器则执行前面展开的二进制程序。
-
-## 固件需要匹配的字节，还要区分只读代码与变量初值
-
-OVMF 分为只读机器码 code 和可写变量初始映像 vars。循环先检查工程缓存，正确就 continue 到下一项；否则按 QEMU 相邻 share 目录等候选位置查找。筛选生成器只交出存在且摘要符合的路径，`next(..., None)` 取首个，没有匹配就返回 None 并报错，不换用另一版固件。
-
-这里对 QEMU 路径调用 resolve，只为找到安装目录旁的 share，不把解析后的名字当启动命令。匹配来源复制到工程 firmware 缓存；实际每次启动再复制一份 vars，启动时的变量写入不会修改可重复使用的初始映像。全部材料齐备后，prepare 返回最初读取的同一份 lock。
-
-**追加到 `scripts/deps.py` 末尾：**
+**追加到 `scripts/deps.py` 末尾，开始编写 prepare；函数剩余部分随后接上，本章写完再运行：**
 
 <a id="code-scripts-deps-py-4"></a>
 
@@ -145,6 +135,20 @@ def prepare():  # 按同一锁文件准备引导器、协议头和两份固件�
     archive=ROOT/'third_party/limine-binary.tar.gz'  # 把归档缓存放在这份工程的 third_party 内
     download(dep['url'],archive,dep['sha256'])  # 下载或复用已校验的 Limine 归档，再允许下面解包
     dest=ROOT/'third_party/limine'  # 展开后的引导文件保存在独立目录
+```
+
+归档已经就绪，制作启动介质时需要的却是其中的 BOOTX64.EFI 与 CD 启动映像。dest 指向 `ROOT/'third_party/limine'`，所以接下来检查的是展开文件。例如 `dep['files'].items()` 交出 BOOTX64.EFI 这一项时，name 取得文件名字符串，sha 取得该文件的期望摘要，`dest/name` 就定位到 `ROOT/'third_party/limine/BOOTX64.EFI'`。
+
+先判断这份文件是否存在。缺失时 `not ...is_file()` 已为真，or 不再读取摘要；存在时才调用 digest 比较字节。生成器按 any 的需要逐项给出这些判断，any 遇到第一个真值便触发重新展开，两项全为假才复用已有文件。只缺一项时，重新展开的仍是整个归档，而非只下载这一项。
+
+展开还要落到刚才检查的位置。当前归档中的真实成员名为 `limine-binary/BOOTX64.EFI`；parts 将它拆成 `('limine-binary', 'BOOTX64.EFI')`，`parts[1:]` 去掉第一段，`Path(*parts[1:])` 把留下的路径段逐个作为参数，组成 BOOTX64.EFI 这个相对路径。修改 member.name 后再向 dest 提取，最终文件正好成为前面检查的对象。有子目录时同样保留第一段以后的各段，只有顶层目录本身的成员被跳过。
+
+member 保存归档成员描述，extract 才按这个描述写出文件。with 限制归档读取句柄的寿命，结束时关闭句柄，已展开的文件继续保留。每次 extract 仍用 `filter='data'` 限制危险路径和成员。
+
+**继续追加 prepare 的展开部分，保持函数内缩进：**
+
+<!-- append: scripts/deps.py -->
+```python
     if any(not (dest/name).is_file() or digest(dest/name)!=sha  # 任何必需文件缺失或摘要错误都触发重新展开；缺失时不算摘要
            for name,sha in dep['files'].items()):  # items 逐次给出文件名与期望摘要；生成器按 any 的请求计算
         dest.mkdir(parents=True,exist_ok=True)  # 确保展开目标存在，已存在的目录不报错
@@ -155,8 +159,32 @@ def prepare():  # 按同一锁文件准备引导器、协议头和两份固件�
                 if len(parts)>1:  # 略过只有顶层目录名的成员，处理顶层目录中的文件
                     member.name=str(Path(*parts[1:]))  # 切片去掉顶层目录，星号将剩余段逐个作为 Path 参数传入
                     tar.extract(member,dest,filter='data')  # 在 dest 中展开成员；data 过滤器拒绝危险路径和不允许的成员
+```
+
+到这里，archive 保存经过归档摘要校验的压缩包，dest 保存启动介质稍后要读取的展开文件。协议头来自另一份记录：`lock['protocol']` 给出它自己的 URL、固定 commit 与摘要，download 将匹配内容放到 `ROOT/'third_party/limine.h'`。编译器稍后读取声明，固件执行的则是前面展开的 EFI 程序。
+
+**继续追加协议头准备，仍在 prepare 内：**
+
+<!-- append: scripts/deps.py -->
+```python
     header=lock['protocol']  # 取得协议头的 URL、固定提交和摘要记录
     download(header['url'], ROOT/'third_party/limine.h', header['sha256'])  # 把经过摘要校验的协议声明保存为后续编译使用的 limine.h
+```
+
+<a id="firmware-cache"></a>
+
+## 固件需要匹配的字节，还要区分只读代码与变量初值
+
+剩下两项来自 `lock['firmware']` 列表。每次 item 是含 name 与 sha256 的字典；处理 code 记录时，target 就是工程 firmware 目录下的 edk2-x86_64-code.fd，随后同样处理 vars。先检查工程缓存：存在且摘要相符便 continue 到下一项，否则才寻找本机安装中的匹配来源。
+
+OVMF 的 code 是只读机器码，vars 是可写变量的初始映像。候选位置先从所选 QEMU 安装目录旁的 share 推导，再尝试列出的常见目录。对 QEMU 路径使用 resolve 是为了找到安装目录，不将解析后的名字当启动命令。筛选生成器只交出存在且摘要符合的路径，`next(..., None)` 取第一份；没有匹配便报错，不能改用同名但字节不同的固件。
+
+找到来源以后，copyfile 将它复制到工程缓存。实际启动再复制一份 vars，使本次变量写入不修改下次还要用的初值。循环两项都完成后，prepare 才返回最初读取的同一份 lock。
+
+**最后追加固件准备与返回，完成 prepare：**
+
+<!-- append: scripts/deps.py -->
+```python
     firmware=ROOT/'third_party/firmware'  # 两份固件的正式缓存目录，与引导器材料分开
     firmware.mkdir(parents=True,exist_ok=True)  # 建立固件目录，保留其中已存在的缓存文件
     for item in lock['firmware']:  # 每次 item 为一条包含 name 和 sha256 的固件字典
@@ -181,7 +209,7 @@ def prepare():  # 按同一锁文件准备引导器、协议头和两份固件�
 
 传输失败会在临时文件校验和解包之前停止，先前经过校验的正式缓存仍可保留。修复网络后运行同一准备命令，版本与摘要不随网络失败改变。需要代理时可在 shell 中设置 HTTPS_PROXY，curl 子进程继承它；参考环境的 `export HTTPS_PROXY=http://127.0.0.1:7897` 指本机 7897 端口，其他电脑应采用自己的实际通路。代理只改变传输，不改变摘要条件。
 
-下面先从参考工程借用锁定的两份外部固件机器码，再调用自己的 prepare；不复制项目实现。若在参考工程本身执行，路径相同就跳过复制。Limine 归档和协议头仍按 URL 获取并核对，固件缓存也继续接受摘要检查。
+运行块中的 source 指向参考工程 `/Users/bilibili/Desktop/AiriOS/third_party/firmware`。先从这里取得锁定的两份外部固件机器码，再调用学习工程自己刚写好的 prepare。若目标正是参考工程本身，路径比较会跳过自复制；source 不存在时也不复制，prepare 随后按候选目录寻找匹配固件。Limine 归档与协议头仍按 URL 获取，复制来的固件也仍须通过摘要检查。
 
 **在学习目录根目录运行：**
 

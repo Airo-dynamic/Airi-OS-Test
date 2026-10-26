@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/05-threads.md#threads-queue-predicate
   establishes: 从检查后再睡的空窗引出条件变量与 futex；通知不持有任务、WAKE 不发布普通数据，队列锁、relaxed 统计和 join 各自支持不同关系。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 队列消费与单词发布在同章分别形成过程；定义、两个线程入口和main前后段就近安排，保留语言同步和内核等待的不同作用。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

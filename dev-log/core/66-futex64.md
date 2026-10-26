@@ -22,11 +22,7 @@ K60 的32位版本到顶会明确拒绝回绕，尚不足以把高频通知直�
 
 新增IO_FUTEX64记录八字节等待。wake匹配同进程对象、相同VA和相同kind三项，不能只在WAIT时读八字节、WAKE时仍把所有同VA记录一起唤醒。kind保存在已有execution.io，不增加动态队列节点，保存地址和截止的字段继续复用。
 
-futex_value接收wide。宽请求复制到uint64_t；窄请求先复制到uint32_t局部值，再由C无符号扩展交给统一比较。不能把四字节直接复制进未初始化uint64_t并依赖恰好剩下零高位，也不把内核读取规则绑到示例的字节序上。helper在复制失败时立即返回，不读未初始化的局部值。
-
-futex_wake根据kind选择8或4字节，检查相应自然对齐与完整可访问跨度。数量仍是完整64位并限至16，不先窄化。扫描只完成同kind等待，过期者仍返回-110但不计入成功通知人数，通知也不改原字。
-
-修改kernel/process/user.c这些窗口。新增目录声明、宽度状态和帮助函数后，下面继续接入等待分派：
+先修改kernel/process/user.c中的io_operation枚举，保留相邻宏和状态作定位。观察ELF声明和目录项稍后在构建段加入；这里先把宽度接进内核等待记录。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -50,47 +46,9 @@ struct user_page { uint64_t address, physical; unsigned flags; }; // fork需要�
 #define RECORD_CHUNKS ((AIRI_USER_PAGES + PAGE_RECORDS - 1) / PAGE_RECORDS) // 1024项最多借七个记录页。
 ```
 
-<!-- replace: kernel/process/user.c -->
-<!-- before -->
-```c
-extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
-extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
-extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
-extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
-extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
-extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
-```
-<!-- after -->
-```c
-extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
-extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
-extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
-extern const uint8_t airi_futex64_elf_start[], airi_futex64_elf_end[]; // 同地址宽度隔离和完整64位比较。
-extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
-extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
-extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
-```
+futex_value接收wide。宽请求复制到uint64_t；窄请求先复制到uint32_t局部值，再由C无符号扩展交给统一比较。不能把四字节直接复制进未初始化uint64_t并依赖恰好剩下零高位，也不把内核读取规则绑到示例的字节序上。helper在复制失败时立即返回，不读未初始化的局部值。
 
-<!-- replace: kernel/process/user.c -->
-<!-- before -->
-```c
-    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
-    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
-    {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
-    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
-    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
-    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
-```
-<!-- after -->
-```c
-    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
-    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
-    {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
-    {"futex64", airi_futex64_elf_start, airi_futex64_elf_end}, // 宽键与原四字节键共存。
-    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
-    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
-    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
-```
+先在complete_io结束处插入这个读取助手，原futex_wake仍接在后面。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -98,6 +56,28 @@ extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所�
     ++io_wake_count; // 实际结束一次阻塞，包括错误和超时。
     airi_log("[WAIT_WAKE] pid=%u result=%ld", execution->process->pid, result); // 不在IRQ中打印或复制。
 }
+```
+<!-- after -->
+```c
+    ++io_wake_count; // 实际结束一次阻塞，包括错误和超时。
+    airi_log("[WAIT_WAKE] pid=%u result=%ld", execution->process->pid, result); // 不在IRQ中打印或复制。
+}
+static bool futex_value(uint64_t address, bool wide, uint64_t *value) { // 按请求宽度复制到同类型内核局部值，不靠字节序扩展窄读取。
+    if (wide) return copy_user(current, value, address, sizeof(*value), false); // 验证并复制完整八字节，保留高32位。
+    uint32_t narrow; // 原接口仍只读四字节。
+    if (!copy_user(current, &narrow, address, sizeof(narrow), false)) return false; // 失败不读取未初始化局部值。
+    *value = narrow; // C无符号扩展为64位，不把窄键变成八字节访问。
+    return true; // 只有完整复制成功才参与比较。
+}
+```
+
+futex_wake根据kind选择8或4字节，检查相应自然对齐与完整可访问跨度。数量仍是完整64位并限至16，不先窄化。扫描只完成同kind等待，过期者仍返回-110但不计入成功通知人数，通知也不改原字。
+
+再替换futex_wake开头到过期分支的旧窗口。已有后半段继续完成唤醒；下一窗口只修改其日志选择。
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
 static long futex_wake(uint64_t address, uint64_t count) { // 私有键由进程对象和用户虚拟地址共同组成。
     if ((address & 3) || count > EXECUTION_COUNT) // 必须四字节对齐，完整64位数量不能窄化。
         return -22; // -EINVAL，尚未唤醒任何等待者。
@@ -114,16 +94,6 @@ static long futex_wake(uint64_t address, uint64_t count) { // 私有键由进程
 ```
 <!-- after -->
 ```c
-    ++io_wake_count; // 实际结束一次阻塞，包括错误和超时。
-    airi_log("[WAIT_WAKE] pid=%u result=%ld", execution->process->pid, result); // 不在IRQ中打印或复制。
-}
-static bool futex_value(uint64_t address, bool wide, uint64_t *value) { // 按请求宽度复制到同类型内核局部值，不靠字节序扩展窄读取。
-    if (wide) return copy_user(current, value, address, sizeof(*value), false); // 验证并复制完整八字节，保留高32位。
-    uint32_t narrow; // 原接口仍只读四字节。
-    if (!copy_user(current, &narrow, address, sizeof(narrow), false)) return false; // 失败不读取未初始化局部值。
-    *value = narrow; // C无符号扩展为64位，不把窄键变成八字节访问。
-    return true; // 只有完整复制成功才参与比较。
-}
 static long futex_wake(uint64_t address, uint64_t count, enum io_operation kind) { // 私有键由进程对象、VA及等待宽度共同组成。
     unsigned bytes = kind == IO_FUTEX64 ? 8 : 4; // 只有固定系统调用入口能选择这两种内部类型。
     if ((address & (bytes - 1)) || count > EXECUTION_COUNT) // 按四/八字节自然对齐，完整数量不窄化。
@@ -312,7 +282,7 @@ long airi_futex_wake64(uint64_t *word, unsigned count) { // 宽键显式使用47
 
 新建futex64-probe.c。word显式八字节对齐，marker低四字节不变，ready表示两位worker已开始，returned位0表示窄等待者、位1表示宽等待者。静态检查要求当前目标八字节原子可直接生成指令，不引入缺失的libatomic。
 
-raw为完整参数错误观察保留三个64位寄存器值，不能通过本来只接收unsigned的C包装测试2^32参数，否则错误可能在进入内核以前就被截掉。waiter只把窄指针的数值交给接口，不在用户C里用不兼容的uint32_t类型解引用这个uint64_t对象；读取对象表示由内核受控复制完成。
+raw为完整参数错误观察保留三个64位寄存器值，不能通过本来只接收unsigned的C包装测试2^32参数，否则错误可能在进入内核以前就被截掉。
 
 <!-- write: labs/airios/futex64-probe.c -->
 ```c
@@ -330,6 +300,12 @@ static long raw(long number, uintptr_t address, uint64_t second, uint64_t third)
     __asm__ volatile("int $0x80" : "+a"(number) : "D"(address), "S"(second), "d"(third) : "memory", "cc"); // 保留64位数量与预算。
     return number; // 原始负错误不写errno。
 }
+```
+
+waiter的argument由主传入0或1，分别选择窄等待1和宽等待marker；两个调用传入同一个word地址。它只把窄指针的数值交给接口，不在用户C里用不兼容的uint32_t类型解引用这个uint64_t对象；读取对象表示由内核受控复制完成。原WAIT返回0以后，它才将returned对应位设为1，因此主能区分“已开始”和“这一种等待已经返回”。
+
+<!-- append: labs/airios/futex64-probe.c -->
+```c
 static long waiter(void *argument) { // 同地址分别登记两种宽度，均不修改word。
     unsigned wide = (unsigned)(uintptr_t)argument; // 0为32位，1为64位。
     atomic_fetch_add_explicit(&ready, 1, memory_order_release); // 只表示已经开始，主随后让出三tick供真正登记。
@@ -411,6 +387,50 @@ $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_FUTEX64_ELF='"$(OUT)/user/futex6
 airi_futex64_elf_start: /* 从静态ELF头校验。 */
 .incbin AIRI_FUTEX64_ELF /* 不使用宿主futex替身。 */
 airi_futex64_elf_end: /* 右端不含字节。 */
+```
+
+ELF已经有完整打包范围，接着在kernel/process/user.c的边界声明和目录表中加入futex64：
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
+extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
+extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
+extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
+extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
+extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
+extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
+```
+<!-- after -->
+```c
+extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
+extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
+extern const uint8_t airi_pthread_mutex_elf_start[], airi_pthread_mutex_elf_end[]; // 默认类型与对象生命周期的用户观察。
+extern const uint8_t airi_futex64_elf_start[], airi_futex64_elf_end[]; // 同地址宽度隔离和完整64位比较。
+extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
+extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
+extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
+```
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
+    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
+    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
+    {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
+    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
+    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
+    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
+```
+<!-- after -->
+```c
+    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
+    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
+    {"pthread-mutex", airi_pthread_mutex_elf_start, airi_pthread_mutex_elf_end}, // 公开互斥接口与真实内部等待重试。
+    {"futex64", airi_futex64_elf_start, airi_futex64_elf_end}, // 宽键与原四字节键共存。
+    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
+    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
+    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
 ```
 
 宿主要求三次FUTEX64_WAIT：主三tick超时，加两轮宽worker；两次FUTEX_WAIT来自两轮窄worker。五次记录的VA必须相同，宽期望值均为完整marker，窄期望均1，不能拿两个不同变量冒充同址隔离。

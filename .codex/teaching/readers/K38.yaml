@@ -21,7 +21,7 @@ first_use:
   establishes: 页池加堆数据页计数保持、活payload保持；当前1MiB上限在同一初始叶子表内
 - concept: 扩展的两层提交与回滚
   at: ../../../dev-log/core/38-kernel-heap-growth.md#heap-grow-mapping
-  establishes: 静态区域句柄持页，完整映射清零后才接入块链，任一拒绝回滚新范围；kmalloc有界重试
+  establishes: 一批十六页由静态区域句柄持有，完整映射清零时仍未进入块链；两层分别提交与回滚，kmalloc有界重试
 - concept: 会话采用缓存感知核对
   at: ../../../dev-log/core/38-kernel-heap-growth.md#heap-grow-callers
   establishes: launch三处及内核任务收尾共用same_usage，保留FD与栈回收边界

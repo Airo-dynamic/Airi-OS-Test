@@ -64,13 +64,7 @@ int __airi_pthread_mutex_wait_unref(pthread_mutex_t *mutex); // 同一次操作�
 <a id="mutex-lifetime-implementation"></a>
 ## 所有引用修改都在同一个应用互斥下完成
 
-ref首先验证初始化形状，再比较core.owner与当前airi_thread_id。未持有锁返回正EPERM，引用不变。持有者读取旧计数；到UINT32_MAX返回EAGAIN而不回绕，其余加一。它必须在unlock以前成功，不能先释放再尝试保留一个可能已被销毁的对象。
-
-unref也要求当前持有同一把锁。原worker在无所有权期间调用它会得到EPERM，即使计数非零也不能提前缩短寿命；重取以后计数从1减到0。额外归还遇到0返回EINVAL，保持0，不能下溢。
-
-两个函数的计数修改由core串行，因此无需在这两个入口间再造一把锁。原子读写让destroy检查使用同一种访问方式，不能由此推断已支持并发销毁或SMP。真实条件等待将负责保证配对及调用顺序；当前函数只检查局部所有权和计数，不识别“哪一个引用属于谁”。所有错误直接返回正数，不修改errno。
-
-在pthread_mutex.c加入内部声明和身份接口；init清零，destroy把wait_users也纳入忙检查。然后增加配对函数，原lock、trylock、unlock策略不变：
+先在pthread_mutex.c加入内部声明和身份接口，再修改init与destroy的旧窗口：init在发布state以前清wait_users，destroy把它与owner、contenders一起检查。原lock、trylock、unlock策略保持。
 
 <!-- replace: labs/airios/libc/pthread_mutex.c -->
 <!-- before -->
@@ -118,10 +112,16 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex) { // 调用者已经停止所�
 int pthread_mutex_destroy(pthread_mutex_t *mutex) { // 调用者已经停止所有将来的锁访问，检查不能替代这个寿命约定。
     if (!initialized(mutex)) return EINVAL; // 当前诊断已销毁状态。
     if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->core.contenders, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->wait_users, __ATOMIC_SEQ_CST)) return EBUSY; // 包括暂时不持锁、以后仍须重取的等待者。
-    __atomic_store_n(&mutex->state, 0, __ATOMIC_RELEASE); // 仅静止对象销毁，底层两字段已为0。
+    __atomic_store_n(&mutex->state, 0, __ATOMIC_RELEASE); // 仅静止对象销毁，core.owner、core.contenders 与 wait_users 均为 0。
     return 0; // 可在之后无并发地重新init。
 }
 ```
+
+ref首先验证初始化形状，再比较core.owner与当前airi_thread_id。未持有锁返回正EPERM，引用不变。持有者读取旧计数；到UINT32_MAX返回EAGAIN而不回绕，其余加一。它必须在unlock以前成功，不能先释放再尝试保留一个可能已被销毁的对象。
+
+两个函数的计数修改由core串行，因此无需在这两个入口间再造一把锁。原子读写让destroy检查使用同一种访问方式，不能由此推断已支持并发销毁或SMP。真实条件等待将负责保证配对及调用顺序；当前函数只检查局部所有权和计数，不识别“哪一个引用属于谁”。所有错误直接返回正数，不修改errno。
+
+以下用unlock函数末尾作定位，接入ref；函数本身仍完整保留。
 
 <!-- replace: labs/airios/libc/pthread_mutex.c -->
 <!-- before -->
@@ -143,6 +143,14 @@ int __airi_pthread_mutex_wait_ref(pthread_mutex_t *mutex) { // 仅由内部等�
     __atomic_store_n(&mutex->wait_users, count + 1, __ATOMIC_SEQ_CST); // 必须先登记再释放core。
     return 0; // 不改变锁的所有权或errno。
 }
+```
+
+unref也要求当前持有同一把锁。原worker在无所有权期间调用它会得到EPERM，即使计数非零也不能提前缩短寿命；重取以后计数从1减到0。额外归还遇到0返回EINVAL，保持0，不能下溢。
+
+继续把配对的unref追加到pthread_mutex.c末尾：
+
+<!-- append: labs/airios/libc/pthread_mutex.c -->
+```c
 int __airi_pthread_mutex_wait_unref(pthread_mutex_t *mutex) { // 同一次内部操作重新取得应用锁以后归还。
     if (!initialized(mutex)) return EINVAL; // 配对期间对象必须仍有效。
     if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) != airi_thread_id()) return EPERM; // 不能先减引用再去重新争取锁。
@@ -157,8 +165,6 @@ int __airi_pthread_mutex_wait_unref(pthread_mutex_t *mutex) { // 同一次内部
 ## 原worker回来以前，主只能借用锁，不能撤销对象
 
 新建mutex-lifetime.c。released与resume是观察夹具的独立原子阶段字，await使用100tick总截止和yield让另一执行者运行。它们不保存guard业务数据，也不替代将来的条件队列。
-
-worker设置自己的errno=81，lock并ref，然后unlock。它立即尝试一次过早unref，必须EPERM；之后release发布released=1。主acquire看到这个阶段以后，worker已经释放core且不会在resume前回来争取，因此owner=0、引用=1是同一条真实路径的状态。
 
 <!-- write: labs/airios/mutex-lifetime.c -->
 ```c
@@ -178,6 +184,14 @@ static void await(_Atomic unsigned *word) { // 夹具本身有界，不拿无限
         require(airi_ticks() - start < 100, "mutex lifetime handshake timeout"); airi_yield(); // 真正允许另一执行者运行。
     }
 }
+```
+
+worker设置自己的errno=81，lock并ref，然后unlock。它立即尝试一次过早unref，必须EPERM；之后release发布released=1。主acquire看到这个阶段以后，worker已经释放core且不会在resume前回来争取，因此owner=0、引用=1是同一条真实路径的状态。
+
+resume打开后，它继续同一函数：先lock，再unref；这时owner已经重新保护对象。额外一次unref观察零计数错误，最后unlock并由主join收拢。
+
+<!-- append: labs/airios/mutex-lifetime.c -->
+```c
 static void *worker(void *argument) { // 演示一次未来条件等待所需的锁寿命，不模拟通知。
     (void)argument; errno = 81; // 私有错误槽不应被内部协议改动。
     require(pthread_mutex_lock(&guard) == 0 && __airi_pthread_mutex_wait_ref(&guard) == 0, "mutex lifetime acquire reference"); // 先持锁保留。
@@ -194,8 +208,6 @@ static void *worker(void *argument) { // 演示一次未来条件等待所需的
 
 main先检查NULL为EINVAL、空闲对象上未经lock的ref为EPERM。创建一位真实worker，等released，再验证owner0且引用1。第一次destroy必须EBUSY，trylock却成功；主unlock以后再次destroy仍EBUSY。引用没有阻塞其他普通使用者，也没有因一次别人借用就消失。
 
-主随后发布resume，原worker完成重取、归还和unlock。join返回71，主核对引用0，此时所有使用者已结束，才成功destroy。动态init再把引用清零，并再次静止销毁。主errno仍71，worker已独立验证81。追加main：
-
 <!-- append: labs/airios/mutex-lifetime.c -->
 ```c
 int main(void) { // 主与worker同时使用同一个静态互斥。
@@ -205,6 +217,12 @@ int main(void) { // 主与worker同时使用同一个静态互斥。
     require(__atomic_load_n(&guard.core.owner, __ATOMIC_SEQ_CST) == 0 && __atomic_load_n(&guard.wait_users, __ATOMIC_SEQ_CST) == 1, "mutex lifetime idle owner live reference"); // 空闲不能代表无人再用。
     require(pthread_mutex_destroy(&guard) == EBUSY && pthread_mutex_trylock(&guard) == 0, "mutex lifetime retained but usable"); // 引用阻止撤销对象，但不锁住数据。
     require(pthread_mutex_unlock(&guard) == 0 && pthread_mutex_destroy(&guard) == EBUSY, "mutex lifetime still retained"); // 主释放以后引用仍属于未完成操作。
+```
+
+主随后发布resume，原worker完成重取、归还和unlock。join返回71，主核对引用0，此时所有使用者已结束，才成功destroy。动态init再把引用清零，并再次静止销毁。主errno仍71，worker已独立验证81。继续追加main的收拢部分：
+
+<!-- append: labs/airios/mutex-lifetime.c -->
+```c
     atomic_store_explicit(&resume, 1, memory_order_release); // 允许原worker回来重取。
     require(pthread_join(thread, &result) == 0 && result == (void *)71 && !__atomic_load_n(&guard.wait_users, __ATOMIC_SEQ_CST), "mutex lifetime join reclaimed"); // 已配对，当前再无使用者。
     require(pthread_mutex_destroy(&guard) == 0 && pthread_mutex_init(&guard, 0) == 0 && !guard.wait_users && pthread_mutex_destroy(&guard) == 0 && errno == 71, "mutex lifetime quiescent reinit"); // 静止后销毁/重建才合法。

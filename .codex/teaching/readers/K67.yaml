@@ -25,5 +25,8 @@ first_use:
 borrowed:
 - component: 既有原始线程、64位futex和原子内建
   contract: 仅私人有效输出，有限uint64范围、固定单CPU；旧32位event和队列不在本节迁移
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 完整值/状态通道、四种0返回和推进/通知分离已经解释完整，main的参数失败与两类极值观察集中
+  revision: 保留成熟表格与两worker真实路径，将snapshot/等待、夹具/worker和参数失败/high/edge分块，明确前面极值不改变changed
 not_inferred: 全值与状态运行不推断掌握，未宣称条件变量/SMP/新Linux或GUI

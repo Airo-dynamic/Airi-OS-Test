@@ -59,3 +59,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/06-entry.md#serial-path
   establishes: 先给出实际运行顺序，再将 UART 参数、寄存器约束、栈准备、ELF 链接与 Make 消费接回同一标记。保留所有端口、ABI、构建选项和失败限制。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/06-entry.md#port-registers
+  establishes: out8实参经约束进入AL/DX后才访问UART；初始化、轮询、字符串、日志和停机分别就近闭合；栈对齐数值明确为演算，主机构建与guest执行层次分开。

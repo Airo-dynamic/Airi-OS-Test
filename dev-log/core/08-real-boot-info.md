@@ -72,7 +72,7 @@ static uint32_t memory_kind(uint64_t raw) {  // 把外部协议用途值转换�
     case LIMINE_MEMMAP_BAD_MEMORY:  // 匹配已标坏的内存区域
         return AIRI_MEMORY_BAD;  // 自有分类明确不允许将此区域分配使用
     case LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE:  // 匹配引导器占用且以后可回收的范围
-        return AIRI_MEMORY_BOOT_RECLAIM;  // 当前仍保留此范围，P2 才安排回收
+        return AIRI_MEMORY_BOOT_RECLAIM;  // 当前继续保留；引导页回收须由明确策略安排
     case LIMINE_MEMMAP_EXECUTABLE_AND_MODULES:  // 匹配内核及引导模块的装载范围
         return AIRI_MEMORY_KERNEL;  // 按内核占用分类，不归入空闲 RAM
     case LIMINE_MEMMAP_FRAMEBUFFER:  // 匹配显示像素内存范围
@@ -85,17 +85,11 @@ static uint32_t memory_kind(uint64_t raw) {  // 把外部协议用途值转换�
 
 ## 入口先核对能否读取，再复制必需描述
 
-入口先初始化串口，使后续失败也可报告。读 response 后先确认地图、条目数组和数量存在，再检查数量不超过 128，最后才转换为 uint32_t 并遍历。`memory->entries[i]` 是第 i 个条目指针，还要检查其非空才能用 `->base` 等访问成员。`->` 先沿结构指针找对象，字段 base/length/type 才给当前范围。缺映射、内核地址或四级页表响应同样停机，不能形成一份编造的成功结构。测试宏只将局部 memory 置空，以走缺地图分支。
+入口先初始化串口，使失败也能报告，再读取memory_request.response。memory指向响应结构，其中entries指向条目指针数组，entry_count说明有几项。检查从外向内进行：先确认memory，再确认数组和非零数量；数量不超过128，才允许后面存入自有数组并缩窄为uint32_t。测试宏只把本次局部memory置空，观察缺地图这条分支。
 
-<a id="boot-lifetimes"></a>
+直接映射偏移、内核装载位置与四级页表响应也是必需输入；缺少任一项就停机。通过这组检查只说明可以开始读取和转换，区域本身是否重叠、溢出或没有usable，仍由自有验证器随后判断。
 
-复制范围决定了以后的依赖。每项 base、length、kind 存入 boot_info 自己的 regions 数组，名称经限容格式化进入 loader 数组；`.field=value` 指定成员初始化让未列出的保留字段为零，可选身份响应缺失时使用备用名称。之后验证和日志只读这些副本。
-
-帧缓冲的地址、尺寸、pitch 与颜色位布局也会复制，但像素仍在原显示内存。代码依次确认响应、数量、数组与第一项指针，只适配 RGB 模式；address 已是有效虚拟地址，按本次直接映射偏移求物理起点。复制地址数值没有复制像素，也没有建立映射，绘图仍依赖引导映射；当前不回收引导页，该依赖继续保留。no-framebuffer 宏则略过这部分，静态可选描述保持零。
-
-组装完成后，`airi_kernel_main(&boot_info)` 按普通 C ABI 经 RDI 交出静态对象地址，仍在同一个内核调用链中。四级要求保护当前地址模型，只检查本次翻译层数，不代表本章已经实现了四层页表管理。
-
-**追加到 `kernel/boot/limine.c` 末尾：**
+**追加入口的串口初始化与响应检查，后面继续接组装过程：**
 
 <a id="code-kernel-boot-limine-c-3"></a>
 
@@ -119,6 +113,18 @@ _Noreturn void airi_limine_start(void) {  // 汇编 call 进入的 C 入口，�
     if (!paging_request.response || paging_request.response->mode != LIMINE_PAGING_MODE_X86_64_4LVL)  // 先确认响应存在，再用协议具名常量检查确为四级页表模式
         airi_panic("expected four-level x86-64 paging");  // 拒绝与当前地址模型不同的页表层数
 
+```
+
+<a id="boot-lifetimes"></a>
+
+现在必需响应已存在，适配层把数值复制到静态boot_info。识别值、版本和size来自自有格式；HHDM偏移与两种内核起点来自各自响应；kernel_size用前面的链接标签地址整数差求出。引导器名称与版本经限容格式化进入自己的loader数组，可选身份响应缺失时采用备用文字。
+
+地图要再沿entries取一次指针。`memory->entries[i]`是第i项的地址，先检查它非空，再用 `->base/length/type`读取所指描述。起点、长度和转换后的用途写入boot_info.regions[i]，指定成员初始化使未列出的保留字段为零。复制的是区域元数据，没有搬动该范围的RAM；后续日志与验证从这个自有数组读取。
+
+**继续追加固定字段、名称与逐项地图复制：**
+
+<!-- append: kernel/boot/limine.c -->
+```c
     boot_info.magic = AIRI_BOOT_MAGIC;      // 写入自有结构识别值，之后由独立验证函数读取
     boot_info.version = AIRI_BOOT_VERSION;  // 标明内核与适配层共同使用的接口版本
     boot_info.size = sizeof(boot_info);     // 记录完整结构所占字节数，包含固定地图数组
@@ -138,6 +144,18 @@ _Noreturn void airi_limine_start(void) {  // 汇编 call 进入的 C 入口，�
                                         .length = memory->entries[i]->length,  // 复制区域字节长度，稍后统一验证是否为空或溢出
                                         .kind = memory_kind(memory->entries[i]->type)};  // 把外部用途转成自有枚举；未指定保留字段置零
     }
+```
+
+必需副本已经形成，显示响应另行可选。代码依次检查响应、数量、数组和第一项指针，只适配RGB模式。no-framebuffer宏略过这整段，静态framebuffer保持零，必需地图仍可使用。
+
+这里也复制地址、尺寸、pitch与颜色布局，但像素仍留在原显示内存。raw.address是引导器已经映射的虚拟地址，按本次direct_map_offset求对应物理起点；复制这个数值不会建立映射。当前保留引导页，绘图对原映射和像素范围的借用也继续保留。
+
+组装结束后，`airi_kernel_main(&boot_info)`按普通C ABI经RDI交出静态对象地址，仍在同一内核调用链中。四级响应只限定本次地址模型，本章尚未自行管理四层页表。
+
+**最后追加可选显示与主函数交接，闭合入口：**
+
+<!-- append: kernel/boot/limine.c -->
+```c
 #ifndef AIRI_TEST_NO_FRAMEBUFFER  // 缺画布故障版本完全略过图形适配，静态描述继续为零
     struct limine_framebuffer_response *response = framebuffer_request.response;  // 取得可选显示响应，允许不存在
     if (response && response->framebuffer_count && response->framebuffers &&  // 依次确认响应、数量和指针数组存在，短路避免空指针访问
@@ -212,65 +230,20 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 接收适配层�
 
 适配入口现在调用主函数，主函数又引用 info.c 的验证和统计。把两份实现加入 SOURCES，链接器才取得这些定义；原串口、运行时和构建选项继续保留。取得显示描述不意味着本次入口已经绘图，输出仍走串口。
 
-**完整替换 `Makefile`：**
+**在 Makefile 找到原 SOURCES 及前一行说明，用第二块替换第一块；其余规则保留：**
 
 <a id="code-makefile-1"></a>
 
-<!-- write: Makefile -->
+<!-- replace: Makefile -->
+<!-- before -->
 ```makefile
-# C 编译器默认名称；命令行 CC=路径可以覆盖此赋值
-CC := clang
-# ELF 链接器默认名称，工具脚本会传入实际路径
-LD := ld.lld
-# 主机观察程序的编译器名称，与内核目标工具分开
-HOST_CC := cc
-# 变量尚未设置时采用 normal，命令行可选择独立故障目录
-PROFILE ?= normal
-# 立即将本次 profile 展开为产物目录，防止不同版本共用对象
-OUT := build/$(PROFILE)
+# 列出当前入口路径依赖的四份 C 输入，不提前编入后续模块
+SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c
+```
+<!-- after -->
+```makefile
 # 加入自有启动校验和主函数，链接器才能取得新入口调用的定义
 SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c kernel/boot/info.c kernel/main.c
-# 将每个 .c 路径换成构建目录中的 .o，再加汇编入口对象
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
-# 编译 x86-64 ELF，选择 C11、优化及调试信息，并把常见警告作为错误。
-# 续行中的 freestanding/builtin/stack-protector 选项选择自有运行环境；pic/pie 关闭地址无关产物。
-# 最后一行禁用 red zone/SIMD，采用高地址代码模型，并生成 .d 头文件依赖。
-CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
-          -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
-          -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 为预处理器指定自有头和锁定协议头的搜索路径
-CPPFLAGS := -Iinclude -Ithird_party
-ifeq ($(PROFILE),no-framebuffer) # 当 profile 名称是 no-framebuffer 时加入缺画布故障宏
-# 在预处理阶段定义故障宏，让适配层略过可选图形响应
-CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
-ifeq ($(PROFILE),missing-memory) # 缺地图 profile 采用下一项预处理定义
-# 使入口局部地图指针变空，验证必需信息错误路径
-CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
-ifeq ($(PROFILE),edit-experiment) # 改动展示 profile 采用下面两条文字覆盖定义
-# 向编译器传入两个字符串宏；单引号保护里面的双引号，使它们成为 C 字面量。
-CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
-            -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-endif # 结束当前 Make 条件范围，下面规则恢复对全部 profile 生效
-
-.PHONY: all kernel image host-test clean # 这些名字表示动作而非同名文件，避免同名文件使动作被误判已完成
-all: image # 默认目标先取得 image，也就需要完成其 ELF 前置依赖
-kernel: $(OUT)/airios.elf # 请求 kernel 动作时只生成本 profile 的 ELF
-$(OUT)/%.o: %.c # 模式规则将任意匹配的 C 源文件编译为同路径对象文件
-	@mkdir -p $(dir $@) # 自动变量 $@ 是对象路径，dir 取父目录；@ 隐藏命令回显
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@ # $< 为第一个依赖源码，-c 只编译，-o 指定对象目标
-$(OUT)/%.o: %.S # 预处理汇编使用同一对象目录和编译驱动
-	@mkdir -p $(dir $@) # 自动变量 $@ 是对象路径，dir 取父目录；@ 隐藏命令回显
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@ # $< 为第一个依赖源码，-c 只编译，-o 指定对象目标
-$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld # 全部对象和链接脚本变化都会使 ELF 需要重新生成
-	# 按 x86-64 ELF 静态链接，不加入宿主启动库；最大页大小采用 4096 字节。
-	# 续行再禁用可执行栈，使用当前链接脚本，把全部对象写成此目标 ELF。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
-	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-image: $(OUT)/airios.elf # 先有当前 ELF，才执行下一行镜像打包
-	python3 scripts/image.py $(PROFILE) # 把 profile 作为独立脚本参数交给打包流程
--include $(OBJECTS:.o=.d) # 替换对象后缀读取头依赖文件；开头 - 允许首次尚无 .d
 ```
 
 重新构建 ELF 和介质，再启动一次机器。观察脚本仍等待完整教学标记，标记之前的地址与地图则来自这次 Limine 响应。不能拿 05 的两项主机夹具或先前启动的日志代替本次数据。

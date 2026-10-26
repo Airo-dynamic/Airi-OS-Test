@@ -23,7 +23,7 @@ static void physical_memory_demo(void) { // 页池已经初始化，临时借出
     if (!first || !second || first == second) // 耗尽和重复借出都不允许继续写入。
         airi_panic("physical page allocation failed"); // 停止潜在的内存破坏。
     volatile uint64_t *mapped = airi_memory_direct(first); // HHDM 将物理页转换为当前可访问的虚拟别名。
-    *mapped = 0x4149524950414745ull; // 真正写入刚借出的 RAM，volatile 保留设备级观察所需的访问。
+    *mapped = 0x4149524950414745ull; // 真正写入刚借出的 RAM，volatile 保留本次普通 RAM 写读，不提供并发同步。
     if (*mapped != 0x4149524950414745ull || pages.free != before - 2) // 验证内容和所有权统计是同一次分配结果。
         airi_panic("physical page write/accounting failed"); // 不能只凭非零地址宣称可用。
     if (!airi_page_free(&pages, first) || airi_page_free(&pages, first) || airi_page_free(&pages, second + 1)) // 验证正常归还、重复释放拒绝和未对齐释放拒绝。

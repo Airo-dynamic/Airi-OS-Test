@@ -15,7 +15,7 @@ already_explained:
 first_use:
 - concept: 用户主动释放整页范围
   at: ../../../dev-log/core/35-user-page-release.md#release-order
-  establishes: 全段预检后逐页unmap/invlpg再归还物理页，不接受ELF和初始栈
+  establishes: 从A第二页归还进入全段预检，逐页unmap/invlpg后归还物理页；末项补洞使下标移动，下一页重新查索引，不接受ELF和初始栈
 - concept: 无序页记录上的首次适配
   at: ../../../dev-log/core/35-user-page-release.md#release-first-fit
   establishes: 冲突越过占用页后重查，复用低地址连续VA洞，物理页不要求连续

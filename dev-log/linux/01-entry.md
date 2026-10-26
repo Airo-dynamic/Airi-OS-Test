@@ -369,7 +369,14 @@ with (work/'qemu.log').open('w') as log:  # QEMU主机输出写文件，离开wi
             process.wait()  # 回收已经结束的进程，避免留下子进程资源
 ```
 
-下面两条是使用个人 SSH 通路的实际操作：第一条运行 Linux 程序，第二条调试本机虚拟 CPU。它们分别写上述独立目录，不把这两个环境合为同一次实验。
+源码、符号和观察器现在已经各有位置，再执行下面两条命令。第一条把 ordinary/raw 的源码交给 Linux，由 Linux 构建并运行；第二条把同次内核 ELF 与源码交给远端 GDB，CPU 仍在本机 QEMU。两者都使用个人 SSH 通路，连接成功以后要核对的对象却不同。
+
+| 操作 | 真正执行被观察代码的位置 | 本次要取得的结果 |
+| --- | --- | --- |
+| linux-lab | 个人 x86-64 Linux 进程 | ordinary 参数与 raw syscall 的寄存器、输出、退出 |
+| kernel-debug | 本机 QEMU 中的 guest CPU | 自有栈、RDI 启动参数及对应符号停点 |
+
+下面分别写入上述独立目录；不能拿前一个实验的输出补成后一个实验的停点。
 
 ```sh
 ./airios linux-lab  # 向个人主机传输并实际运行两份程序，保存输出与GDB记录。

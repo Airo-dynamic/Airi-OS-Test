@@ -44,8 +44,6 @@ long airi_event64_notify(airi_event64 *event, unsigned count); // 仅通知至�
 
 新建event64.c。布局和编译检查要求对齐八字节及直接原子操作。snapshot先验证显式形状、输出对齐和字段别名，成功以后才acquire读序号并写输出；失败没有半写，也不把最高位保留给错误。
 
-wait保持K60分工：先验证最大6000tick预算，当前版本不等于expected就在用户态返回0；相同才进46号比较登记。原调用被通知返回0、或内核比较失效返回-11，都变成“重查”的0，返回前再acquire读一次。到期仍为-110；它不循环替业务决定条件真假，也不授予任何对象所有权。
-
 <!-- write: labs/airios/libc/event64.c -->
 ```c
 #include <airi_event64.h> // 数据值与状态码使用不同返回位置。
@@ -59,6 +57,12 @@ long airi_event64_snapshot(airi_event64 *event, uint64_t *value) { // output必�
     *value = __atomic_load_n(&event->sequence, __ATOMIC_ACQUIRE); // 包括UINT64_MAX在内都作为数据保存，不窄化到long。
     return 0; // 状态与完整数据分别交付。
 }
+```
+
+wait保持K60分工：先验证最大6000tick预算，当前版本不等于expected就在用户态返回0；相同才进46号比较登记。原调用被通知返回0、或内核比较失效返回-11，都变成“重查”的0，返回前再acquire读一次。到期仍为-110；它不循环替业务决定条件真假，也不授予任何对象所有权。
+
+<!-- append: labs/airios/libc/event64.c -->
+```c
 long airi_event64_wait(airi_event64 *event, uint64_t expected, unsigned ticks) { // 不替调用者决定业务条件。
     if (!valid(event) || ticks > 6000) return -22; // 完整预算先验证。
     if (__atomic_load_n(&event->sequence, __ATOMIC_ACQUIRE) != expected) return 0; // 早已变化则无需46号。
@@ -102,8 +106,6 @@ long airi_event64_notify(airi_event64 *event, unsigned count) { // 可以要求�
 
 新建events64.c。high从最高位为1开始，edge从最大值前一位开始，changed从0开始。三者职责分开，不能把极值观察产生的通知借给普通等待。ready表示两worker取得了旧0，rechecks记录无变化返回，done只在真正读到新版本时增加。
 
-两worker用status检查snapshot成功，再读取私人expected/current。它们只等待changed从0到1，因此工作函数最后可以返回已验证的1；这不是用long重新承载任意64位版本。所有版本快照本身仍通过uint64_t输出。循环共享一次200tick起点，通知后不续借预算。
-
 <!-- write: labs/airios/events64.c -->
 ```c
 #include <airi_event64.h> // 完整值写到私人uint64_t，long只返回状态。
@@ -121,6 +123,12 @@ static void await(_Atomic unsigned *word, unsigned value) { // 夹具总等待�
         require(airi_ticks() - start < 100, "event64 handshake timeout"); airi_yield(); // 让真实其他执行者运行。
     }
 }
+```
+
+两worker先检查snapshot的返回状态，再读取私人expected/current。它们只等待changed从0到1，因此工作函数最后可以返回已验证的1；这不是用long重新承载任意64位版本。所有版本快照本身仍通过uint64_t输出。循环共享一次200tick起点，通知后不续借预算。
+
+<!-- append: labs/airios/events64.c -->
+```c
 static long waiter(void *argument) { // 两人等同一个宽版本，但不消费通知令牌。
     (void)argument; uint64_t expected, current; // 所有版本数据都保留完整64位。
     if (airi_event64_snapshot(&changed, &expected) || expected != 0) return -250; // 第一份快照在主推进以前取得。
@@ -142,9 +150,7 @@ static long waiter(void *argument) { // 两人等同一个宽版本，但不消�
 
 main从私人value=71开始，验证NULL、未对齐和输出字段别名的-22及保持。notify17拒绝，notify0不请求内核，坏等待预算也先拒绝。
 
-high的snapshot必须状态0、输出0x8000000000000000，再advance到0x8000000000000001。旧高值等待在用户态发现不同，围住它的两次45号差值为1，只有结束查询自身。edge最后一次推进到UINT64_MAX，snapshot仍状态0并完整写出全1；再advance才-75，序号保持，后续snapshot依然成功。
-
-high给当前完整值三tick等待，必须真实46号到期，内核日志的期望为9223372036854775809。最高位不只在一个用户比较中存在，也确实经过宽等待边界。
+先完成这些显式失败检查，再用high与edge观察成功数据；它们都不会推进changed，后面的两worker仍从changed=0取得快照。
 
 <!-- append: labs/airios/events64.c -->
 ```c
@@ -152,11 +158,25 @@ int main(void) { // 所有输出槽都属于当前调用栈，不与事件字段
     uint64_t value = 71; // 失败必须保持哨兵。
     require(airi_event64_snapshot(0, &value) == -22 && airi_event64_snapshot(&changed, 0) == -22 && airi_event64_snapshot(&changed, (uint64_t *)((uintptr_t)&value + 4)) == -22 && value == 71, "event64 output validation"); // NULL/未对齐不写半个结果。
     require(airi_event64_snapshot(&changed, &changed.sequence) == -22 && airi_event64_notify(&changed, 17) == -22 && airi_event64_notify(&changed, 0) == 0 && airi_event64_wait(&changed, 0, 6001) == -22, "event64 alias and budget"); // 原子字段不能充当私人普通输出。
+```
+
+继续追加main。high的snapshot必须状态0、输出0x8000000000000000，再advance到0x8000000000000001。旧高值等待在用户态发现不同，围住它的两次45号差值为1，只有结束查询自身。
+
+<!-- append: labs/airios/events64.c -->
+```c
     require(airi_event64_snapshot(&high, &value) == 0 && value == 0x8000000000000000ull && airi_event64_advance(&high) == 0, "event64 sign bit data"); // 最高位为1仍是成功数据。
     uint64_t before = airi_thread_syscalls(); // 只测旧高位快照的等待。
     require(airi_event64_wait(&high, 0x8000000000000000ull, 20) == 0, "event64 changed high snapshot"); // 当前高值已加1，用户态直接重查。
     uint64_t after = airi_thread_syscalls(); // 结束查询自身一次。
     require(after - before == 1 && airi_event64_snapshot(&high, &value) == 0 && value == 0x8000000000000001ull, "event64 fast and full output"); // 不把最高位截掉或当错误。
+```
+
+edge最后一次推进到UINT64_MAX，snapshot仍状态0并完整写出全1；再advance才-75，序号保持，后续snapshot依然成功。
+
+high给当前完整值三tick等待，必须真实46号到期，内核日志的期望为9223372036854775809。最高位不只在一个用户比较中存在，也确实经过宽等待边界。
+
+<!-- append: labs/airios/events64.c -->
+```c
     require(airi_event64_snapshot(&edge, &value) == 0 && value == UINT64_MAX - 1 && airi_event64_advance(&edge) == 0 && airi_event64_snapshot(&edge, &value) == 0 && value == UINT64_MAX, "event64 maximum data"); // 全1值也能成功交付。
     require(airi_event64_advance(&edge) == -75 && airi_event64_snapshot(&edge, &value) == 0 && value == UINT64_MAX, "event64 saturation unchanged"); // 不以回绕伪装新代次。
     uint64_t start = airi_ticks(); require(airi_event64_wait(&high, 0x8000000000000001ull, 3) == -110 && airi_ticks() - start >= 3, "event64 full high timeout"); // 当前值相同则实际宽等待到期。

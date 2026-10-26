@@ -39,3 +39,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/07-first-boot.md#code-config-boot-limine-conf-1
   establishes: 区分主机 staging、外层 ISO 与 CD 映像内部 FAT；固件读启动映像的 EFI，Limine 再取配置与内核。固定版本构建规则已核实，完整行、超时与主机回收条件保留。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/07-first-boot.md#host-guest-output
+  establishes: staging四份输入分别接到外层ISO与内部FAT启动映像；脚本先准备本轮路径和argv，再就近启动Popen、等待完整新行并回收，90秒截止与失败条件保留。

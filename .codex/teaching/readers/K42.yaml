@@ -18,7 +18,7 @@ first_use:
   establishes: FS:8得到当前基址加8的用户线性地址，设置值不映射或固定其目标页面
 - concept: 特权MSR与段选择子的不同作用
   at: ../../../dev-log/core/42-user-fs-base.md#fs-msr
-  establishes: ECX选MSR、EDX:EAX组成64位值；用户设置前拒绝非规范/高半区，先装空选择子再写完整基址
+  establishes: ECX选MSR、EDX:EAX组成64位值；用户设置前拒绝非规范/高半区，装入选择子35会令旧缓存过时，每次取实际值，恢复先装空选择子再写完整基址
 - concept: 真实硬件值共同入口与恢复
   at: ../../../dev-log/core/42-user-fs-base.md#fs-entry
   establishes: 用户能装合法选择子，因此每次CS3入口先取实际FS再清零；无新ISR的返回也要恢复

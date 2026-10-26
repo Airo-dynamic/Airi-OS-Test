@@ -31,3 +31,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/01-tools.md#tool-paths
   establishes: 从主机观察与内核两种产物说明 CC/LD/HOST_CC 的消费关系；工具选择、参数组成与 Make 执行分别成立。保留覆盖优先级、符号链接与错误条件。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/01-tools.md#tool-paths
+  establishes: 沿clang/llvm实际候选走到路径返回，再将选中路径装入Make的CC参数；ROOT解析与工具保名分别解释，argv赋值不混同Python变量。

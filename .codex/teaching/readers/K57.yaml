@@ -25,5 +25,8 @@ first_use:
 borrowed:
 - component: 既有128号陷入、45号整数包装与identity镜像入口
   contract: 计数是AiriOS观察ABI，不是Linux接口或耗时指标；饱和后不用于差值
-feedback: []
+feedback:
+- source: B09计数消费与编辑导航复核
+  observation: 入口位置、45号返回和生命周期条件集中说明，identity编辑窗口数还写成五个
+  revision: 按字段→真实入口加一→45号读取接续，保留18条记录与生命周期推导，准确指向三个identity旧窗口并区分差值9与锁请求8
 not_inferred: 重建、运行与次数符合不推断读者已掌握

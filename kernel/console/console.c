@@ -86,7 +86,7 @@ void airi_map_line(const struct airi_console *c, unsigned i, char *s, size_t n) 
     }
     const struct airi_memory_region *r = &c->boot->regions[i];  // 借用第i条实际内存范围，读取起点、长度和类别
     airi_snprintf(s, n, "%03u %016llx %016llx %s", i, (unsigned long long)r->base,  // 记录区域下标与物理半开区间左右端点，地址固定十六进制宽度方便逐列比较
-                  (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把当前64位字段转成格式要求的unsigned long long
+                  (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把区间右端转为 unsigned long long，kind 另转为静态用途名称
 }
 static void system_info(struct airi_console *c) {  // 将启动身份和内核尺寸加入命令输出
     airi_console_print(c, "AiriOS 0.1 / x86_64 / learning kernel");  // 将AiriOS 0.1 / x86_64 / learning kernel保存为一条命令说明或身份记录
@@ -96,7 +96,7 @@ static void system_info(struct airi_console *c) {  // 将启动身份和内核�
 }
 void airi_console_init(struct airi_console *c, const AiriBootInfo *b) {  // 清命令状态并绑定只读启动结构，形成初始文字
     airi_memset(c, 0, sizeof(*c));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
-    c->boot = b;     // 将借用启动信息，描述与内存地图须持续有效置为b，后续读取使用新状态
+    c->boot = b;     // 保存调用者提供的启动信息地址；会话继续借用结构和地图，使用期间须有效
     system_info(c);  // 从同一启动结构生成系统身份与内核镜像尺寸
     airi_console_print(c, "");  // 在输出环中保存一条空行，为后续显示保留间隔
     airi_console_print(c, "System console attached.");  // 将System console attached.保存为一条命令说明或身份记录

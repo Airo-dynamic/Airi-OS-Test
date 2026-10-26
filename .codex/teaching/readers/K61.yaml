@@ -31,5 +31,8 @@ first_use:
 borrowed:
 - component: 既有所有权锁、变化通知、用户工作执行者与PIT
   contract: 有效对象和私人不重叠输出，固定四槽、有限代次、单CPU；不是完整线程池或pthread
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 锁下取得旧版本、持锁通知提交点、关闭排空和接受/完成区分已有完整解释
+  revision: 保留成熟模型，将期限/持锁助手与解锁等待分开，将limited饱和解释放回独立对象首次使用前，保全所有失败和输出条件
 not_inferred: 运行和重建不推断掌握，无新Linux/GUI验证

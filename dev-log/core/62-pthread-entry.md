@@ -231,7 +231,7 @@ static void *held(void *argument) { // 容量worker从回调开始就不再占�
 }
 ```
 
-main把自己的errno设为71，验证无效参数、非NULL属性、self join、零／过宽身份等正错误与输出保持。随后创建两位echo，比较这两个已创建尚未join的有效身份；第一位join完整返回原token指针，第二位用NULL丢弃结果也仍收拢。再重复join旧身份只检验本实现的ESRCH扩展，不作为标准用法。
+main把自己的errno设为71，先验证无效参数、非NULL属性、self join、零／过宽身份等正错误与输出保持。此时还没有创建echo，也没有可收取的worker。
 
 <!-- append: labs/airios/pthread-probe.c -->
 ```c
@@ -244,6 +244,14 @@ int main(void) { // 所有创建/收取都从主执行者开始。
     void *output = (void *)(uintptr_t)99; // join失败保持私人输出。
     require(pthread_join(primary, &output) == EDEADLK && pthread_join(0, &output) == ESRCH && pthread_join((pthread_t)UINT32_MAX + 1, &output) == ESRCH, "pthread invalid joins"); // 不窄化过宽值。
     require(output == (void *)(uintptr_t)99 && errno == 71, "pthread join failure preserves state"); // 正错误不写errno。
+```
+
+继续在main中创建两位echo，比较这两个已创建尚未join的有效身份。第一位join完整返回原token指针，第二位用NULL丢弃结果也仍收拢；结果对象来自main持有的tokens，启动包早已在业务函数调用前释放。再重复join旧身份，只检验本实现的ESRCH扩展，不作为标准用法。
+
+下面两条成功 join 的断言还在 join 返回后比较了旧身份。此时目标身份的标准寿命已经结束；这里能继续比较，仅来自本实现整数 TID 不复用、`pthread_equal` 比较数值的限定。可移植代码应在 join 前比较有效身份，不能把这两条断言移植为一般 pthread 用法。[pthread_equal 的有效身份要求](https://man7.org/linux/man-pages/man3/pthread_equal.3p.html)也适用于这里。K63 将把观察改为创建者、槽位复用与仍存活的 leaf，并删除这两处结束后的比较。
+
+<!-- append: labs/airios/pthread-probe.c -->
+```c
     pthread_t threads[8]; // 只在create成功以后使用每个槽。
     for (unsigned i = 0; i < 2; ++i) { tokens[i].index = i; require(pthread_create(&threads[i], 0, echo, &tokens[i]) == 0 && errno == 71, "pthread initial create"); } // 新worker可以在下一次创建以前已经返回。
     require(!pthread_equal(threads[0], threads[1]), "pthread distinct live identities"); // 两个已创建尚未join的身份都仍有效。
@@ -257,8 +265,6 @@ int main(void) { // 所有创建/收取都从主执行者开始。
 
 第一种失败发生在包分配成功以后：先让八位held进入回调，所有包已free，八工作槽仍全被占用。主第九次create会先分配一个包，再被内核以容量不足拒绝。它必须free这个失败包，返回EAGAIN，thread哨兵777和errno71保持。前后malloc_info快照的活对象、活字节应相同，不能把失败包泄漏成一项隐藏状态。
 
-发布门以后收取八人，再做24轮顺序create/join，超过槽数但从不超过同时八人的容量。所有回调返回自己的原参数。这里不要求每一次join都真的阻塞：目标可能早已结束，仍应正常收取，不能把某种调度顺序当正确性的前提。
-
 <!-- append: labs/airios/pthread-probe.c -->
 ```c
     for (unsigned i = 0; i < 8; ++i) require(pthread_create(&threads[i], 0, held, &tokens[i]) == 0 && errno == 71, "pthread capacity fill"); // 八个真实工作槽全部占用。
@@ -269,6 +275,12 @@ int main(void) { // 所有创建/收取都从主执行者开始。
     unchanged = 777; require(pthread_create(&unchanged, 0, held, 0) == EAGAIN && unchanged == 777 && errno == 71, "pthread capacity error"); // 第九次malloc包后创建失败，必须归还。
     struct airi_malloc_info after = airi_malloc_info(); // 一致快照与失败以前比较。
     require(after.live_objects == before.live_objects && after.live_bytes == before.live_bytes, "pthread failed packet cleanup"); // 失败路径不泄漏包。
+```
+
+发布门以后收取八人，再做24轮顺序create/join，超过槽数但从不超过同时八人的容量。所有回调返回自己的原参数。这里不要求每一次join都真的阻塞：目标可能早已结束，仍应正常收取，不能把某种调度顺序当正确性的前提。
+
+<!-- append: labs/airios/pthread-probe.c -->
+```c
     require(airi_event_publish(&gate) >= 0, "pthread capacity release"); // 版本前进让尚未登记的人也不睡错。
     for (unsigned i = 0; i < 8; ++i) require(pthread_join(threads[i], &output) == 0 && output == &tokens[i], "pthread capacity join"); // 八个原参数分别返回。
     for (unsigned i = 0; i < 24; ++i) { // 超过八槽总量，验证重复创建/收取与包复用。

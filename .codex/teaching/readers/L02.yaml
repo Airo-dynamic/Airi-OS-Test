@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/02-memory.md#linux-vma-rss
   establishes: 同一 64MiB 范围历经保留、逐页触碰、首页只读、孩子故障、解除。补明 mprotect 拆 VMA 后快照范围变小的含义，保留 RSS/缺页统计边界与远端未验证。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: snapshot 的地址先定位实际VMA，再解释统计范围变化；触页与保护/故障主流程分块接续。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

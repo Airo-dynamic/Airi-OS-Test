@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/20-user-boundary.md#user-address-space
   establishes: 从内核任务缺少隔离引入权限边界；同一用户字符串跨页验证、TSS 交接、所选现场和离栈回收连续展开，保留四项受控故障及 ABI 精度。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/20-user-boundary.md#int80-contract
+  establishes: 沿真实0x70000ffc/8跨页write绑定现场、两轮检查复制和返回RAX；分开用户栈、陷入栈、启动现场的实际交接，用户实现按所有权阶段分块，继承文件改可定位增量。

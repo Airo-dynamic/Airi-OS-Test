@@ -31,3 +31,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/00-first-tool.md#kernel-model
   establishes: 保留已认可完整稿，复查外层解释脚本、默认内层探测、入口异常和退出码，并接到新 01 的工具选择；实现、命令和局部语法说明保持。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/00-first-tool.md#process-arguments
+  establishes: 先闭合main内的等待与错误返回，再就近写文件入口；函数整数经过SystemExit成为进程退出码，两次Python运行角色保持。

@@ -13,7 +13,7 @@ size_t strlen(const char *text); // 用户有效NUL字符串长度。
 long airi_write(unsigned fd, const void *buffer, size_t bytes); // 自有int80 ABI，失败直接返回负数。
 long airi_getpid(void); // 获取当前用户身份。
 _Noreturn void airi_exit(unsigned code); // 退出不返回用户调用方。
-long airi_puts(const char *text); // 有界串口write，不自动补换行。
+long airi_puts(const char *text); // 有界 FD 写入，不自动补换行。
 long airi_fork(void); // 首版内核直接复制用户页，子返回0，父返回子PID。
 long airi_waitpid(long pid, int *status); // pid=-1或指定孩子；status是普通退出值。
 void *airi_alloc(size_t bytes); // 零填充页申请，失败NULL；显式release整页或进程结束回收。

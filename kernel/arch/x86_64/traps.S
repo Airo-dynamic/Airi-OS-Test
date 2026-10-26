@@ -13,7 +13,7 @@ airi_tables_load: /* rdi 指向 GDT 描述符，rsi 指向 IDT 描述符。 */
     movw %ax, %es /* 设置额外数据段选择子。 */
     movw %ax, %ss /* 设置内核栈段选择子。 */
     movw $40, %ax /* TSS 描述符从 GDT 第五项开始，占两项。 */
-    ltr %ax /* 为双重故障加载独立栈信息。 */
+    ltr %ax /* 加载 TSS，提供双重故障 IST 与用户跨权时的 RSP0。 */
     lidt (%rsi) /* 后续异常从自己的 IDT 取入口。 */
     ret /* 返回 C 初始化函数。 */
 .size airi_tables_load, .-airi_tables_load /* 记录函数长度。 */

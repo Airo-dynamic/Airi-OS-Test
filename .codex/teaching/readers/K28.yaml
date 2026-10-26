@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/28-pipes.md#pipe-endpoint-owner
   establishes: 同一 child 数据流引出环中未读状态和端点存活；100 字节容量演算参与回绕，空/EAGAIN/EOF 与 HUP 按写者生命周期展开，保留原子创建和范围限制。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 端点引用与字节环模型保留；文件层六组、用户层四组修改准确接到原有RAM路径，阶段标记同步。
+  evidence: 完整正文、编辑动作和原生旁注复读；源码与冻结检查点逐字相同，不推定用户已掌握。

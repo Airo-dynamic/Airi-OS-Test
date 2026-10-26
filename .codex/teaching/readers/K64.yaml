@@ -28,5 +28,8 @@ first_use:
 borrowed:
 - component: 既有用户输出验证、线程运行库、版本门与延后回收
   contract: worker目标、有效私人输出、固定单CPU；无主独立退出/detach/cancel与新Linux/GUI实测
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 等待出边/目标认领、闭环与结果撤销模型成熟，目录注册打断字段到join机制，助手与入口同在长替换块
+  revision: 保留16步/464与904字节/各错误合同，将观察注册移到构建段，分开join_cycle和join_worker旧窗口，将原始坏输出与B放行解释放回实际消费者
 not_inferred: 图关系和运行不推断掌握，未宣称SMP或完整POSIX

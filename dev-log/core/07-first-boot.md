@@ -33,11 +33,20 @@ serial: yes
 
 ## 主机先组织目录树，制镜像工具再写入启动信息
 
-image.py 接收 Make 传来的 profile，`sys.argv[1]` 选择 build/normal 等目录。它先删除旧 staging，再重建本次目录树，防止已不需要的旧文件混入新镜像；其他配置继续使用各自目录。
+Make执行 `python3 scripts/image.py normal` 时，sys.argv[1]给出normal，out就指向工程的build/normal，staging再指向其中的iso目录。这个iso目录还是主机上的普通目录树；脚本先删除它的旧版本，再只放入本轮选定文件，其他profile的目录不受影响。
 
-四次 copyfile 分别放入内核、根目录配置、外层 EFI 文件和已经含有 FAT/EFI 内容的 CD 映像。copyfile 只是主机文件复制，不会重新制作 CD 映像内部的 FAT。`xorriso -as mkisofs` 将 staging 写成 ISO，`--efi-boot` 等参数登记现成映像并提供相应启动布局，QEMU 随后才能使用它。
+四次copyfile把材料放到各自的位置：
 
-每个路径仍是 argv 的独立元素。至此增加的是磁盘数据，脚本成功打印 Image 只说明打包完成，还没有执行内核。
+| 主机输入 | staging内的位置 | 后续用途 |
+| --- | --- | --- |
+| out下的airios.elf | boot/airios.elf | Limine按配置装载的内核 |
+| config/boot/limine.conf | limine.conf | 运行中的Limine读取配置 |
+| 已展开的BOOTX64.EFI | EFI/BOOT/BOOTX64.EFI | 外层ISO保存的EFI文件 |
+| 已展开的limine-uefi-cd.bin | boot/limine/limine-uefi-cd.bin | 内含FAT与EFI程序，登记为本次光盘启动映像 |
+
+copyfile只复制现成字节，不会重新制作bin内部的FAT。xorriso随后消费整个staging目录，以mkisofs参数风格写出airios.iso；`--efi-boot`指向目录中的bin，登记UEFI启动信息。因而OVMF首先进入bin内部那份EFI程序，运行中的Limine才按外层配置取得内核。
+
+所有路径仍各占argv的一项。脚本打印Image时，完成的是主机磁盘上的镜像文件，尚未启动QEMU或执行内核。
 
 **新建 `scripts/image.py`：**
 
@@ -59,7 +68,7 @@ if staging.exists():  # 本轮打包前判断旧 staging 是否存在，避免�
 (staging/'EFI/BOOT').mkdir(parents=True)     # 创建 UEFI 默认启动路径的父目录
 shutil.copyfile(out/'airios.elf',staging/'boot/airios.elf')  # 把本次 ELF 放到 Limine 配置将读取的介质路径
 shutil.copyfile(ROOT/'config/boot/limine.conf',staging/'limine.conf')  # 把内核路径及交接协议配置放到介质根目录
-shutil.copyfile(ROOT/'third_party/limine/BOOTX64.EFI',staging/'EFI/BOOT/BOOTX64.EFI')  # 放入 OVMF 按 UEFI 默认路径启动的 Limine 程序
+shutil.copyfile(ROOT/'third_party/limine/BOOTX64.EFI',staging/'EFI/BOOT/BOOTX64.EFI')  # 在外层 ISO 保留同名 EFI 文件；本次光盘入口由登记的 bin 提供
 shutil.copyfile(ROOT/'third_party/limine/limine-uefi-cd.bin',  # 选择已校验的 UEFI 光盘启动映像作为复制来源
                 staging/'boot/limine/limine-uefi-cd.bin')  # 将光盘启动映像放进 xorriso 稍后登记的介质路径
 subprocess.run([tool('xorriso','xorriso'),'-as','mkisofs','-R','-r','-J',  # 选择 xorriso，使用 mkisofs 参数风格与目录命名扩展建立 ISO
@@ -81,13 +90,7 @@ print(f'Image: {out/"airios.iso"}')  # 打印实际生成的主机镜像路径�
 
 机器固定为 q35 主板、qemu64 CPU、单 CPU、256 MiB，采用 TCG 将 guest 指令翻译为主机操作，所以 Apple Silicon 也能运行 x86-64 内核。cdrom 选择新 ISO，boot d 优先光盘；pflash 两份 drive 分别放只读固件 code 与本轮可写 vars 副本，参考固件保持不变。
 
-Popen 启动后立即交回进程对象，Python 可以继续读日志。启动前删除旧 serial.log，再用 monotonic 建立 90 秒截止点；单调时间不随墙上时钟校准倒退。poll 为 None 表示仍运行，整数表示已经退出，未取到标记就退出必须失败。
-
-每 0.1 秒读一次可能遇到半行。splitlines 保留行尾，只接受以标记开头且换行已到的完整行；读到它才打印结果并 break。旧日志先删除、半行不接受，分别避免旧成功与尚未发完的输出被当成本轮完成。
-
-while 的 else 在没有 break 时报告超时，finally 则无论成功或异常都回收 QEMU：先 terminate，等五秒，仍不退出再 kill/wait。guest 的 hlt 不会替它完成这项主机进程清理。
-
-**新建 `scripts/first_boot.py`：**
+**新建 `scripts/first_boot.py`，先准备本轮文件和QEMU参数：**
 
 <a id="code-scripts-first-boot-py-1"></a>
 
@@ -95,7 +98,7 @@ while 的 else 在没有 break 时报告超时，finally 则无论成功或异�
 ```python
 """Bounded serial-only observation before the full QMP test harness exists."""  # 只按本次串口标记观察启动，超过截止时间即失败
 from pathlib import Path  # 将文件名包装为可拼接、可读取的路径对象
-import shutil      # 复制文件及移除旧的打包目录树
+import shutil      # 为本轮 QEMU 复制可写固件变量
 import subprocess  # 启动主机工具，取得退出状态或保存进程对象
 import time  # 用单调时钟等待启动，并在两次检查之间暂停
 from tools import ROOT, tool  # 借用工程根路径及已确定的工具查找顺序
@@ -112,6 +115,18 @@ command = [tool('qemu-system-x86_64', 'qemu'), '-machine', 'q35', '-accel', 'tcg
            '-drive', f'if=pflash,format=raw,unit=1,file={work / "vars.fd"}',  # unit 1 装入本轮可写固件变量副本
            '-cdrom', str(ROOT / 'build/normal/airios.iso'), '-boot', 'd',  # 把当前 normal 镜像作为光盘，并优先从光盘启动
            '-serial', f'file:{serial}']  # 将 COM1 输出连接到此轮主机日志文件，列表到此闭合
+```
+
+现在command已经指定本次ISO、只读固件和新的vars副本，serial也定位到刚清空的日志路径。下面才让Popen启动QEMU，它立即交回进程对象，Python随后可以一边保留这次运行，一边读取它接出的串口文件。
+
+deadline用单调时间monotonic设为90秒以后，不随墙上时钟校准倒退。每0.1秒读取一次serial.log，文件尚未出现时先取空串；已经读到的文字也可能只有半行。splitlines保留行尾，只有一行以标记开头且换行已到，才打印本轮输出并break。删旧文件排除了旧成功，完整行条件排除了尚未发完的记录。
+
+等待还检查这一个process。poll返回None表示QEMU仍在运行，整数则是它已退出的状态；未收到标记就退出，立即报告失败。while未通过break离开时，else报告截止超时。无论哪条结果，finally都先terminate、wait五秒，仍不结束才kill并wait。guest中的hlt只暂停虚拟CPU，不会替Python回收主机进程。
+
+**继续追加启动、等待与回收，闭合本轮观察：**
+
+<!-- append: scripts/first_boot.py -->
+```python
 with (work / 'qemu.log').open('w') as errors:  # 打开 QEMU 自身诊断文件；退出此范围时关闭主机文件句柄
     process = subprocess.Popen(command, stdout=errors, stderr=errors)  # 启动 QEMU 后立即取得进程对象；其 stdout/stderr 都写诊断文件
     try:  # 把本轮等待异常与 finally 中的进程清理关联起来

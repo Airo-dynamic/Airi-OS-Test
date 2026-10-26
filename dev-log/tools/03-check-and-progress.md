@@ -76,9 +76,18 @@ if __name__ == '__main__':  # 直接执行此文件才进入命令入口，作�
 <a id="tool-progress"></a>
 ## 只更新一条路线的停留点
 
-有了可定位的声明，命令入口才可以让 list、show、check 和 export 消费同一份记录，避免各维护一套编号。`checkpoints()` 把章节列表转换为“身份→章节记录”的字典。list遍历其中的记录并按track过滤显示，show用身份找到document再读取正文。check调用T01的replay并启用执行，输出目录由`mkdtemp`新建；它不会在命令结束后自动清理，运行记录与失败现场因而可以继续查看。export则调用T02，只构造源码与说明，不运行章节命令。
+现在把同一份章节声明交给实际命令。`checkpoints()` 形成“身份 → 章节记录”的字典，后面的动作都从这里选中同一记录，再决定怎样使用：
 
-从空进度开始，执行`./airios learn progress --record 02`后，字典成为`{"core": "02"}`；再执行`./airios learn progress --record L01`，只增加`"linux": "L01"`，core仍是02。`nodes[args.record]['track']`给出要更新的键，`args.record`给出新值。安装图形清单后，G13同样只更新graphics。不带`--record`时只读取并显示`artifacts/learning-progress.json`。
+| 动作 | 记录怎样被消费 | 结果留在哪里 |
+| --- | --- | --- |
+| list | 按 track 过滤记录 | 终端列表，不改变学习源码 |
+| show | 用身份找到 document 并读取正文 | 终端中的教程内容 |
+| check | 调用 T01 的 replay 并启用 run | mkdtemp 创建的新目录；日志与失败现场不会自动清除 |
+| export | 调用 T02 固定来源并重建 | 指定的新目录，不执行章节命令 |
+
+它们共享编号，并不共享一种副作用。接下来的 progress 又只保存位置，不调用 replay 或 export。
+
+从空进度开始，执行`./airios learn progress --record 02`后，字典成为`{"core": "02"}`；再执行`./airios learn progress --record L01`，只增加`"linux": "L01"`，core仍是02。`nodes[args.record]['track']`给出要更新的键，`args.record`给出新值。安装图形清单后，G13同样只更新graphics。不带 `--record` 时只读取并显示 `artifacts/learning-progress.json`。这个文件是命令的输出，不是课程前置或编译输入；下方 route_test 用临时 ROOT 实际检查两条路线先后记录，已有个人位置不会被测试覆盖。
 
 记录到 02 只更新位置文件，不会创建一次 Git 提交。另一个 current 导出选择的则是实际提交树：HEAD 表示 Git 当前检出的提交位置。current取得这份提交的整个文件树，先要求没有未提交或未跟踪的改动，但不要求个人提交具有教学尾注；普通课程身份则按前置组合重建源码。前者需要Git，后者使用T02已经说明的固定来源规则。`current`不接受alongside，因为它记录的是一棵准确的提交树，不能同时声称还加入了另一份路线内容。
 
@@ -409,7 +418,7 @@ if __name__ == '__main__':  # 直接执行此文件才进入命令入口，作�
 
 ## 在当前实现上核对，并观察路线记录
 
-下面把内容、导航和位置记录接回同一入口，先验证工具自身，再使用它读取课程。下面先运行作者工具检查，再核对全部已安装路线。`learn list --track core`只改变列表显示，不改变源码或图形记录。检查点JSON和教程来自T01已经接入的同一份资料；若来源不符，报告具体节点或文件，不继续运行后面的命令。
+内容、导航和位置已经各自有了消费者。最后先运行作者工具自身的观察，再从同一入口核对已安装路线和读取目录；位置写入则已经由临时目录中的 progress 测试覆盖。`learn list --track core`只改变列表显示，不改变源码或图形记录。检查点JSON和教程来自T01已经接入的同一份资料；若来源不符，报告具体节点或文件，不继续运行后面的命令。
 
 <!-- run -->
 ```sh

@@ -56,3 +56,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/01-entry.md#runtime-main
   establishes: 输出一行的三种执行环境分别展开；argc 初始栈、raw 寄存器与返回地址、远端 GDB 对本地 guest 的观察逐步对应，保留证据限制和 SSH255 未验证状态。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 三条观察路径分别沿执行环境、源码与符号输入、输出和停点收束；同一SSH通路不等于同一CPU或进程。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

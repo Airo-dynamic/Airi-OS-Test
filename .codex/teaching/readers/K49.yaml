@@ -24,7 +24,7 @@ first_use:
   establishes: 成员地址借用不复制页面，fork仍逐页深复制，不把描述值复制当成共享
 - concept: C中的显式所有权转移
   at: ../../../dev-log/core/49-user-memory-owner.md#memory-destroy
-  establishes: take先复制小描述再清来源，返回值必须接住；destroy在非活动根上按表、数据、记录页顺序归还
+  establishes: take交接归还责任并清来源记录，旧页面和活动CR3仍保持；返回值必须接住，切根后destroy才按表、数据、记录页顺序归还
 - concept: 不复制整个进程的exec提交
   at: ../../../dev-log/core/49-user-memory-owner.md#memory-exec
   establishes: 新旧内存分别持有，FD和内核栈原地保持，新的FPU和FS单独替换，切根后回收旧内存

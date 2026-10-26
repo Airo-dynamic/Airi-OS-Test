@@ -25,5 +25,8 @@ first_use:
 borrowed:
 - component: 既有copy_user、等待截止、原始int80与工作执行者
   contract: 自有46/47号，不是Linux ABI；固定单CPU，未增加新的跨进程64实验或SMP保证
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 高低字节表、完整寄存器参数和双向同址隔离模型成熟，观察注册隔开内核宽度与读取/通知助手
+  revision: 保留全部数值及UP边界，将注册放回构建段、分离futex_value与futex_wake定位增量，并在waiter前绑定实际0/1参数和returned位
 not_inferred: 重建和高位/键检查不推断掌握，旧event尚未升级

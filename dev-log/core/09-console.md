@@ -31,7 +31,7 @@ lines 另保存 256 行、每行 128 字节。total_lines 累计逻辑行号，l
 #define AIRI_CONSOLE_WIDTH 128  // 一条输出的数组容量为128字节，含终止零
 #define AIRI_COMMAND_SIZE 64    // 命令与历史项各用64字节，最多63个内容字节
 #define AIRI_HISTORY_SIZE 8     // 最多记住8条已提交的命令
-enum airi_view { AIRI_VIEW_TERMINAL, AIRI_VIEW_MEMORY, AIRI_VIEW_DEVICES, AIRI_VIEW_JOURNAL };  // 按顺序编号当前airi_view可接受的状态或事件
+enum airi_view { AIRI_VIEW_TERMINAL, AIRI_VIEW_MEMORY, AIRI_VIEW_DEVICES, AIRI_VIEW_JOURNAL };  // Terminal、Memory、Devices、Journal 依次取 0–3，用于选择当前视图
 enum airi_key {  // 按顺序编号当前airi_key可接受的状态或事件
     AIRI_KEY_UP = 256,  // 向上浏览命令历史或移动选择
     AIRI_KEY_DOWN,      // 向下浏览命令历史或移动选择
@@ -74,7 +74,9 @@ void airi_map_line(const struct airi_console *c, unsigned index, char *out, size
 
 ## 文本已产生，还要等消费者取走
 
-mem 会先生成表头、总量与说明，设备发送随后逐行读取。emit 因而把有界格式化结果复制进 lines，不保留临时格式参数或局部数组地址。256 个槽反复使用，累计逻辑号标明这次文字属于哪一行。
+mem会先生成表头、总量与说明，设备发送随后逐行读取。这里的emit接收console对象与格式，把结果直接写入它的lines；它位于console.c，只在这个文件内部使用。第04章base.c中同名的static emit则接收output记录与单个字符，两者各在自己的编译单元内。console的emit调用airi_vsnprintf后，字节层的emit才按容量写入当前一行。
+
+一次格式化结束，文字已经保存在会话数组里，不再借临时参数或局部数组地址。256个槽反复使用，累计逻辑号标明本次文字属于哪一行，后续消费者再取出并显示。
 
 例如逻辑行 256 复用槽 0，不能让读取旧逻辑行 0 的请求拿到它。airi_console_line 先拒绝未来或已覆盖的行号，再用序号对 256 取模定位。返回的是会话内部数组的借用指针，后续环绕可能覆盖，消费者应在需要时及时使用。
 
@@ -108,11 +110,11 @@ static bool equal(const char *a, const char *b) {  // 按长度和内容判断�
 }
 ```
 
-mem map、devices、log 需要把同一启动结构的不同字段变成一行文字。map_line 读取 base/length，输出半开区间右端；越过 region_count 就给空串，不能访问未用槽。device_line 输出固定 UART、键盘与本次显示描述，没有可用帧缓冲则明确 unavailable。
+log、devices与mem map读取同一boot副本，形成的文字却不同。它们都接收调用者提供的数组与容量，在本次同步调用中写入，不保存数组地址。调用者稍后通过emit把这行复制进输出环，下一次查询才能复用局部数组。
 
-journal 当前是八项有序启动说明，尚无实时时钟，不把下标写成实际时间。每个助手都在调用者提供的数组里限容形成文字，再由调用方复制进输出环；生成记录与设备发送仍分开。
+先写log的来源。journal是八项固定顺序的启动说明，其中加载器、范围和可用量取自本次boot。0000等前缀是顺序编号；当前没有实时时钟，不能把这些下标当作测得的时间。
 
-**追加到 `kernel/console/console.c` 末尾：**
+**追加启动记录查询：**
 
 <a id="code-kernel-console-console-c-2"></a>
 
@@ -158,6 +160,14 @@ void airi_journal_line(const struct airi_console *c, unsigned i, char *s, size_t
         break;  // 本项文字已形成，结束switch而不继续生成下一项
     }
 }
+```
+
+devices再按0、1、2分别形成UART、键盘和显示描述。前两项报告固定PC配置；显示项读取本次framebuffer，独立验证后才显示宽高、bpp与pitch，没有可用描述就形成unavailable。这仍是在数组里生成说明，没有读取像素或发送串口。
+
+**继续追加设备查询：**
+
+<!-- append: kernel/console/console.c -->
+```c
 void airi_device_line(const struct airi_console *c, unsigned i, char *s, size_t n) {  // 把指定设备描述格式化到调用者输出缓冲
     const struct airi_framebuffer *f = &c->boot->framebuffer;  // 取启动信息内嵌帧缓冲描述的地址，未复制像素内存
     switch (i) {  // 按调用者请求的记录下标选择当前文字内容
@@ -176,6 +186,14 @@ void airi_device_line(const struct airi_console *c, unsigned i, char *s, size_t 
             airi_snprintf(s, n, "fb0     display   unavailable");  // 图形描述不满足绘图前提时明确写不可用，避免读取无效像素地址
     }
 }
+```
+
+mem map需要逐项显示物理范围。map_line先把下标与region_count比较，越界就给空串；有效时从regions[i]读取base和length，按base+length形成半开区间右端，并把kind转成静态名称。调用者每次取一项，不会访问未用槽。
+
+**继续追加地图行查询：**
+
+<!-- append: kernel/console/console.c -->
+```c
 void airi_map_line(const struct airi_console *c, unsigned i, char *s, size_t n) {  // 把指定物理内存范围格式化成一行文字
     if (i >= c->boot->region_count) {  // 查询下标超过有效内存区域时生成空输出
         if (n)  // 输出容量非零时才允许写入首字节
@@ -184,7 +202,7 @@ void airi_map_line(const struct airi_console *c, unsigned i, char *s, size_t n) 
     }
     const struct airi_memory_region *r = &c->boot->regions[i];  // 借用第i条实际内存范围，读取起点、长度和类别
     airi_snprintf(s, n, "%03u %016llx %016llx %s", i, (unsigned long long)r->base,  // 记录区域下标与物理半开区间左右端点，地址固定十六进制宽度方便逐列比较
-                  (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把当前64位字段转成格式要求的unsigned long long
+                  (unsigned long long)(r->base + r->length), airi_memory_name(r->kind));  // 把区间右端转为 unsigned long long，kind 另转为静态用途名称
 }
 ```
 
@@ -204,7 +222,7 @@ static void system_info(struct airi_console *c) {  // 将启动身份和内核�
 }
 void airi_console_init(struct airi_console *c, const AiriBootInfo *b) {  // 清命令状态并绑定只读启动结构，形成初始文字
     airi_memset(c, 0, sizeof(*c));  // 清零整个当前状态或快照，使计数和标记从确定初值开始
-    c->boot = b;     // 将借用启动信息，描述与内存地图须持续有效置为b，后续读取使用新状态
+    c->boot = b;     // 保存调用者提供的启动信息地址；会话继续借用结构和地图，使用期间须有效
     system_info(c);  // 从同一启动结构生成系统身份与内核镜像尺寸
     emit(c, "");     // 在输出环中保存一条空行，为后续显示保留间隔
     emit(c, "System console attached.");      // 将System console attached.保存为一条命令说明或身份记录
@@ -218,13 +236,13 @@ void airi_console_init(struct airi_console *c, const AiriBootInfo *b) {  // 清�
 
 ## 回车让当前输入成为一次提交
 
-execute 先把 input 复制为局部 command，本次分派便不依赖稍后要清空的输入数组。对 `  mem  `，start 跳过两个前导空格，尾空格改写为 NUL，再按 mem 完整匹配；全为空格则不增加 commands。非空提交先写输出中的提示行、计数与历史，再执行具体分支，所以未知命令也算一次提交。
+回到本章实际送入的 `mem\n`。前三次字符只留在input中，回车事件才调用execute。execute先复制整份input到局部command，后续分派沿这个副本进行，最后清空input也不会丢掉本次名称。
 
-历史满八条时，用 memmove 把后七项完整前移，为本次副本留位置。mem 将观察输入的 `0x400000` 字节除以 1024，产生 4096 KiB，再追加说明和空行。mem map 另逐项输出范围，echo 则匹配五字节 `echo ` 前缀并输出后缀，不能把它与 mem 的完整匹配混同。
+首尾空格在副本上处理。对 `  mem  `，start越过前两个空格，尾空格改写为NUL，得到完整mem；全为空格时直接返回，不增加commands。非空提交先把提示行写进输出环、增加commands，再保存历史，未知命令也经过同一次提交计数。
 
-查询助手的局部 line 在每次 emit 时被复制，execute 返回后不再借用。clear 清可见数量而不回退累计序号，后续新行仍有新的身份。整个分派保持在同一个会话调用中。
+历史存的是已提交名称的副本。八条满后，memmove把后七个完整64字节槽前移，最后一槽接本次命令；当前view回到Terminal，scroll归零。
 
-**追加到 `kernel/console/console.c` 末尾：**
+**追加execute的名称整理、提交计数与历史保存，后面继续接命令分派：**
 
 <a id="code-kernel-console-console-c-4"></a>
 
@@ -250,6 +268,16 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
     airi_snprintf(c->history[c->history_count++], AIRI_COMMAND_SIZE, "%s", start);  // 先在旧计数下标保存命令，再把历史计数加一
     c->view = AIRI_VIEW_TERMINAL;  // 切回Terminal显示当前输入或命令结果
     c->scroll = 0;  // 回到输出尾部，便于看到最新命令
+```
+
+这时start已指向本次要执行的名称，input还没有被逻辑键入口清空。mem分支从boot取得0x400000字节usable，除以1024得到4096 KiB，依次把表头、三类总量、说明与空行写进环。按这里第一次mem调用演算，初始化的10行之后又产生7行，commands变为1；这些数字仍是模型状态，尚未发送到主机终端。
+
+其他分支继续消费同一整理后的start。mem map逐项调用地图助手，devices遍历三项设备，log遍历八项启动说明，局部line每次被emit复制后就能复用。echo按五字节 `echo ` 前缀取后缀，mem等名称则要求完整相等。clear只清line_count，不回退total_lines；随后产生的新行仍有新的逻辑编号。所有分支都在本次会话调用内结束。
+
+**继续追加各命令分支并闭合execute：**
+
+<!-- append: kernel/console/console.c -->
+```c
     char line[AIRI_CONSOLE_WIDTH];  // 命令查询先在128字节局部数组形成一行，再由emit复制进输出环
     if (equal(start, "help")) {     // 提交文字完整等于help时生成命令列表
         emit(c, "COMMAND    OPERATION");  // 将COMMAND    OPERATION保存为一条命令说明或身份记录
@@ -305,13 +333,11 @@ static void execute(struct airi_console *c) {  // 读取完整提交命令，更
 
 ## 一次键调用可以只改状态，而不执行命令
 
-设备将来报告扫描码，主机也可直接调用逻辑键接口，模型只消费统一事件：普通字符是 ASCII 值，F1、方向键等用 256 起的编号。每次调用只处理一个事件，跨次保存的 input 才把三个字符连为 mem。
+设备将来报告扫描码，主机观察现在直接给出逻辑事件。普通字符用ASCII值，F1与方向键等用256起的编号，每次调用只处理一个事件。m、e、m会分别走到末尾的字符分支，跨调用保留的input才逐步形成命令；函数前面的分支先识别功能键。
 
-F1..F4 改 view；内存按十二项一页计算，PgDn 不能越过最后一页，终端翻页只改 scroll。第一次向上看历史时先保存 draft，之后只改变回看距离；向下回到 history_back=0，恢复的仍是进入历史前那份未提交文字。
+F1..F4选择view。Memory每十二项一页，页数向上取整，PgDn不能越过最后有效页；Terminal翻页只改变scroll，不执行查询，也不改输入。当前串口只发送生成的文字，选择视图本身没有绘图动作。
 
-回车调用 execute 后才清 input、退出历史并清旧草稿；退格先检查长度，普通字符则要求新增后仍留一格 NUL。不支持或放不下的事件返回 false，true 只表示状态可能变化，调用方再决定发送新行或更新可选画面，不能把它当成“命令已执行”。
-
-**追加到 `kernel/console/console.c` 末尾：**
+**追加逻辑键入口的视图与分页部分：**
 
 <a id="code-kernel-console-console-c-5"></a>
 
@@ -339,6 +365,16 @@ bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑�
         }
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }
+```
+
+上下键需要保留另一份状态。第一次离开正在编辑的input时，把它复制到draft；history_back记录离当前草稿有几条历史，后续上翻只增加这个距离，不反复覆盖draft。下降到0才把原草稿复制回来。
+
+按本章六条提交后的历史演算：如果接着输入x，三次Up依次得到sys、help、devices；再三次Down才回到x。历史是已经提交的六份副本，draft保存的则是这次尚未提交的x，二者不能互相替代。
+
+**继续追加历史浏览，仍在同一个键处理函数内：**
+
+<!-- append: kernel/console/console.c -->
+```c
     if (key == AIRI_KEY_UP || key == AIRI_KEY_DOWN) {  // 上下键进入命令历史浏览，不提交新命令
         if (!c->history_count)  // 尚未有已提交历史时没有可浏览项
             return false;  // 当前事件没有可执行操作，调用者无需因此重画
@@ -354,6 +390,16 @@ bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑�
         c->view = AIRI_VIEW_TERMINAL;  // 切回Terminal显示当前输入或命令结果
         return true;  // 本逻辑事件已处理，调用者可重画当前状态
     }
+```
+
+最后处理清屏、提交、退格和普通字符。清屏只改可见输出、scroll与view，当前输入仍在。回车先让execute用完命令副本，再清input、退出历史并丢弃旧draft；下一条命令从空输入开始。退格先检查长度，新增普通字符则必须给末尾NUL留一格。
+
+不支持或放不下的事件返回false，true只表示这一事件可能改变显示状态；调用方随后决定取新行或更新画面。前三个字符都可以返回true，却没有增加commands，只有非空提交才执行命令。
+
+**最后追加提交与字符编辑，闭合逻辑键函数：**
+
+<!-- append: kernel/console/console.c -->
+```c
     if (key == AIRI_KEY_CLEAR) {  // 清屏功能键移除可见历史并回到Terminal，输入文字仍保留
         c->line_count = 0;  // 清除可见历史行数，累计逻辑行号仍保留
         c->scroll = 0;      // 回到输出尾部，便于看到最新命令
@@ -391,7 +437,7 @@ bool airi_console_key(struct airi_console *c, int key) {  // 消费一个逻辑�
 
 submit 逐字节调用 console_key，字符串中的换行是提交事件，NUL 只结束送入循环。mem 先得到 4096 KiB，echo serial-mainline 形成参数回显，theme day 留下未知命令错误，再查询 devices、help、sys；六次都更新同一个历史和输出环，最后才按逻辑行号显示。
 
-input 每次提交后清空，历史仍保留已提交版本；draft 只保存浏览前尚未提交的文字，不能用历史替代。比如正输入 x 时上翻到 devices，再下翻应恢复 x，而不是丢掉草稿。下面的连续观察建立同一对象跨调用的寿命，后面的主机检查再核对这些浏览边界。
+这里的六次submit都处理同一个console，所以commands最终为6，历史与输出环累计保留。每次回车后input已清空；本观察先显示这些提交产生的结果，前面说明的历史浏览与草稿恢复边界在后续主机检查中另外核对。
 
 **新建 `labs/tutorial/console.c`：**
 

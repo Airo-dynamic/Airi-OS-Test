@@ -34,3 +34,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/03-bytes.md#nul-string
   establishes: 共享算法只访问借用内存，主机观察入口另借 printf；同一重叠范围的读写方向解释结果，保留 NUL、零长度、地址表示和编译选项。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/03-bytes.md#overlap-copy
+  establishes: 用观察中的right/left两条真实memmove调用绑定dst/src/n，分别走逆序与正序；四字节写入范围与保留的E/NUL接到最终六字节核对。

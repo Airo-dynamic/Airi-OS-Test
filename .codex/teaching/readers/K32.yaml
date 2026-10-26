@@ -32,3 +32,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/32-user-async.md#async-user-abi
   establishes: 用户局部描述与 BUSY 数据分开；fork 整数不授予资源、exec 同 PID 换 epoch、CQ 输出先验后 pop 连续解释，限速证据按同一等待区间核对。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: owner构造、fork、exec、exit、CQ等待与drain分别接到真实旧/新窗口，固定池检查和限速证据保留。
+  evidence: 全篇正文、旁注、编辑与运行说明复读；纯内存源码/命令/旧锚点保护通过，本轮不新增行为实测。

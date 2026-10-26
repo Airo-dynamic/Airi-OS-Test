@@ -31,5 +31,8 @@ first_use:
 borrowed:
 - component: Linux man-pages pthread_create/join/pthreads行为参考，已有TLS/malloc/原始线程
   contract: 本项目仅声明实现的源码子集，不提供Linux ABI或完整POSIX；官方OpenGroup页面本轮403，使用Linux项目官方手册核对
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 类型正确入口、包归属和两种资源失败模型完整，main把失败检查与成功指针回收连成一块
+  revision: 保留原函数类型、载体与所有权限定，将未创建阶段/两echo往返及容量失败/开门收拢分别接到实际代码
 not_inferred: 源码和运行不推断掌握；无新Linux/GUI运行，未宣称C++线程库已可用

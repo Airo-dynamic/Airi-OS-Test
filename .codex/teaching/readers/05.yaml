@@ -43,3 +43,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
   establishes: 保留已认可完整稿，复查其与新 04/06/08 的交接。两段地图、地址别名、验证内部统计、独立显示检查和主机观察仍完整成立。
+
+followalong_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
+  establishes: 显示字段首次出现前解释地址借用、像素/字节单位与通道位；地图验证和四状态观察先闭合，可选显示检查保留独立作用，内部统计与外部使用顺序分清。

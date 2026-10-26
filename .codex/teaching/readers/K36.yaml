@@ -18,7 +18,7 @@ first_use:
   establishes: init fork/wait、shell命令与启动服务栈各有职责，身份不硬编码PID1
 - concept: 独立UART消费身份
   at: ../../../dev-log/core/36-init-supervisor.md#init-input
-  establishes: 固定FD引用不自动授予fork孩子读取权，init直接孩子成功exec sh才取得唯一前台资格
+  establishes: 沿init直接孩子的一次exec区分申请资格、新映像准备、FD0提交与input_pid发布；固定FD引用不自动授予fork孩子读取权
 - concept: 保存绝对截止的用户睡眠
   at: ../../../dev-log/core/36-init-supervisor.md#init-sleep
   establishes: IO_SLEEP借已有frame等待，不借用户缓冲，到期写0唤醒，不在轮询中延长截止

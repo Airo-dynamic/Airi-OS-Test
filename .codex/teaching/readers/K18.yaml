@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/18-timer.md#pit-pic-route
   establishes: 至少五次事件连接设备、控制器和 CPU 三环节；初始化后才开 IF，EOI 后才可继续交付。保留屏蔽故障、APIC 前提、周期等待与未来防丢唤醒区别。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/18-timer.md#timer-config
+  establishes: 保留设备控制器CPU三环节与屏蔽故障模型，配置和观察代码分块后就近区分CONFIG与真实tick完成；继承汇编、分派、构建与工具只替换实际增量。

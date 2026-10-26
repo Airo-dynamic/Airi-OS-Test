@@ -32,3 +32,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/22-processes.md#process-state
   establishes: 以 42/99 的父子数据、同一 fork 返回点、等待调用和僵尸占槽组织进程机制；当前执行者与状态写入目标分开，保留离栈后回收条件。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/22-processes.md#fork-copy-wait
+  establishes: 沿实际waitpid(child,&status)从寄存器现场到等待登记，再由孩子按父根写23并唤醒同一次调用；明确current与目标p，保留成熟状态机与不可抢占限定，已有模块只作精确增量。

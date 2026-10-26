@@ -37,9 +37,7 @@ long airi_event_publish(airi_event *event); // 版本加一后通知至多十六
 
 新建 event.c。布局检查保证整个event就是对齐四字节，原子操作由当前目标直接生成，不导入libatomic。valid只检查NULL与未对齐；它不能像内核页表检查那样替任意用户指针返回EFAULT，已释放或坏映射仍会触发用户故障。这个边界和用户互斥相同。
 
-sequence使用acquire读取。wait先检查对象和最大6000tick预算，再比较当前版本；不相同直接返回0，避免一次必然比较失败的43号请求。相同才进入airi_futex_wait，内核重新比较并登记，覆盖用户读取与实际睡眠之间发生的发布。它返回-11时，版本已不再符合旧决定；返回0时，只能确定收到通知，都统一成“重查”的0。返回前再作一次acquire读取，其他错误保留。
-
-这里不自动循环，因为循环必须围绕调用者真正关心的条件。若库内部只等“序号不同”才返回，就会隐藏没有改变条件的通知；若把0当成已有任务，又会把一次空通知误当成功取出工作。先写到wait结束：
+sequence使用acquire读取，把当前版本作为非负long返回。先完成布局、有效形状和快照函数；接下来wait会用同一个sequence地址把用户观察接到内核比较。
 
 <!-- write: labs/airios/libc/event.c -->
 ```c
@@ -54,6 +52,14 @@ long airi_event_sequence(airi_event *event) { // 快照不是申请一个通知�
     if (!valid(event)) return -22; // -EINVAL，在原子访存以前拒绝NULL/未对齐。
     return __atomic_load_n(&event->sequence, __ATOMIC_ACQUIRE); // 64位long能表达所有32位版本，不把最高位当错误。
 }
+```
+
+wait先检查对象和最大6000tick预算，再比较当前版本；不相同直接返回0，避免一次必然比较失败的43号请求。相同才进入airi_futex_wait，内核重新比较并登记，覆盖用户读取与实际睡眠之间发生的发布。它返回-11时，版本已不再符合旧决定；返回0时，只能确定收到通知，都统一成“重查”的0。返回前再作一次acquire读取，其他错误保留。
+
+这里不自动循环，因为循环必须围绕调用者真正关心的条件。若库内部只等“序号不同”才返回，就会隐藏没有改变条件的通知；若把0当成已有任务，又会把一次空通知误当成功取出工作。追加这次有界等待：
+
+<!-- append: labs/airios/libc/event.c -->
+```c
 long airi_event_wait(airi_event *event, uint32_t expected, unsigned ticks) { // 一次有界等待，不替调用者循环判断业务条件。
     if (!valid(event) || ticks > 6000) return -22; // 完整预算先检查，变化已发生也不能掩盖坏参数。
     if (__atomic_load_n(&event->sequence, __ATOMIC_ACQUIRE) != expected) return 0; // 先前变化可在用户态发现，省去必然-11的请求。
@@ -77,7 +83,7 @@ publish先读一个期望版本，用release CAS把它加一。另一个发布�
 
 <!-- append: labs/airios/libc/event.c -->
 ```c
-long airi_event_publish(airi_event *event) { // 调用者先完成受保护状态变更，再发布版本并通知。
+long airi_event_publish(airi_event *event) { // 以 release CAS 推进版本，再通知等待者；业务状态的先后与可见性由调用者协议保证。
     if (!valid(event)) return -22; // 不允许NULL/未对齐进入CAS或内核。
     uint32_t expected = __atomic_load_n(&event->sequence, __ATOMIC_RELAXED); // 仅用于CAS尝试，尚不读取业务数据。
     do { // 多个发布者失败后沿CAS回填的新版本重试，不重复使用旧值。
@@ -141,9 +147,7 @@ static long worker(void *argument) { // 两人观察同一个版本变化，通�
 <a id="event-before-and-after"></a>
 ## 先发生的发布，以及后来才取的新快照
 
-main先验证显式坏形状与预算。edge最后一次发布返回唤醒0，版本仍推进到UINT32_MAX；再次发布返回-75并保持原值。changed从0发布成1，同样没有等待者；随后用旧0等待，用户态读到1便返回0。两次45号围住这个调用，差值只能为1，即结束查询自身，证明没有额外43号。
-
-然后用新快照1配零预算得到-110；再给三tick，确实进入内核、到期后返回-110。这些都没有下一次发布，不能把已有版本1当成可保存到以后领取的通知。写main的前半段：
+main先验证显式坏形状与预算，再检查独立edge：最后一次发布返回唤醒0，版本仍推进到UINT32_MAX；再次发布返回-75并保持原值。先写这一组，它不会改动普通对象changed。
 
 <!-- append: labs/airios/events.c -->
 ```c
@@ -152,6 +156,14 @@ int main(void) { // 所有通知对象在创建worker以前已初始化。
     require(airi_event_wait(&changed, 0, 6001) == -22, "event invalid budget"); // 即使版本相符也不能扩大接口预算。
     require(airi_event_sequence(&edge) == (long)UINT32_MAX - 1 && airi_event_publish(&edge) == 0, "event last publication"); // 唤醒0不等于未发布。
     require(airi_event_sequence(&edge) == (long)UINT32_MAX && airi_event_publish(&edge) == -75 && airi_event_sequence(&edge) == (long)UINT32_MAX, "event refuses wrap"); // 饱和错误不改版本。
+```
+
+继续main内的changed观察。它从0发布成1，同样没有等待者；随后用旧0等待，用户态读到1便返回0。两次45号围住这个调用，差值只能为1，即结束查询自身，证明没有额外43号。
+
+再用新快照1配零预算得到-110；给三tick则确实进入内核、到期后返回-110。这两次都没有下一次发布，不能把已有版本1当成可保存到以后领取的通知。
+
+<!-- append: labs/airios/events.c -->
+```c
     long old = airi_event_sequence(&changed); // 普通对象最初是0。
     require(old == 0 && airi_event_publish(&changed) == 0 && airi_event_sequence(&changed) == 1, "event publication before wait"); // 没有等待者，仍推进版本。
     uint64_t before = airi_thread_syscalls(); // 测量旧快照等待是否在用户态直接返回。

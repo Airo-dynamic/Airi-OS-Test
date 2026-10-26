@@ -28,3 +28,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/33-shell-pipeline.md#shell-stdin
   establishes: 沿输入 demo→父 shell 保留→孩子 exec→同一页内容经过 RAM 文件与注册副本→父恢复组织整章；UART 唯一消费者、FD0 CLOEXEC 和观察区间保留。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 单一UART读者到固定FD0，再到用户read/持久等待连续展开；原文件全部主要接线改为唯一替换，用户页和注册副本寿命保持。
+  evidence: 全篇正文、旁注、编辑与运行说明复读；纯内存源码/命令/旧锚点保护通过，本轮不新增行为实测。

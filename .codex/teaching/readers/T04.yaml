@@ -1,22 +1,22 @@
 checkpoint: T04
 baseline: baseline.yaml
 start: T03
-current_operation: 唯一定位旧窗口，按文章次序替换并观察整章失败保持
+current_operation: 保留T01已有解析器，新增独立测试，核对唯一定位和整章失败保持
 already_explained:
 - concept: 路径到完整源码字符串的累计状态
   at: ../../../dev-log/tools/01-reconstruction.md#t01-edits
-  establishes: write赋值、append连接字符串，state_for按前置顺序累计，不复制终点源码
+  establishes: write赋值、append连接、replace唯一匹配，apply整章成功才交回state；state_for按前置累计，不复制终点源码
 - concept: 导出目录保护
   at: ../../../dev-log/tools/02-snapshots.md#snapshot-composition
   establishes: 固定来源重建与新目录保护分别负责输入身份和输出安全
 first_use:
-- concept: 精确旧窗口和换行身份
+- concept: 通过独立观察核对精确窗口和换行身份
   at: ../../../dev-log/tools/04-exact-edits.md#exact-window-model
   establishes: before完整唯一匹配后用after替换，空旧窗口拒绝，空新文本删除
 - concept: 围栏扫描与生成器暂停
   at: ../../../dev-log/tools/04-exact-edits.md#exact-edit-parser
   establishes: 当前位置解析围栏，yield交出动作后保留position，展示源码内的标记不再解释
-- concept: 整章失败保持与重叠匹配
+- concept: 通过故障输入核对整章失败保持与重叠匹配
   at: ../../../dev-log/tools/04-exact-edits.md#exact-edit-observation
   establishes: 字符串不可变使浅复制隔离修改，任一动作失败不发布pending，第二次查找从首命中下一字符开始
 borrowed:
@@ -24,3 +24,8 @@ borrowed:
   contract: 测试使用真实course.apply和临时字典；不运行QEMU、不覆盖学习目录
 feedback: []
 not_inferred: 工具通过只证明编辑协议行为，不推定课程可读或用户已掌握
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 已有解析器作为跟踪摘抄，本轮只新增九项独立测试；精确匹配与整章失败保持继续保留。
+  evidence: 对照冻结正文逐篇复读，并在内存核对源码、原锚点与运行命令；不推定读者已掌握。

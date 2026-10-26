@@ -44,7 +44,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attrib
 int pthread_mutex_destroy(pthread_mutex_t *mutex) { // 调用者已经停止所有将来的锁访问，检查不能替代这个寿命约定。
     if (!initialized(mutex)) return EINVAL; // 当前诊断已销毁状态。
     if (__atomic_load_n(&mutex->core.owner, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->core.contenders, __ATOMIC_SEQ_CST) || __atomic_load_n(&mutex->wait_users, __ATOMIC_SEQ_CST)) return EBUSY; // 包括暂时不持锁、以后仍须重取的等待者。
-    __atomic_store_n(&mutex->state, 0, __ATOMIC_RELEASE); // 仅静止对象销毁，底层两字段已为0。
+    __atomic_store_n(&mutex->state, 0, __ATOMIC_RELEASE); // 仅静止对象销毁，core.owner、core.contenders 与 wait_users 均为 0。
     return 0; // 可在之后无并发地重新init。
 }
 int pthread_mutex_lock(pthread_mutex_t *mutex) { // POSIX形状的lock没有调用者给出的总超时。

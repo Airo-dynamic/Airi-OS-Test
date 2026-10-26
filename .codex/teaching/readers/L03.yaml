@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/03-process.md#linux-fork-memory
   establishes: 以同一匿名页、PID 和共享偏移解释 Linux 对照，修正真实 --child 参数与临时坏 ELF 的保留期，保留早晚 exec 失败区别及未验证状态。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 助手、新映像after_exec、原main准备、fork孩子与父wait分块，维持真实参数和FD继承身份。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

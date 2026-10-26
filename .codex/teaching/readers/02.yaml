@@ -18,7 +18,7 @@ first_use:
   establishes: JSON 对象转为字典、数组转为列表；按键和下标逐层取得实际值与摘要
 - concept: 缓存判定与归档展开
   at: ../../../dev-log/02-dependencies.md#archive-preparation
-  establishes: items 提供键值对，or 短路，生成器供 any 逐项检查；切片与星号重组路径，with 限制归档句柄寿命
+  establishes: dep取自lock的limine记录，url/归档路径/归档摘要传入download；同一BOOTX64.EFI从files缓存检查接到真实归档成员解包，items/or/any/切片与展开服务这条路径
 borrowed:
 - component: Limine、协议头与 OVMF
   contract: 下载或复制锁定字节；固件启动引导器，协议头用于编译
@@ -31,9 +31,13 @@ feedback:
   revision: 保留实现字节和现有下载流程，只说明字体字段由可选图形支线消费。
 not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
 source_reading:
-- concept: 嵌套配置、生成器与归档句柄
+- concept: 真实材料与下载参数
   at: ../../../dev-log/02-dependencies.md#code-scripts-deps-py-4
-  establishes: JSON 对象和数组成为字典和列表；next 消费按文件摘要筛选后的候选路径；with 限定归档读取句柄的寿命
+  establishes: lock转为外层字典，dep取Limine内层记录；同一记录的URL与摘要配合ROOT下归档路径交给download，返回后归档才合格
+  status: 本版就地解释；不推断读者已掌握
+- concept: 固件候选与缓存
+  at: ../../../dev-log/02-dependencies.md#firmware-cache
+  establishes: firmware列表逐项形成target；先验缓存，next再取存在且摘要匹配的首个来源，复制到工程缓存；vars的启动副本与初值分开
   status: 本版就地解释；不推断读者已掌握
 - concept: 文件字节与摘要
   at: ../../../dev-log/02-dependencies.md#code-scripts-deps-py-2
@@ -48,3 +52,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/02-dependencies.md#boot-materials
   establishes: 锁文件记录经字典访问成为归档、展开目标与固件输入；同一个 BOOTX64.EFI 路径贯穿缓存判定和解包，with 结束仅关闭归档句柄。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/02-dependencies.md#archive-preparation
+  establishes: prepare按归档绑定、展开、协议头、固件四个连续动作就近解释和敲入；最终源码、命令和旧锚点保持。

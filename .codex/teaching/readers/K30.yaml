@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/30-block-begin-poll.md#block-begin-poll
   establishes: 由 perform 不交还控制权引出 begin/poll；同一扇区请求的状态跨调用保存，同步适配只收自己提交，日志忙拒绝发生在事务前。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 整体替换perform为begin/pending/poll及同步适配，跨调用状态与设备借用保持，演示单独接回。
+  evidence: 全篇正文、旁注、编辑与运行说明复读；纯内存源码/命令/旧锚点保护通过，本轮不新增行为实测。

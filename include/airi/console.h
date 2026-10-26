@@ -6,7 +6,7 @@
 #define AIRI_CONSOLE_WIDTH 128  // 一条输出的数组容量为128字节，含终止零
 #define AIRI_COMMAND_SIZE 64    // 命令与历史项各用64字节，最多63个内容字节
 #define AIRI_HISTORY_SIZE 8     // 最多记住8条已提交的命令
-enum airi_view { AIRI_VIEW_TERMINAL, AIRI_VIEW_MEMORY, AIRI_VIEW_DEVICES, AIRI_VIEW_JOURNAL };  // 按顺序编号当前airi_view可接受的状态或事件
+enum airi_view { AIRI_VIEW_TERMINAL, AIRI_VIEW_MEMORY, AIRI_VIEW_DEVICES, AIRI_VIEW_JOURNAL };  // Terminal、Memory、Devices、Journal 依次取 0–3，用于选择当前视图
 enum airi_key {  // 按顺序编号当前airi_key可接受的状态或事件
     AIRI_KEY_UP = 256,  // 向上浏览命令历史或移动选择
     AIRI_KEY_DOWN,      // 向下浏览命令历史或移动选择

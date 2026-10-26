@@ -15,7 +15,7 @@ already_explained:
 first_use:
 - concept: 返回值与errno的不同有效范围
   at: ../../../dev-log/core/44-posix-errno.md#errno-result
-  establishes: 失败转换为-1和正错误，成功/EOF不以旧errno判断失败；本库成功保留，不泛化为所有libc的保证
+  establishes: 失败转换为-1和持久的本地正错误；定位函数地址经宏解引用成为当前int槽，成功/EOF不以旧errno判断失败，本库成功保留不泛化
 - concept: 源码标志映射与访问模式
   at: ../../../dev-log/core/44-posix-errno.md#posix-flags
   establishes: O_RDONLY为0，低两位枚举先解释再映射原始ABI；未知位拒绝，mode形状不冒充权限实现

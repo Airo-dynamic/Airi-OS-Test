@@ -11,7 +11,7 @@ identity 的局部锁放在 inspect 的调用栈上，其他执行者不访问�
 
 K52 已把实际执行者放进 running，把共享内存和 FD 所属进程放进 current。请求由哪条执行链发出，就累加到那份 user_execution；同 PID 下的三个工作者分别保存自己的数值。时钟 IRQ 有独立入口，用户故障也应先退出当前组，都不能算成用户主动请求。128号门进来的未知编号或失败请求仍计一次，因为它们确实跨过了同一道边界。
 
-在 user_execution 的 user_ticks 后加入 uint64_t syscall_count。64位无符号上限是 UINT64_MAX，到顶以后停止增加，以免回绕成小数。正常观察离这个上限很远；饱和后的差值不能再当精确测量。随后在 airi_user_trap 拒绝内核错误、保存现场并处理用户故障以后加一，最后增加45号返回分支。前两处已有的启动129号门和故障分支继续提前返回，因此不会误计。
+先给每个执行者保存数值的位置。在 user_execution 的 user_ticks 后加入 uint64_t syscall_count，计数因而跟随这份执行状态，不跟随共享PID或用户页。64位上限为 UINT64_MAX，到顶便停止增加；正常观察离它很远，饱和后的差值不能再当精确测量。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -34,6 +34,8 @@ K52 已把实际执行者放进 running，把共享内存和 FD 所属进程放�
     int64_t wait_target; // 等待的孩子PID条件，不是地址空间所有权。
 ```
 
+字段已加入，接下来在真正的请求路径累加。位置在拒绝内核错误、保存现场并处理用户故障之后，在按 RAX 编号分派服务之前；已有启动129号门和故障返回仍先离开，时钟IRQ也不走这条用户请求计数。只有真正经过128号门的请求到这里才加一，未知编号或随后失败仍算一次。
+
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
 ```c
@@ -54,6 +56,8 @@ K52 已把实际执行者放进 running，把共享内存和 FD 所属进程放�
         bool write = f->rax == 1 || f->rax == 16; // 输出到流或文件。
         bool positioned = f->rax == 15 || f->rax == 16; // 显式偏移不支持阻塞流。
 ```
+
+45号返回的是入口已经加一之后的数值。例如第一次发请求就是查询45，结果为1。除入口已经加一外，45号不读取用户指针，也不切换执行者的调度状态；日志里的 pid、tid 来自真实 current/running。这个接口不是 Linux ABI，也不是耗时测量，不能从次数直接推算纳秒或吞吐。接着在44号之后、未知编号返回之前加入查询分支，让它读取刚才那份 running 的计数。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -80,8 +84,6 @@ K52 已把实际执行者放进 running，把共享内存和 FD 所属进程放�
 ```
 
 新建执行者的控制槽原本就从零开始，回收也会清零。fork 只复制用户页和指定 CPU 现场，不复制整份父 execution，因此孩子即使从父的调用点继续，也没有发出父的6号请求，计数仍为零。worker 槽复用同样从零开始。exec 保留当前 execution，只替换映像、FS 和相关内存；原来的请求数随这个仍在运行的执行者保留，不采用候选映像的零计数。
-
-45号返回的是入口已经加一之后的数值。例如第一次发请求就是查询45，结果为1。它不读取用户指针，也不改当前执行者状态；日志里的 pid、tid 来自真实 current/running。这个接口不是 Linux ABI，也不是耗时测量，不能从次数直接推算纳秒或吞吐。
 
 <a id="syscalls-sampling"></a>
 ## 先读开始值，八次解锁，再读结束值
@@ -120,7 +122,7 @@ uint64_t airi_thread_syscalls(void) { // 此观察本身是一次真实45号系�
 
 结束查询自身也是第九个请求：假设开始返回4，八次通知以后累计12，结束查询入口加一才返回13，所以 after-before=9。开始查询已包含在 before 中，会被相减抵消；只需从差值减去结束查询的一次。本节先断言9，再打印对应标记，不能预写成功字符串来代替计数。
 
-还在每位新 worker 和 fork 孩子的首个请求处查询，要求返回1。普通 main 可能由 shell 通过 exec 进入，不能假设从未发过请求；重置 main 则应继续看到 exec 前已有的累计值。修改 identity.c 的五个窗口，其余控制头校准、PIT 循环和收取步骤保持：
+还在每位新 worker 和 fork 孩子的首个请求处查询，要求返回1。普通 main 可能由 shell 通过 exec 进入，不能假设从未发过请求；重置 main 则应继续看到 exec 前已有的累计值。依次修改 identity.c 的三个旧窗口：第一个接 inspect 的测量与worker首查询，第二个接 main 的普通/exec入口，第三个接原始fork孩子的首查询。其余控制头校准、PIT循环和收取步骤保持：
 
 <!-- replace: labs/airios/identity.c -->
 <!-- before -->
@@ -254,6 +256,8 @@ guest 自己检查差值；宿主再消费45号日志，核对执行者生命周
                     offset=len(text); wire.sendall(b'threads\n'); text=wait('[SHELL_COMMAND_DONE] name=threads code=0',offset) # 真正同地址空间执行，不能由fork复制或宿主线程模拟。
                     thread_output=text[offset:] # 所有身份与标记均限定在这条命令之后。
 ```
+
+查询差值9包括结束查询自身，锁的额外请求仍是八次44号。下面机器结果把这两个量分别记作八对操作与八次锁请求；per_execution_syscall_count 只记录前面的PID/TID分组检查已经通过，不代替实际列表与差值断言。
 
 <!-- replace: scripts/shell_test.py -->
 <!-- before -->

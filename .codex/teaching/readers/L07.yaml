@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/07-uring.md#uring-submit
   establishes: 保留已认可完整稿并复查 L05/L06/K32 交接；cookie103 的六字节有效前缀、提交数量、CQ 槽与应用数组寿命以及 liburing 错误诊断限制仍完整。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 保留成熟cookie103六字节与SQ/CQ生命周期，补明wait_one预算属于单次CQ等待。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

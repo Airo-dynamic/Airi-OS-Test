@@ -18,7 +18,7 @@ already_explained:
 first_use:
 - concept: 同一算法在用户目标中的独立实例
   at: ../../../dev-log/core/48-user-malloc.md#user-arena
-  establishes: 纯heap.c以用户参数另编译，用户BSS和arena不引用内核堆；请求头保持基本类型对齐
+  establishes: 纯heap.c以用户参数另编译；33字节请求对应底层64字节容量，requested用于复制与活请求统计，16字节请求头保持对齐，用户实例不引用内核堆
 - concept: 懒申请与对象/缓存统计
   at: ../../../dev-log/core/48-user-malloc.md#malloc-request
   establishes: 查询和零请求不申请页，arena失败保持空描述可重试，活请求长度与页面缓存分别记录

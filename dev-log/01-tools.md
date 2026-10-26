@@ -73,13 +73,17 @@ def tool(name, formula=None):  # name 是命令名；formula 默认 None，表�
                        'Firmware must also match config/deps.lock.json.')  # 工具安装之外，固件还须匹配项目锁
 ```
 
-查找成功后拿到的是启动路径，不是已经运行的进程。这里保留工具的符号链接名称：例如 ld.lld 可能指向通用 lld，而启动时使用的名称又参与链接模式选择。ROOT 要追溯源码真实位置，工具路径却只补成绝对路径；两处对路径的处理服务不同目的。缺少工具时，异常同时给出 macOS、Debian/Ubuntu 与 Arch/CachyOS 的安装包名。
+沿 `tool("clang", "llvm")` 的一次正常查找看结果：没有 AIRI_CLANG 覆盖，且 `/opt/homebrew/opt/llvm/bin/clang` 存在并可执行时，循环就在这里返回。函数不再检查第二个 Homebrew 前缀，也不继续搜 PATH；返回值只保存选中的路径，编译器还没有运行。显式覆盖和 Linux 路径按前面同一顺序处理。
+
+返回工具路径时还要保留启动名称。例如 ld.lld 可能是指向通用 lld 的符号链接，启动时使用 ld.lld 这个名字会参与链接模式选择，因此这里只补成绝对路径。ROOT 则需要追溯 tools.py 的真实源码位置，才适合使用 resolve；两种处理分别服务启动工具和定位工程。缺少工具的异常继续列出 macOS、Debian/Ubuntu 与 Arch/CachyOS 包名。
 
 ## 把三种角色交给同一次 Make 调用
 
 工具分别选好以后，要把它们带到构建执行器。GNU Make 读取 Makefile 中的目标和规则：目标说明这次要形成哪种产物，规则中的变量决定采用哪些工具。调用 `make_command("normal", "kernel")`，意味着选择 normal 配置下的 kernel 目标；随后规则用 CC 编译内核、用 LD 链接，主机观察规则则用 HOST_CC。一个参数列表可以提供三者，不表示三者都在每个目标中执行。
 
-`make_command` 先选择 Make 自己。显式设置了 AIRI_GMAKE 时，错误路径立即失败；没有设置才尝试 gmake，找不到再试 make。后者也是 Linux 常见的 GNU Make 命令名。随后把各条工具路径、变量赋值和目标组成与上一章相同的 argv 列表。
+make_command 首先需要启动这次构建的 Make。显式设置 AIRI_GMAKE 就只接受指定路径，无效时停止；没有设置才先找 gmake，失败后改找 make，后者是 Linux 常见的 GNU Make 命令名。取得 Make 路径后，再调用同一个 tool 函数分别选 Clang、LLD 和主机 cc。
+
+这些结果接下来进入 argv 列表。比如前面选中 Homebrew Clang，`f'CC={tool("clang", "llvm")}'` 就形成一个 `CC=/opt/homebrew/opt/llvm/bin/clang` 字符串。它是交给 Make 的一项参数，不会在 Python 中创建名为 CC 的变量。LD 与 HOST_CC 按同样方式形成各自的一项，最后接上目标名。
 
 **追加到 `scripts/tools.py` 末尾：**
 
@@ -99,7 +103,7 @@ def make_command(profile='normal', target='all'):  # 两个默认参数分别选
             f'LD={tool("ld.lld", "lld")}', f'HOST_CC={tool("cc")}', target]  # argv 后半：链接器、主机编译器和目标；尚未执行
 ```
 
-返回列表的第一项是 Make 可执行文件路径，`-j4` 允许最多四项构建任务并行。`PROFILE=normal`、`CC=/opt/homebrew/opt/llvm/bin/clang` 等各自占一个元素，是交给 Make 的变量赋值，末项 kernel 是目标名。调用方把列表交给 subprocess.run 等进程接口后，Make 才运行并按规则调用编译器；生成这张列表本身尚未启动 Make，也尚未生成任何产物。
+现在 `make_command("normal", "kernel")` 的结果已经包含本次构建所需的信息：第零项是 Make 路径，`-j4` 允许最多四项构建任务并行，后面是 PROFILE、CC、LD、HOST_CC 四项赋值，末项是 kernel。Make 运行以后才会按规则使用这些值；本章的打印只让我们看到将交出的调用数据，还没有编译产物。
 
 下面先打印这份调用数据，再给 Clang 设置一个空路径观察拒绝分支。`PYTHONPATH=scripts` 只为这一次 Python 进程增加模块搜索目录，使 `from tools import ...` 找到刚写好的模块；PATH 搜索可执行程序，两者不能互换。Shell 的 heredoc 把两条 PY 标记间的完整程序交给 Python，末条 if 则检查失败退出码。
 

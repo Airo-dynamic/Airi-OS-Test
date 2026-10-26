@@ -212,11 +212,7 @@ pthread-probe增加TLS变量local_marker，声明初值42。echo0将它改成100
 
 descendant是echo0写出的新身份，主在join echo0以后才读，不把create成功当成用户写回已经完成。descendant_self由leaf在运行以后写，再release发布descendant_ready。用户参数仍指向主持有的静态tokens[0]，不指向echo0将要结束的工作栈。
 
-主收取echo0后，让leaf实际在gate上等待。接着创建replacement，使用另一份tokens[2]，避免两个仍在运行者同时写同一对象。内核会复用最早空闲的echo0槽：用户TLS基址数值可以相同，但普通初值和TCB身份必须重新建立。replacement返回并被join以后，主才发布leaf的gate。
-
-leaf恢复后检查321、201和自己的活身份仍正确，再返回原tokens[0]。若它借用了创建者的TLS或现场，创建者槽被清零、写入replacement初值及身份时就会暴露错误。主最后join leaf取得原指针，证明创建者结束没有提前结束仍活着的同进程执行链。
-
-修改观察程序的这些窗口，保留容量八人、二十四轮复用和两个真实资源失败路径。普通结束以后不再拿已经结束的身份调用equal；有效身份的比较放在自身仍运行或两个已创建尚未join的时候。
+下面分两块更新pthread-probe.c从primary到held签名之间的内容。第一块替换primary到require结束的旧窗口，新增TLS、身份和门，再加入leaf；第二块才更新echo。容量八人、二十四轮复用和两个资源失败路径都保留。普通结束以后不再拿已经结束的身份调用equal；有效身份的比较放在自身仍运行或两个已创建尚未join的时候。
 
 <!-- replace: labs/airios/pthread-probe.c -->
 <!-- before -->
@@ -227,22 +223,6 @@ static _Atomic unsigned ready; // 回调开始时启动包已经被适配器释�
 static void require(int condition, const char *message) { // 失败结束本真实进程组。
     if (!condition) { airi_puts(message); airi_puts("\n"); airi_exit(88); } // 不继续输出成功标记。
 }
-static void *echo(void *argument) { // 真正的POSIX形状函数，不强转函数指针。
-    struct token *token = argument; // 用户参数保持到主join以后。
-    require(errno == 0 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
-    token->identity = pthread_self(); // 只写自己那一份输出，主尚未读取。
-    errno = 101 + (int)token->index; // 每位执行者保存不同错误哨兵。
-    if (!token->index) { // 第一位观察未支持的worker管理能力。
-        pthread_t untouched = 777; void *output = (void *)(uintptr_t)99; // 失败输出哨兵。
-        require(pthread_create(&untouched, 0, echo, token) == ENOTSUP && untouched == 777, "pthread nested create unsupported"); // 不能悄悄创建后返回失败。
-        require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread peer join unsupported"); // 保留当前主管理限制。
-        require(pthread_join(pthread_self(), 0) == EDEADLK, "pthread worker self join"); // 自己等待自己明确报告。
-    }
-    airi_yield(); // 在真正共享执行者之间交替，errno仍属于自己。
-    require(errno == 101 + (int)token->index, "pthread worker errno private"); // pthread调用和别人的TLS不污染它。
-    return token; // 目标返回值不是启动包，而是仍存活的用户对象。
-}
-static void *held(void *argument) { // 容量worker从回调开始就不再占启动包。
 ```
 <!-- after -->
 ```c
@@ -268,6 +248,32 @@ static void *leaf(void *argument) { // 创建者是worker而不是主执行者�
     require(errno == 201 && local_marker == 321 && pthread_equal(pthread_self(), descendant_self), "nested worker survives creator reuse"); // 创建者槽复用不污染仍存活的子TLS/TCB。
     return argument; // 原main持有的token仍有效，不借creator已经结束的栈。
 }
+```
+
+接着替换echo函数至held签名以前的窗口。现在echo0实际创建leaf，把main持有的token传下去；echo自身的100／101与leaf的321／201属于不同TLS。对等join仍返回ENOTSUP，不能把创建能力放开等同于收取能力也已放开。
+
+<!-- replace: labs/airios/pthread-probe.c -->
+<!-- before -->
+```c
+static void *echo(void *argument) { // 真正的POSIX形状函数，不强转函数指针。
+    struct token *token = argument; // 用户参数保持到主join以后。
+    require(errno == 0 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
+    token->identity = pthread_self(); // 只写自己那一份输出，主尚未读取。
+    errno = 101 + (int)token->index; // 每位执行者保存不同错误哨兵。
+    if (!token->index) { // 第一位观察未支持的worker管理能力。
+        pthread_t untouched = 777; void *output = (void *)(uintptr_t)99; // 失败输出哨兵。
+        require(pthread_create(&untouched, 0, echo, token) == ENOTSUP && untouched == 777, "pthread nested create unsupported"); // 不能悄悄创建后返回失败。
+        require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread peer join unsupported"); // 保留当前主管理限制。
+        require(pthread_join(pthread_self(), 0) == EDEADLK, "pthread worker self join"); // 自己等待自己明确报告。
+    }
+    airi_yield(); // 在真正共享执行者之间交替，errno仍属于自己。
+    require(errno == 101 + (int)token->index, "pthread worker errno private"); // pthread调用和别人的TLS不污染它。
+    return token; // 目标返回值不是启动包，而是仍存活的用户对象。
+}
+static void *held(void *argument) { // 容量worker从回调开始就不再占启动包。
+```
+<!-- after -->
+```c
 static void *echo(void *argument) { // 真正的POSIX形状函数，不强转函数指针。
     struct token *token = argument; // 用户参数保持到主join以后。
     require(errno == 0 && local_marker == 42 && !pthread_equal(pthread_self(), primary), "pthread fresh errno and identity"); // 新TLS不继承主71。
@@ -307,6 +313,12 @@ int main(void) { // 主安排观察并统一收取，实际创建也可发生在
     pthread_t unchanged = 777; pthread_attr_t attributes = {0}; // 非NULL属性当前不支持，即使保留字为0。
     require(pthread_equal(primary, pthread_self()), "pthread equality"); // 只比较有效身份，不靠猜测下一个TID。
 ```
+
+主收取echo0后，让leaf实际在gate上等待。接着创建replacement，使用另一份tokens[2]，避免两个仍在运行者同时写同一对象。内核会复用最早空闲的echo0槽：用户TLS基址数值可以相同，但普通初值和TCB身份必须重新建立。replacement返回并被join以后，主才发布leaf的gate。
+
+leaf恢复后检查321、201和自己的活身份仍正确，再返回原tokens[0]。若它借用了创建者的TLS或现场，创建者槽被清零、写入replacement初值及身份时就会暴露错误。主最后join leaf取得原指针，证明创建者结束没有提前结束仍活着的同进程执行链。
+
+下面替换main从失败输出哨兵到容量start之间的旧窗口，按创建echo→收取创建者→重用其槽→放行leaf的顺序写入。八人容量观察仍接在这一段之后。
 
 <!-- replace: labs/airios/pthread-probe.c -->
 <!-- before -->

@@ -21,7 +21,7 @@ first_use:
   establishes: 候选0不公开，root/fork/exec/worker在可运行前写真实身份，使用已验证布局不追随任意FS
 - concept: TLS保留与用户态身份读取
   at: ../../../dev-log/core/56-runtime-identity.md#runtime-fast-query
-  establishes: used保留anchor形成PT_TLS，FS读头后直接返回，有效版本才走快路径；ELF节回收另需保护
+  establishes: used保留anchor形成PT_TLS，沿inspect后的普通调用从FS0取self再读版本/TID，有效头直接返回，后备也以合法FS布局为前提；ELF节回收另需保护
 - concept: 原始查询作独立证据
   at: ../../../dev-log/core/56-runtime-identity.md#runtime-identity-observation
   establishes: 每位观察者仅一次42号参考，主版本后备另一次，实际内核日志核对七次而非用户自报

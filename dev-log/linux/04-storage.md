@@ -11,31 +11,6 @@
 
 短读已经表明“请求总长”不等于“完成总长”。写入循环也必须从完成位置继续，否则重交原向量会重复前缀。pwritev_all 先复制 iovec 描述数组，仍借调用者原数据。正返回n后，先越过完整消费的段，再前移当前部分段的iov_base并缩短iov_len，同时显式offset只加n。零长度段直接跳过；−1且errno=EINTR才重试未完成范围，正短返回则必须先消费实际前缀。本轮EOF短读是真正的短成功，七字节普通文件写入不宣称一定触发短写。
 
-<a id="linux-cache-and-space"></a>
-## 页缓存、空间预留和直接I/O分别改变什么
-
-字节已经经文件接口交给内核，接下来仍要区分谁看得见、内存是否驻留、是否请求了同步。共享文件映射 MAP_SHARED 让 CPU 写入文件缓存页。程序写首字节Z后立即用普通pread读到Z，说明当前可见内容一致；此时还没由这个观察确认同步。mincore只返回当前这一页的驻留快照，既不是进程总RSS，也不表示掉电后可恢复。接着msync(MS_SYNC)请求同步映射修改，munmap结束映射，FD仍可用于fdatasync。可见性、驻留和同步是三个不同观察。
-
-另一种“分配”发生在文件存储范围，不能拿刚才的驻留页模型解释。posix_fallocate 请求为指定文件范围预留空间，成功后记录st_size和以512字节计的st_blocks；它不等于给进程分配2MiB RSS。这个函数返回错误码本身，不能直接用旧errno报告。明确不支持的结果单独记录；ENOSPC等真正失败必须结束实验，不能用“不支持”掩盖。
-
-若应用选择直接 I/O，缓冲地址、长度和文件偏移还要满足后端约束；这不是把普通 write 换一个标志就必然成立。O_DIRECT 的约束来自实际文件系统，不能统一猜成512或4096。先打开独立direct文件，用statx的STATX_DIOALIGN查询内存和偏移对齐；头文件、内核或文件系统未提供字段时标DIRECT_UNVERIFIED。对齐值有效后再posix_memalign，内存分配至少多留一字节，确保后面的错开地址请求仍在已分配范围内。
-
-对齐写要完整写出一个要求的单位，再把地址错开一字节观察返回值。若地址对齐要求为1，错开并不违反要求；有些文件系统也可能对不合要求的请求回退缓冲路径。因此记录实际返回和errno，不硬造统一EINVAL。O_DIRECT不替代fsync，也不能仅凭一次成功断言所有缓存完全绕过。
-
-<a id="linux-eintr"></a>
-## 真正中断一次正在等待的读取
-
-前面的 EOF 返回正的短前缀或零，这里再区分一次尚未得到数据的等待被信号中断。Linux 管道保留写端且没有数据时，读端会等待；关闭所有写端才会读到EOF。本节保留两个端点，给SIGALRM安装flags为0的处理器，避免SA_RESTART自动重启read。约一秒后信号让read返回−1/EINTR。处理器只设置sig_atomic_t标量并用允许在信号上下文调用的alarm再安排一次；这样即使第一次信号早于read到达，也不会永远等一个已经过去的单次事件。主流程读返回后取消alarm并恢复原处理方式。
-
-EINTR与EOF短读不同：这里返回−1并没有正的完成前缀。处理器不能随意printf、分配对象或调用普通锁；本节不实现完整信号框架，后续等待实验再展开并发交接。
-
-<a id="linux-replace-durability"></a>
-## 名字换成new，旧FD为什么还能读old
-
-最后把内容与名字接起来：发布新版本希望后来打开 current 的读者得到 new，同时已有旧 FD 仍指向原对象。这要求先准备好新内容，再改变名字对应，而不是原地覆盖 old。先创建 current 写 old 并同步，再创建replace.tmp写new。发布新版本的顺序是：写完新内容，fsync新文件，renameat将临时名字替换成current，再fsync目录FD。rename负责同目录路径可见性的切换，文件同步负责内容与相应元数据，目录同步负责名称变更；它们不能互相替代，C++流flush也不能自动代替这两次fsync。
-
-rename后重新open current得到新对象，旧FD仍引用原对象，因此两者分别读new和old。这个实验验证实际调用顺序和当前对象身份，没有拉掉主机电源。文件系统不支持目录同步或同步失败时会如实报错，不能用原子替换可见性推断所有掉电保证。对应 FileStorage::atomicWrite 的持久性问题，重点是找出旧注释把哪两个时刻合在了一起；本节不修改其他项目源码。
-
 **新建 `labs/linux/p4`。** Linux完整实现位于平台条件的Linux分支；Mac只编译并运行拒绝分支返回77，不能据此声称Linux分支已经编译。
 
 **新建 `labs/linux/p4/io.c`。** 核心向量、缓存、信号和同步路径必须通过；直接I/O与预分配能力按实际FS分别报告。
@@ -110,6 +85,17 @@ static void pwritev_all(int fd, const struct iovec *source, int count, off_t off
         }
     }
 }
+```
+
+<a id="linux-eintr"></a>
+## 真正中断一次正在等待的读取
+
+前面的 EOF 返回正的短前缀或零，这里再区分一次尚未得到数据的等待被信号中断。Linux 管道保留写端且没有数据时，读端会等待；关闭所有写端才会读到EOF。本节保留两个端点，给SIGALRM安装flags为0的处理器，避免SA_RESTART自动重启read。约一秒后信号让read返回−1/EINTR。处理器只设置sig_atomic_t标量并用允许在信号上下文调用的alarm再安排一次；这样即使第一次信号早于read到达，也不会永远等一个已经过去的单次事件。主流程读返回后取消alarm并恢复原处理方式。
+
+EINTR与EOF短读不同：这里返回−1并没有正的完成前缀。处理器不能随意printf、分配对象或调用普通锁；本节不实现完整信号框架，后续等待实验再展开并发交接。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
 static volatile sig_atomic_t interrupted; // 信号处理器只修改允许的简单标量。
 static void alarm_handler(int signal_number) { // 异步处理器不做printf或分配。
     (void)signal_number; // 这里只处理SIGALRM。
@@ -121,7 +107,7 @@ static void observe_eintr(void) { // 管道保留写端但不写，read必然等
     if (pipe(ends)) // 创建真正Linux管道。
         fail("pipe"); // 不能以模拟结果替代。
     struct sigaction action = {0}, old; // flags0避免SA_RESTART自动重启read。
-    action.sa_handler = alarm_handler; // 唯一异步动作是设标量。
+    action.sa_handler = alarm_handler; // 处理器设置标量并用 alarm 重设时钟，不调用普通输出或分配。
     sigemptyset(&action.sa_mask); // 不额外屏蔽其他信号。
     if (sigaction(SIGALRM, &action, &old)) // 保存旧处理方式，实验后恢复。
         fail("sigaction"); // 权限或参数错误明确失败。
@@ -138,6 +124,21 @@ static void observe_eintr(void) { // 管道保留写端但不写，read必然等
     expect(n == -1 && error == EINTR && interrupted, "read was not interrupted by real signal"); // 真正观察EINTR，不靠手设errno。
     puts("[EINTR_OK] empty pipe read interrupted; no SA_RESTART"); // 与短成功返回区分。
 }
+```
+
+<a id="linux-cache-and-space"></a>
+## 页缓存、空间预留和直接 I/O 分别改变什么
+
+先给这项选择一个位置。普通文件的缓冲 I/O 通过 Linux 管理的文件页缓存交接数据：读可以从已有缓存页取内容，写也可能先改变缓存页，之后再由同步或回写推进到后端。应用数组与这些缓存页仍是两份对象，write 返回以后不能只凭返回值判断持久性。
+
+有的存储程序已经维护自己的数据缓存，希望减少与文件页缓存的重复。O_DIRECT 请求尽量减小这层缓存的影响，让文件 I/O 直接面向用户缓冲；代价之一是应用必须遵守当前文件要求的地址、长度与偏移约束。它仍由 Linux 文件系统和设备栈处理，也不等于绕过所有设备缓存或取得落盘保证。这里另开 direct 文件，使这项观察与后面的 data 共享映射实验分开。[文件页缓存](https://docs.kernel.org/mm/page_cache.html)、[open 的 O_DIRECT 合同](https://man7.org/linux/man-pages/man2/open.2.html)给出这些边界。
+
+若应用选择这条路径，缓冲地址、长度和文件偏移还要满足后端约束；这不是把普通 write 换一个标志就必然成立。O_DIRECT 的约束来自实际文件系统，不能统一猜成512或4096。先打开独立direct文件，用statx的STATX_DIOALIGN查询内存和偏移对齐；头文件、内核或文件系统未提供字段时标DIRECT_UNVERIFIED。对齐值有效后再posix_memalign，内存分配至少多留一字节，确保后面的错开地址请求仍在已分配范围内。
+
+对齐写要完整写出一个要求的单位，再把地址错开一字节观察返回值。若地址对齐要求为1，错开并不违反要求；有些文件系统也可能对不合要求的请求回退缓冲路径。因此记录实际返回和errno，不硬造统一EINVAL。O_DIRECT不替代fsync，也不能仅凭一次成功断言所有缓存完全绕过。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
 static int direct_io(int directory) { // 可选能力必须按实际文件系统报告。
 #ifndef STATX_DIOALIGN // 老头文件没有对齐查询，不能凭512或4096猜规则。
     (void)directory; // 不使用未知O_DIRECT约束。
@@ -187,6 +188,12 @@ static int direct_io(int directory) { // 可选能力必须按实际文件系统
     return 1; // 只有这条路径完成才称直接I/O已运行。
 #endif // 结束头文件能力差异。
 }
+```
+
+助手已经写出，接着由 main 建立同一轮临时目录和 data 文件，先实际走完前面的向量读写。此时 main 尚未结束；后续的预留、缓存和名称替换继续追加，再一起编译。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
 int main(void) { // Linux普通用户程序，文件系统和设备由Linux管理。
     char directory[] = "/tmp/airios-storage-XXXXXX"; // mkdtemp替换末尾六位，避免碰已有项目文件。
     if (!mkdtemp(directory)) // 创建私有临时目录。
@@ -212,6 +219,12 @@ int main(void) { // Linux普通用户程序，文件系统和设备由Linux管�
         fail("preadv"); // 保留errno。
     expect(n == 5 && !memcmp(first, "cd", 2) && !memcmp(second, "efg", 3) && second[3] == 0x55, "short vector read layout"); // 短读跨段消费位置可见。
     printf("[VECTOR_OK] requested=10 returned=%ld first=cd second_prefix=efg offset=3\n", (long)n); // 真实EOF短读，不伪造短写。
+```
+
+接下来为同一文件预留存储范围。这种“分配”发生在文件系统中，不能当成进程驻留页的增长。posix_fallocate 请求为指定文件范围预留空间，成功后记录st_size和以512字节计的st_blocks；它不等于给进程分配2MiB RSS。这个函数返回错误码本身，不能直接用旧errno报告。明确不支持的结果单独记录；ENOSPC等真正失败必须结束实验，不能用“不支持”掩盖。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
     int allocation = posix_fallocate(fd, 0, 2 * 1024 * 1024); // 返回错误码，与普通syscall的-1/errno不同。
     if (allocation) { // 只把明确不支持归入能力缺失，空间错误仍失败。
         if (allocation != EOPNOTSUPP && allocation != ENOSYS && allocation != EINVAL) { // ENOSPC等不能假装不支持。
@@ -225,6 +238,12 @@ int main(void) { // Linux普通用户程序，文件系统和设备由Linux管�
             fail("fstat allocated file"); // 记录读取元数据失败。
         printf("[PREALLOC_OK] size=%lld allocated_512_blocks=%lld\n", (long long)info.st_size, (long long)info.st_blocks); // 逻辑长度与物理分配分开。
     }
+```
+
+字节已经经文件接口交给内核，接下来仍要区分谁看得见、内存是否驻留、是否请求了同步。共享文件映射 MAP_SHARED 让 CPU 写入文件缓存页。程序写首字节Z后立即用普通pread读到Z，说明当前可见内容一致；此时还没由这个观察确认同步。mincore只返回当前这一页的驻留快照，既不是进程总RSS，也不表示掉电后可恢复。接着msync(MS_SYNC)请求同步映射修改，munmap结束映射，FD仍可用于fdatasync。可见性、驻留和同步是三个不同观察。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
     long page_size = sysconf(_SC_PAGESIZE); // 实际Linux页大小，不用固定4096推断驻留跨度。
     expect(page_size > 0, "page size unavailable"); // 避免无效mmap长度。
     char *mapped = mmap(NULL, (size_t)page_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // 文件第一页共享映射，不创建独立匿名副本。
@@ -247,8 +266,25 @@ int main(void) { // Linux普通用户程序，文件系统和设备由Linux管�
     if (fdatasync(fd)) // 同步数据及恢复它必要的元数据，例如长度。
         fail("data fdatasync"); // 不把close当同步替代。
     close(fd); // 不再借此FD。
+```
+
+结束映射并同步 data 以后，FD 才关闭。接下来分别调用刚写好的 EINTR 与直接 I/O 助手：前者保持管道写端以制造真实等待，后者另开 direct 文件查询自身约束，不把 data 的映射页拿来假定缓冲对齐。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
     observe_eintr(); // 真信号中断，不和EOF短读混为一谈。
     int direct_verified = direct_io(root); // 可选直接I/O按环境能力记录。
+```
+
+<a id="linux-replace-durability"></a>
+## 名字换成new，旧FD为什么还能读old
+
+最后把内容与名字接起来：发布新版本希望后来打开 current 的读者得到 new，同时已有旧 FD 仍指向原对象。这要求先准备好新内容，再改变名字对应，而不是原地覆盖 old。先创建 current 写 old 并同步，再创建replace.tmp写new。发布新版本的顺序是：写完新内容，fsync新文件，renameat将临时名字替换成current，再fsync目录FD。rename负责同目录路径可见性的切换，文件同步负责内容与相应元数据，目录同步负责名称变更；它们不能互相替代，C++流flush也不能自动代替这两次fsync。
+
+rename后重新open current得到新对象，旧FD仍引用原对象，因此两者分别读new和old。这个实验验证实际调用顺序和当前对象身份，没有拉掉主机电源。文件系统不支持目录同步或同步失败时会如实报错，不能用原子替换可见性推断所有掉电保证。对应 FileStorage::atomicWrite 的持久性问题，重点是找出旧注释把哪两个时刻合在了一起；本节不修改其他项目源码。
+
+<!-- append: labs/linux/p4/io.c -->
+```c
     int old = openat(root, "current", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600); // 旧名称与仍打开的旧对象。
     if (old < 0) // 独立临时目录内也检查创建错误。
         fail("open old"); // 不忽略失败。
@@ -294,6 +330,7 @@ int main(void) { // Linux普通用户程序，文件系统和设备由Linux管�
 #endif // 非Linux分支只报告77。
 ```
 
+
 <a id="linux-storage-run"></a>
 ## 保存真正的内核边界
 
@@ -335,16 +372,21 @@ printf '{"passed":true,"phase":"p4","direct_verified":%s,"physical_power_loss_te
 
 **更新远端阶段选择。** p4只复制io.c与run.sh，使用AiriOS-labs/p4和artifacts/linux-p4。
 
-<!-- write: scripts/linux_lab.py -->
+参数合法集合加入 p4。
+
+<!-- replace: scripts/linux_lab.py -->
+<!-- before -->
 ```python
-"""Run the authorized Linux programs on the user's personal Linux host."""  # 从本机发起个人 Linux 主机上的两份实验
-import argparse  # 命令行解析器把字符串选项转换为带名称的属性。
-import io     # BytesIO 为内存字节提供文件式读写接口。
-import json   # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-import shlex  # 按 Shell 引用规则拆分或引用文本，区别于实际执行。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import tarfile     # 读取或构造 tar 归档，成员路径及类型还需单独检查。
-from tools import ROOT  # 共享 ROOT 指向项目根目录，后续路径不依赖调用位置。
+
+parser=argparse.ArgumentParser()  # 主机参数解析器提供--host选项与用法提示。
+parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')  # 个人Linux主机可以显式替换，不涉及公司机器。
+parser.add_argument('--phase', choices=('p1', 'p2', 'p3'), default='p1') # 实验来源与远端目录使用同一阶段名。
+args=parser.parse_args()  # 把进程参数转为Namespace，后续通过 args.host 取得目标主机字符串。
+if args.host.startswith('-') or any(c.isspace() for c in args.host):  # 禁止选项形状和空白，避免host被外部工具误解析；生成器逐字符检查空白。
+    raise RuntimeError('Invalid SSH host')  # 无效目标在启动SSH之前拒绝。
+```
+<!-- after -->
+```python
 
 parser=argparse.ArgumentParser()  # 主机参数解析器提供--host选项与用法提示。
 parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')  # 个人Linux主机可以显式替换，不涉及公司机器。
@@ -352,14 +394,23 @@ parser.add_argument('--phase', choices=('p1', 'p2', 'p3', 'p4'), default='p1') #
 args=parser.parse_args()  # 把进程参数转为Namespace，后续通过 args.host 取得目标主机字符串。
 if args.host.startswith('-') or any(c.isspace() for c in args.host):  # 禁止选项形状和空白，避免host被外部工具误解析；生成器逐字符检查空白。
     raise RuntimeError('Invalid SSH host')  # 无效目标在启动SSH之前拒绝。
-ssh=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=10',args.host]  # 非交互认证，连接最多十秒，最后元素是单个host参数。
-# Relative to SSH's login directory; does not overwrite any other project.
-remote='AiriOS-labs/' + args.phase  # 相对个人主机登录目录的独立实验目录。
-dest=ROOT/'artifacts'/('linux-' + args.phase) # 每阶段独立保存本轮状态。
-dest.mkdir(parents=True, exist_ok=True) # SSH失败也必须有证据目录。
-(dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'not yet verified'},indent=2)+'\n') # 先覆盖旧成功身份。
-connection=subprocess.run(ssh+[f'mkdir -p {shlex.quote(remote)}'],capture_output=True,text=True,timeout=20) # 非交互连接另有总时间上界。
-(dest/'connection.log').write_text(connection.stdout + connection.stderr) # 真实失败输出在复制源码之前也保留。
+```
+
+p4 选择本章的 io.c 与 run.sh，仍在阶段独立目录运行。
+
+<!-- replace: scripts/linux_lab.py -->
+<!-- before -->
+```python
+if connection.returncode: # 未连接就不复制也不声称程序运行。
+    (dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'connection failed','exit':connection.returncode},indent=2)+'\n') # 明确本轮未验证。
+    raise RuntimeError(f'Linux SSH failed ({connection.returncode}); see {dest}/connection.log') # 路径和失败状态交回统一入口。  # 本地参数列表启动SSH，远端命令文本中的目录由quote保护。
+names = ('ordinary.c','raw_start.S','run.sh') if args.phase == 'p1' else ('memory.c','run.sh') if args.phase == 'p2' else ('process.c','run.sh') # 只选择本阶段已写出的程序。
+sources=[ROOT/'labs/linux'/args.phase/name for name in names]  # 列表推导按所选阶段名称构成Path对象。
+subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp安静且非交互传输，连接上限同SSH。
+                *[str(p) for p in sources],f'{args.host}:{remote}/'],check=True)  # 列表内*展开本阶段路径字符串，最后一项是远端目标。
+```
+<!-- after -->
+```python
 if connection.returncode: # 未连接就不复制也不声称程序运行。
     (dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':False,'status':'connection failed','exit':connection.returncode},indent=2)+'\n') # 明确本轮未验证。
     raise RuntimeError(f'Linux SSH failed ({connection.returncode}); see {dest}/connection.log') # 路径和失败状态交回统一入口。  # 本地参数列表启动SSH，远端命令文本中的目录由quote保护。
@@ -367,95 +418,25 @@ names = ('ordinary.c','raw_start.S','run.sh') if args.phase == 'p1' else ('memor
 sources=[ROOT/'labs/linux'/args.phase/name for name in names]  # 列表推导按所选阶段名称构成Path对象。
 subprocess.run(['scp','-q','-o','BatchMode=yes','-o','ConnectTimeout=10',  # scp安静且非交互传输，连接上限同SSH。
                 *[str(p) for p in sources],f'{args.host}:{remote}/'],check=True)  # 列表内*展开本阶段路径字符串，最后一项是远端目标。
-execution=subprocess.run(ssh+[f'cd {shlex.quote(remote)} && sh run.sh'])  # 远端先切实验目录，再执行shell；暂不check，失败也先下载证据。
-data=subprocess.check_output(ssh+[f'cd {shlex.quote(remote)} && tar -cf - artifacts'])  # tar从标准输出交回归档bytes，-f -表示不写远端归档文件。
-dest.mkdir(parents=True,exist_ok=True)  # 确保证据父目录存在。
-with tarfile.open(fileobj=io.BytesIO(data)) as tar:  # 把内存归档作为文件交给tarfile，with结束关闭归档。
-    tar.extractall(dest,filter='data')  # data过滤限制危险成员，解包到本轮证据目录。
-if execution.returncode:  # 非零远端状态意味着实验失败，即使tar传输成功。
-    raise RuntimeError(f'Linux experiment failed; evidence downloaded to {dest}')  # 原始证据已经带回，再报告失败位置。
-result=json.loads((dest/'artifacts/result.json').read_text())  # 实际远端程序写出的JSON恢复成字典。
-if result.get('passed') is not True:  # get缺键返回None，只有布尔True才接受。
-    raise RuntimeError('Remote validation failed')  # 远端记录不满足成功合同。
-(dest/'remote.json').write_text(json.dumps({'host':args.host,'directory':remote,'verified':True,'status':'program and GDB completed'},indent=2)+'\n')  # 记录本次实际host和目录，不把另一主机记录混用。
-print(f'Remote evidence downloaded: {dest}')  # 显示本轮证据可查看位置。
 ```
 
 **更新统一入口。** 扩充phase到p4，其余guest命令保持。
 
-<!-- write: scripts/manage.py -->
+入口接受 p4，默认仍为 p1。
+
+<!-- replace: scripts/manage.py -->
+<!-- before -->
 ```python
-import argparse  # 命令行解析器把字符串选项转换为带名称的属性。
-import json      # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-import shlex     # 按 Shell 引用规则拆分或引用文本，区别于实际执行。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import sys  # 取得当前解释器路径、入口参数及标准错误流。
-from tools import ROOT, tool, make_command  # 复用路径、工具查找与构建参数，不另建工具选择规则。
-from deps import prepare  # 复用外部依赖下载与校验，统一入口先调用它。
-from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
-from storage_test import check_storage_restart # 两个独立CPU从同一实验盘恢复。
-from console_test import check_console  # 复用真实键盘和UART输入验证。
-
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal','stack-guard','block-readonly','block-timeout','block-missing')  # 元组固定九种构建配置，CLI choices 与 test 遍历共用。
-def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
-    subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
-def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。
-    # GNU Make dry-run is the single source of compiler flags, including headers.
-    command=make_command('normal','kernel')  # 局部 command 是 Make 参数列表，不是导入的QEMU command函数。
-    command.insert(1,'-Bn')  # 在可执行路径之后插入 -B强制列规则、-n只打印的选项。
-    lines=subprocess.check_output(command,cwd=ROOT,text=True).splitlines()  # 读取命令文本并按行拆分，不执行打印出的编译器命令。
-    entries=[]  # 保存编译数据库条目，每项对应一份源文件及参数。
-    for line in lines:  # 逐条检查 Make 打印的命令。
-        if ' -c ' not in line or ' -o ' not in line: continue  # 过滤目录创建与链接命令，只考虑单文件编译。
-        tokens=shlex.split(line)  # 按shell引号解析参数边界，列表值随后直接保存。
-        if '-c' not in tokens or '-o' not in tokens: continue  # 分词后再确认编译选项，排除仅字符串碰巧匹配的行。
-        source=tokens[tokens.index('-c')+1]  # index 找到-c位置，其后一个元素是被编译的源文件路径。
-        entries.append({'directory':str(ROOT),'file':str(ROOT/source),'arguments':tokens})  # 保存工作目录、绝对源路径和完整参数列表供 clangd 消费。
-    target=ROOT/'build/normal/compile_commands.json'  # 数据库放在普通配置目录，.clangd 从此处读取。
-    target.parent.mkdir(parents=True,exist_ok=True)   # 数据库父目录缺失时创建，已有目录保持。
-    target.write_text(json.dumps(entries,indent=2)+'\n')  # 列表编码为JSON数组，输出本次真实构建参数。
-
-def build(profile):  # 给指定配置调用同一Make规则，普通配置额外更新编辑器数据库。
-    run(make_command(profile))  # 组装配置及工具覆盖，执行完整内核与镜像构建。
-    if profile=='normal':  # 测试配置不替换日常编辑参数。
-        compilation_database()  # 普通配置才导出clangd数据库。
-def inspect_elf(profile='normal'):  # 核对独立内核目标，不接受宿主解释器、动态依赖或未解析符号。
-    binary=ROOT/'build'/profile/'airios.elf'  # 定位本次配置的ELF，避免检查另一目录的旧产物。
-    readelf=tool('llvm-readelf','llvm')  # 按既定规则找到 LLVM ELF 检查器。
-    report=subprocess.check_output([readelf,'-h','-l','-d','-s',str(binary)],text=True)  # 合并ELF头、程序段、动态信息和符号表的文本报告。
-    nm=subprocess.check_output([tool('llvm-nm','llvm'),'-u',str(binary)],text=True)  # -u 只列未定义符号，独立内核应没有内容。
-    if nm.strip() or 'INTERP' in report or '(NEEDED)' in report:  # 非空未定义项、解释器段或动态依赖任一存在就拒绝。
-        raise RuntimeError('Kernel is not a fully resolved freestanding executable')  # 报告不满足完全解析的独立目标约定。
-    if 'X86-64' not in report and 'x86-64' not in report:  # 兼顾工具文字大小写，必须出现x86-64机器类型。
-        raise RuntimeError('Wrong ELF target')  # 错误机器目标不能作为此次内核成功结果。
-    if 'EXEC (Executable file)' not in report:  # 要求固定地址静态ET_EXEC，与链接脚本装载方式一致。
-        raise RuntimeError('Expected a static ET_EXEC ELF')  # PIE或其他ELF种类不满足目前启动路径。
-    (ROOT/'artifacts').mkdir(exist_ok=True)  # 建立检查报告目录。
-    (ROOT/'artifacts/kernel-elf.txt').write_text(report)  # 保存实际ELF检查输出，便于后续调试查看。
-    print('PASS ELF: x86-64 ET_EXEC, no interpreter/dependencies/undefined symbols')  # 只在机器、类型、依赖和符号全部符合后打印通过。
-
-def doctor():  # 查工具与版本，再实际准备和构建内核以验证环境。
-    record={}  # 字典以工具名称为键，值保存路径和首行版本。
-    for name,formula in [('clang','llvm'),('ld.lld','lld'),('qemu-system-x86_64','qemu'),  # 每项二元组给可执行名称与对应软件包标识。
-                         ('xorriso','xorriso'),('gmake','make'),('llvm-readelf','llvm')]:  # 继续列镜像制作、GNU Make和ELF检查器；循环解包到name/formula。
-        executable=make_command()[0] if name=='gmake' else tool(name,formula)  # GNU Make沿用gmake再make的选择，其余工具按既有规则查找。
-        flag='-version' if name=='xorriso' else '--version'  # xorriso 使用单横线，其余工具使用双横线版本参数。
-        result=subprocess.run([executable,flag],capture_output=True,text=True)  # 启动版本命令，分别收集标准输出与错误文本。
-        version=(result.stdout+result.stderr).splitlines()[0]  # 版本可能写在任一流，取合并后的第一行。
-        record[name]={'path':executable,'version':version}     # 工具键映射到实际路径和版本，不只有安装包名称。
-        print(f'OK {name}: {version}')  # 显示本轮查到的工具身份和版本。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    run(make_command(target='kernel'))  # 通过真实内核编译和链接验证环境，不仅看工具是否存在。
-    compilation_database()  # 使用同一规则生成编辑器参数。
-    inspect_elf()  # 检查刚构建出的普通配置ELF。
-    (ROOT/'artifacts/toolchain.json').write_text(json.dumps(record,indent=2)+'\n')  # 保存本次实际工具路径和版本。
-def main():  # 解析统一入口动作，并把它交给先前实现的脚本。
-    if len(sys.argv)>1 and sys.argv[1]=='learn':  # 先检查有动作参数，再识别采用独立子解析器的learn。
-        from learning import main as learn  # 只进入learn时导入后续提供的学习模块，别名避免与当前main混淆。
-        learn(sys.argv[2:])  # 切片丢掉程序名和learn，把余下参数交给子入口。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    parser=argparse.ArgumentParser(description='AiriOS build and learning tools')  # 建立动作解析器，不合法参数由argparse给出用法。
-    parser.add_argument('action',choices=['doctor','build','run','test','debug','kernel-debug','linux-lab','clean','ui-preview','ui-test','docs-check','snapshots'])  # 位置参数限定动作集合，拼错动作不能落到默认运行QEMU。
+    parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
+    parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
+    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
+    parser.add_argument('--phase',choices=('p1','p2','p3'),default='p1') # Linux阶段显式选择，默认保持P1。
+    parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
+    parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
+    args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
+```
+<!-- after -->
+```python
     parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
     parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
     parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受已发布配置。
@@ -463,78 +444,6 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
     parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
     parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
     args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
-    if args.action=='snapshots':  # 只有导出动作需要读取Git教学提交链。
-        from snapshots import generate  # 局部导入后续提供的快照模块。
-        generate()  # 核对固定main提交链和旧目录保护后导出阶段源码。
-        return      # 当前动作完成，不继续后面的构建或分派。
-    if args.action=='docs-check':  # 只检查重建与导航时无需启动QEMU。
-        from docs_check import check_docs  # 只有明确来源检查才读取全部课程。
-        check_docs()  # 核对正文重建与本地导航，不阻塞默认 test。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    if args.graphics:  # G24已提供纯标准库资产检查，运行图形不依赖G26的截图工具。
-        from graphics_assets import verify_fonts  # 显式选择后才读取图形目录。
-        verify_fonts()  # 不导入Pillow或Cocoa。
-    if args.action in ('ui-preview', 'ui-test') or (args.action == 'test' and args.graphics):  # 完整图形回归在G26后使用。
-        from ui_preview import preview, check_frontend  # 主线不会导入这份可选工具。
-    if args.action=='ui-preview':  # 主机窗口无需内核启动依赖。
-        preview(args.app,args.state)  # 打开指定应用和服务状态。
-        return  # 此动作已完成。
-    if args.action=='ui-test':  # 主机行为与图像观察采用前章接口。
-        check_frontend()  # 运行共享C测试与平台可用快照。
-        return  # 此动作已完成。
-    if args.action=='clean':  # 清理不需要再构建内核。
-        run(make_command(target='clean'))  # 调用Make既有删除规则。
-        return  # 清理结束。
-    if args.action=='linux-lab':  # Linux对照程序由独立脚本传到个人主机运行。
-        run([sys.executable,str(ROOT/'scripts/linux_lab.py'),'--host',args.host,'--phase',args.phase])  # 当前解释器执行个人主机实验。
-        return  # 远程实验结束后不启动另一台虚拟机。
-    if args.action=='doctor':  # doctor自己按需准备和构建。
-        doctor()  # 查工具、构建、生成编辑器参数并检查ELF。
-        return    # 环境检查结束。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    if args.graphics:  # 图形和串口使用不同产物目录，不复用旧目标。
-        args.profile = 'desktop-' + args.profile  # 如 normal 变为 desktop-normal。
-    if args.action=='kernel-debug':  # 内核GDB观察需要先得到普通配置带符号ELF。
-        build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
-        run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
-        return  # 调试记录完成后结束本动作。
-    if args.action=='test':  # 完整验证串联主机算法、可选前端、九种启动和三条设备输入。
-        run(make_command(target='host-test'))  # 编译同一纯C实现并运行带ASan/UBSan的主机边界检查。
-        if args.graphics:  # 普通 test 不导入或验证前端。
-            check_frontend(screenshots=False)  # 图形模型检查仍有自己的一组断言。
-        results=[]  # 列表依次保存各配置的实际启动结果。
-        profiles = [('desktop-' + p) if args.graphics else p for p in PROFILES]  # 呈现方式和故障场景正交。
-        for profile in profiles:  # 按固定九种配置独立编译与启动。
-            build(profile)  # 生成对应配置的ELF和镜像，产物目录彼此隔离。
-            if profile.endswith('normal'):  # 普通目标额外检查ELF结构。
-                inspect_elf(profile)  # 保存机器、类型、依赖与符号报告。
-            results.append(check(profile))  # 等待该配置完成标记并保存结果，任一失败异常中止。
-        (ROOT/'artifacts'/('desktop-boot-tests.json' if args.graphics else 'boot-tests.json')).write_text(json.dumps(results,indent=2)+'\n')  # 九种启动结果编码为JSON数组。
-        prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
-        console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
-        (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
-        check_storage_restart('desktop-normal' if args.graphics else 'normal') # 独立正式日志区的真实跨QEMU恢复。
-    else:  # 普通build/run/debug共用指定配置构建路径。
-        build(args.profile)  # build/run/debug先构建调用者选择的配置。
-        if args.action!='build':  # 单独构建到此结束，run和debug继续启动虚拟机。
-            work=ROOT/'artifacts'/('interactive-'+args.profile)  # 交互日志按配置分开保存。
-            if args.action=='debug':  # debug把CPU停在复位并打开回环GDB端点。
-                print('QEMU waits at reset. Remote GDB: target remote localhost:1234\n'  # 告诉调试者当前CPU尚未前进及连接地址。
-                      'Then hbreak _start; continue. See dev-log/linux/01-entry.md.',flush=True)  # 提示入口硬件断点，flush保证运行虚拟机前已打印。
-            if args.graphics:  # 图形交互仍将UART写入本轮文件。
-                print(f'Serial log: {work/"serial.log"}',flush=True)  # 显示本次实际串口日志路径，立即刷新输出。
-            cmd = command(args.profile,work,gui=args.graphics,debug=args.action=='debug')  # 先形成具体 QEMU 参数。
-            if not args.graphics:  # 串口交互直接连接当前主机终端。
-                cmd[cmd.index('-serial')+1] = 'mon:stdio'  # QEMU 用 Ctrl-A X 退出，Ctrl-A C 切监视器。
-                print('Serial console: this terminal. Exit QEMU with Ctrl-A X.', flush=True)  # 字节不再写入文件。
-            run(cmd)  # 启动所选串口或图形QEMU，debug动作才带-S和GDB。
-
-if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义接口。
-    try:  # 入口错误统一转成明确的失败状态。
-        main()  # 执行解析和分派，异常留给下面处理。
-    except (RuntimeError,subprocess.CalledProcessError,AssertionError) as error:  # 三类异常都保留具体原因并转成非零退出。
-        print(f'ERROR: {error}',file=sys.stderr)  # 错误文字送标准错误，不混入正常结果流。
-        sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
 ```
 
 

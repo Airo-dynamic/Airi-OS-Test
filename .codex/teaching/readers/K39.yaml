@@ -18,10 +18,10 @@ first_use:
   establishes: 内存init只建页池/根/最小堆，demo在初始化后消费；时钟不再由demo配置
 - concept: 无演示前置的用户启动
   at: ../../../dev-log/core/39-service-boot.md#service-user-start
-  establishes: 文件资源先初始化，boot仍走同一ELF/launch路径，初始PID1来自此前无用户身份消耗
+  establishes: 文件资源先初始化，boot仍走同一ELF/launch路径；一代logout不结束这次启动调用，初始PID1来自此前无用户身份消耗
 - concept: 启动资源就绪与服务可用
   at: ../../../dev-log/core/39-service-boot.md#service-main-flow
-  establishes: 资源标记只说明内核准备，实际用户prompt和命令才证明服务；初始映像失败回可操作monitor
+  establishes: 从复位的资源初始化接到内核会话、用户init与真实shell提示符；资源标记后还需运行命令，初始映像失败回可操作monitor
 - concept: 独立服务构建与故障配置
   at: ../../../dev-log/core/39-service-boot.md#service-profile
   establishes: 三种profile单独编译，不改变BootInfo或用户ABI，CLI在读取前端前拒绝service加graphics

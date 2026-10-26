@@ -1,6 +1,6 @@
 """Bounded serial-only observation before the full QMP test harness exists."""  # 只按本次串口标记观察启动，超过截止时间即失败
 from pathlib import Path  # 将文件名包装为可拼接、可读取的路径对象
-import shutil      # 复制文件及移除旧的打包目录树
+import shutil      # 为本轮 QEMU 复制可写固件变量
 import subprocess  # 启动主机工具，取得退出状态或保存进程对象
 import time  # 用单调时钟等待启动，并在两次检查之间暂停
 from tools import ROOT, tool  # 借用工程根路径及已确定的工具查找顺序

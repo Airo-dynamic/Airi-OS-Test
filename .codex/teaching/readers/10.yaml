@@ -49,3 +49,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/10-input.md#scan-code
   establishes: 键盘前缀与修饰状态跨解码调用保留，UART 则直接交字节；回车产生新行后才发送和发布计数。父进程一项一等，区分主机管道与设备容量。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/10-input.md#uart-input-path
+  establishes: 左右Shift与E0按真实扫描值解释跨次状态；主循环分阶段接模型和新行，Python按路径/启动状态/一项一等/清理就近编写，index/ready/waiting/offset各自有具体消费者。

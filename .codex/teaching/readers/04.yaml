@@ -38,3 +38,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/04-format.md#serial-model
   establishes: 按实际的 %s:%u、IO、123u 追踪两项实参；output 在入口创建，格式指针、args 与 count 各自推进，截断仍继续统计。已修正原追踪与观察不同的路径。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/04-format.md#format-capacity
+  establishes: 区分snprintf普通变参与vsnprintf既有va_list入口；沿真实s/冒号/u调用接扫描和分派，统一output限容；原字节函数继承03，头文件采用唯一endif替换。

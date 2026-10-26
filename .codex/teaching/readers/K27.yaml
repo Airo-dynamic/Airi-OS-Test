@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/27-user-storage.md#storage-service
   establishes: 由新内核无法取得旧 count 引出正式日志服务和双启动；用户副本、静态服务与 DMA 逐层交接，纠正标题将 QEMU 误称 CPU 进程，保留同步等待边界。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: append/read方向和副本边界分别解释，五组服务接线窗口与两次启动观察保持一致。
+  evidence: 完整正文、编辑动作和原生旁注复读；源码与冻结检查点逐字相同，不推定用户已掌握。

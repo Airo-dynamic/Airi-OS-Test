@@ -28,5 +28,8 @@ first_use:
 borrowed:
 - component: LLVM nm与既有条件编译、int80和用户线程调度
   contract: nm只读对象符号，暂停仅为观察，不测普通库性能或推断全部SMP交错
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 四轮状态表和原调用继续的解释已经完整，但主循环的准备、测量和收拢挤在同一块
+  revision: 保留四轮与链接边界，将主循环按确认位置→只测释放→开gate并join分块，解释跟随当前实际状态
 not_inferred: 四轮运行与重建不推断掌握，不声称穷尽并发调度

@@ -13,7 +13,7 @@ K63允许worker创建其他worker，但只有主收取结果。现在让worker�
 
 唯一认领仍不能单独防死锁：A认领B、B认领A，每个目标都只给一人，但两人都等对方结束。新边running->target要写入以前，从target沿join_tid向前走；如果回到running，拒绝-35，不登记这条边。链的方向来自正在等待的执行者，不能反过来沿joiner_tid走。
 
-修改user_execution的字段声明。其余源码修改也在同一文件，本节后面逐项解释；先完成这些确定窗口，再更新用户入口。
+先在kernel/process/user.c的user_execution声明中加joiner_tid。下面保留字段前后的旧窗口；接下来仍在此文件完成41号入口、链检查与结果恢复，观察ELF的目录项放到构建段一起加入。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -35,48 +35,6 @@ struct user_execution { // 一条用户执行链的CPU现场、内核陷入栈�
     long result; // 工作函数的64位返回值，join取得后才能收拢执行者。
     uint64_t fs_base; // 当前执行者的用户FS基址，不拥有对应用户数据页。
     uint64_t fpu_physical; // 独立内核状态页，保存本执行者的x87/SSE寄存器。
-```
-
-<!-- replace: kernel/process/user.c -->
-<!-- before -->
-```c
-extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
-extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
-extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
-extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
-extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
-extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
-```
-<!-- after -->
-```c
-extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
-extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
-extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
-extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
-extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
-extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
-extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
-```
-
-<!-- replace: kernel/process/user.c -->
-<!-- before -->
-```c
-    {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
-    {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
-    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
-    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
-    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
-    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
-```
-<!-- after -->
-```c
-    {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
-    {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
-    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
-    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
-    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
-    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
-    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
 ```
 
 <!-- replace: kernel/process/user.c -->
@@ -104,13 +62,7 @@ extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所�
 <a id="join-claim-and-cycle"></a>
 ## 先验证输出，再检查链，最后认领与登记
 
-join_cycle最多走EXECUTION_COUNT即16步，不递归消耗内核栈。遇到running说明会闭环；目标不在IO_JOIN等待中，链在这里结束；沿同组身份找不到下一个也结束。超过有界槽数仍不结束时拒绝，避免在已循环或内部不一致的链上无限遍历。当前所有新边都经过同样检查，因此正常状态不会先藏一条未检出的环。
-
-join_worker先检查自己等待自己，原始41号现在也统一返回-35。其他执行者试图join主TID返回-95；主入口return/exit仍结束整个组，不能伪造一个主线程独立结果。然后验证完整用户输出跨度，错误返回-14，此时尚未触碰任何认领；即使目标已给A，主传坏输出也不能夺走A资格。
-
-找到同组目标后，先检查新边是否闭环，再检查目标是否已被别人认领。都通过才写target->joiner_tid=running->tid。目标已结束则立即交出结果，标记REAP_PENDING；未结束则在running保存join_tid、IO_JOIN和用户输出VA，再撤销运行资格。THREAD_JOIN_WAIT保留原有pid/tid字段，追加joiner，区分目标与收取者。
-
-身份查找、链检查、认领和等待登记在同一次不可抢占内核调用内完成。依据仍是固定单CPU及内核不会在中途运行另一个用户调用，字段无需在本版另用用户原子操作；这并不是未来SMP可以不加同步的证明。结果消费以后仍要等离开目标内核栈再销毁，不能因为“别人已经join”就立即释放脚下的栈。
+join_cycle最多走EXECUTION_COUNT即16步，不递归消耗内核栈。遇到running说明会闭环；目标不在IO_JOIN等待中，链在这里结束；沿同组身份找不到下一个也结束。超过有界槽数仍不结束时拒绝，避免在已循环或内部不一致的链上无限遍历。当前所有新边都经过同样检查，因此正常状态不会先藏一条未检出的环。在create_worker结束处、原join_worker之前插入助手，以下用前者的结束三行定位。
 
 <!-- replace: kernel/process/user.c -->
 <!-- before -->
@@ -118,6 +70,34 @@ join_worker先检查自己等待自己，原始41号现在也统一返回-35。�
     destroy_execution(execution); // 栈/FPU的成功部分可独立归还，不关闭进程共享资源。
     return -12; // -ENOMEM，调用者和其他已运行执行者保持。
 }
+```
+<!-- after -->
+```c
+    destroy_execution(execution); // 栈/FPU的成功部分可独立归还，不关闭进程共享资源。
+    return -12; // -ENOMEM，调用者和其他已运行执行者保持。
+}
+static bool join_cycle(struct user_execution *target) { // 新边running->target不能回到running，所有边都在同进程内。
+    for (unsigned count = 0; count < EXECUTION_COUNT; ++count) { // 固定十六执行槽给出遍历上限，不递归借内核栈。
+        if (target == running) return true; // 已有等待链回到调用者，加入新边会成环。
+        if (target->state != USER_IO_WAIT || target->io != IO_JOIN) return false; // 不在join上等别人，链在这里结束。
+        target = find_worker(current, target->join_tid); // 沿本执行者正在等待的目标身份前进。
+        if (!target) return false; // 已不可join的末端不能继续形成活等待链。
+    }
+    return true; // 超过有界槽数仍未结束，拒绝而不无限遍历损坏/循环链。
+}
+```
+
+join_worker先检查自己等待自己，原始41号现在也统一返回-35。其他执行者试图join主TID返回-95；主入口return/exit仍结束整个组，不能伪造一个主线程独立结果。然后验证完整用户输出跨度，错误返回-14，此时尚未触碰任何认领；即使目标已给A，主传坏输出也不能夺走A资格。
+
+找到同组目标后，先检查新边是否闭环，再检查目标是否已被别人认领。都通过才写target->joiner_tid=running->tid。目标已结束则立即交出结果，标记REAP_PENDING；未结束则在running保存join_tid、IO_JOIN和用户输出VA，再撤销运行资格。THREAD_JOIN_WAIT保留原有pid/tid字段，追加joiner，区分目标与收取者。
+
+身份查找、链检查、认领和等待登记在同一次不可抢占内核调用内完成。依据仍是固定单CPU及内核不会在中途运行另一个用户调用，字段无需在本版另用用户原子操作；这并不是未来SMP可以不加同步的证明。结果消费以后仍要等离开目标内核栈再销毁，不能因为“别人已经join”就立即释放脚下的栈。
+
+替换原join_worker至return_worker开头的窗口，保留后者剩余实现。现在join_cycle已在它之前可调用。
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
 static struct airi_trap_frame *join_worker(struct airi_trap_frame *frame) { // 本轮只有主执行者能收取同组工作结果。
     if (running != &current->execution) // 不支持工作者之间的join图或自建管理树。
         frame->rax = (uint64_t)-16ll; // -EBUSY。
@@ -151,18 +131,6 @@ static struct airi_trap_frame *return_worker(struct airi_trap_frame *frame) { //
 ```
 <!-- after -->
 ```c
-    destroy_execution(execution); // 栈/FPU的成功部分可独立归还，不关闭进程共享资源。
-    return -12; // -ENOMEM，调用者和其他已运行执行者保持。
-}
-static bool join_cycle(struct user_execution *target) { // 新边running->target不能回到running，所有边都在同进程内。
-    for (unsigned count = 0; count < EXECUTION_COUNT; ++count) { // 固定十六执行槽给出遍历上限，不递归借内核栈。
-        if (target == running) return true; // 已有等待链回到调用者，加入新边会成环。
-        if (target->state != USER_IO_WAIT || target->io != IO_JOIN) return false; // 不在join上等别人，链在这里结束。
-        target = find_worker(current, target->join_tid); // 沿本执行者正在等待的目标身份前进。
-        if (!target) return false; // 已不可join的末端不能继续形成活等待链。
-    }
-    return true; // 超过有界槽数仍未结束，拒绝而不无限遍历损坏/循环链。
-}
 static struct airi_trap_frame *join_worker(struct airi_trap_frame *frame) { // 同组主/worker都能收取worker，主执行者本体暂不是目标。
     if (frame->rdi == running->tid) // 自己不能等到自己结束再继续。
         frame->rax = (uint64_t)-35ll; // -EDEADLK，原始接口也统一报告。
@@ -379,7 +347,7 @@ int pthread_join(pthread_t thread, void **result) { // 同组执行者可join wo
     token->identity = pthread_self(); // 只写自己那一份输出，主尚未读取。
     errno = 101 + (int)token->index; local_marker = 100 + token->index; // 每位执行者保存不同运行值。
     if (!token->index) { // 第一位创建子执行者，并观察暂不可join的主执行者目标。
-        void *output = (void *)(uintptr_t)99; // 尚未支持的对等join仍保留失败输出哨兵。
+        void *output = (void *)(uintptr_t)99; // 主执行者目标暂不可 join，失败仍保留输出哨兵。
         require(pthread_create(&descendant, 0, leaf, token) == 0, "pthread nested create succeeds"); // 包由这个creator准备，资源归同一process。
         require(pthread_join(primary, &output) == ENOTSUP && output == (void *)(uintptr_t)99, "pthread primary target unsupported"); // 只是主目标暂不支持，普通worker之间已可收取。
         require(pthread_join(pthread_self(), 0) == EDEADLK, "pthread worker self join"); // 自己等待自己明确报告。
@@ -391,8 +359,6 @@ int pthread_join(pthread_t thread, void **result) { // 同组执行者可join wo
 ## 先完成一条正常的worker到worker收取
 
 新建join-probe.c。tokens由主持有，参数与返回值都不借结束后的工作栈。两个版本门分别放行A和B，attempted表示A已准备发join，cycle_done表示B确实收到反向边错误。握手有期限，不把标志本身当内核已登记证据。
-
-raw_join只用于坏输出观察：pthread包装会先让内核写自己的私人long槽，不能用故意无效的void **直接调用包装来验证内核。这里以41号和完整高地址进入原始边界，检查内核先验证输出、不会直接解引用这个地址；返回仍是原始负错误。
 
 <!-- write: labs/airios/join-probe.c -->
 ```c
@@ -422,6 +388,12 @@ static void await(_Atomic unsigned *word) { // 主只等观察位置，不拿目
         require(airi_ticks() - start < 100, "join observation timeout"); airi_yield(); // 真正让其他用户执行者运行。
     }
 }
+```
+
+raw_join只用于坏输出观察：pthread包装会先让内核写自己的私人long槽，不能用故意无效的void **直接调用包装来验证内核。这里以41号和完整高地址进入原始边界，检查内核先验证输出、不会直接解引用这个地址；返回仍是原始负错误。
+
+<!-- append: labs/airios/join-probe.c -->
+```c
 static long raw_join(pthread_t target, uintptr_t output) { // 只为观察内核输出验证，绕开用户包装的私人long槽。
     long number = 41; // 仍是自有41号，不是Linux线程ABI。
     __asm__ volatile("int $0x80" : "+a"(number) : "D"(target), "S"(output), "d"(0ull) : "memory", "cc"); // 完整64位地址进入原始边界。
@@ -479,8 +451,6 @@ main先跑正常两级收取，再创建A/B。放行A并给三tick登记机会�
 | B普通返回 | A原41号完成 | B结果只交给A |
 | A普通返回 | 主可收取A | 主得到A结果，不能再收B |
 
-最后join A后，再收B得到本实现的ESRCH诊断扩展，输出保持。活启动包为0，接着fork/wait仍能继续，确认没有留下worker生命周期使has_workers永久报忙。这个fork是普通进程，不计入四位worker数量。
-
 <!-- append: labs/airios/join-probe.c -->
 ```c
 int main(void) { // 主仍可join worker，但不再是唯一可收取者。
@@ -493,6 +463,14 @@ int main(void) { // 主仍可join worker，但不再是唯一可收取者。
     result = (void *)(uintptr_t)99; // 主尝试成为B第二位收取者。
     require(pthread_join(peers[1], &result) == EINVAL && result == (void *)(uintptr_t)99 && errno == 71, "peer duplicate claim rejected"); // 返回22，不能把B从A手中交给主。
     airi_puts("[JOIN_CLAIM_OK] competing=22 bad_output=14 unchanged=1\n"); // 两种拒绝都真实发生以后才输出。
+```
+
+A的认领已保留，主的两次尝试也都返回，现在才放行B。它收到闭环错误后正常返回，A因此完成原join；主随后收取A。
+
+最后join A后，再收B得到本实现的ESRCH诊断扩展，输出保持。活启动包为0，接着fork/wait仍能继续，确认没有留下worker生命周期使has_workers永久报忙。这个fork是普通进程，不计入四位worker数量。
+
+<!-- append: labs/airios/join-probe.c -->
+```c
     require(airi_event_publish(&start_b) >= 0, "peer start B"); await(&cycle_done); // B实际尝试反向边并收到35。
     require(pthread_join(peers[0], &result) == 0 && result == &tokens[3], "peer A final result"); // B先结束，A收取B，再由主收取A。
     result = (void *)(uintptr_t)99; require(pthread_join(peers[1], &result) == ESRCH && result == (void *)(uintptr_t)99, "peer result consumed exactly once"); // 当前不复用TID的诊断扩展，不能再拿一次结果。
@@ -531,6 +509,50 @@ $(OUT)/labs/airios/images.o: CPPFLAGS += -DAIRI_JOIN_ELF='"$(OUT)/user/join.elf"
 airi_join_elf_start: /* 包含文件头和所有用户段。 */
 .incbin AIRI_JOIN_ELF /* 不借宿主线程演示。 */
 airi_join_elf_end: /* 右端不包含字节。 */
+```
+
+现在在同一内核文件的ELF边界声明处加入join范围，再在现有pthread与identity目录项之间加入join名称：
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
+extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
+extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
+extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
+extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
+extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
+extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
+```
+<!-- after -->
+```c
+extern const uint8_t airi_events_elf_start[], airi_events_elf_end[]; // 用户变化通知通过同一真实futex运行。
+extern const uint8_t airi_queue_elf_start[], airi_queue_elf_end[]; // 队列算法位于用户态，内核继续提供既有线程/等待。
+extern const uint8_t airi_pthread_elf_start[], airi_pthread_elf_end[]; // POSIX形状的用户包装不替代真实共享执行者。
+extern const uint8_t airi_join_elf_start[], airi_join_elf_end[]; // 对等worker收取与有界环检测观察。
+extern const uint8_t airi_identity_elf_start[], airi_identity_elf_end[]; // 原始fork、exec与工作槽复用中的本地TID观察。
+extern const uint8_t airi_heap_threads_elf_start[], airi_heap_threads_elf_end[]; // 同一arena并发分配、跨执行者归还与快照。
+extern const uint8_t airi_mutex_elf_start[], airi_mutex_elf_end[]; // 原子所有权与futex等待组合的真实用户观察。
+```
+
+<!-- replace: kernel/process/user.c -->
+<!-- before -->
+```c
+    {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
+    {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
+    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
+    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
+    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
+    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
+```
+<!-- after -->
+```c
+    {"events", airi_events_elf_start, airi_events_elf_end}, // 版本快照、无变化通知与广播观察。
+    {"queue", airi_queue_elf_start, airi_queue_elf_end}, // 有界生产消费、关闭排空与背压。
+    {"pthread", airi_pthread_elf_start, airi_pthread_elf_end}, // 正错误、启动包和指针返回观察。
+    {"join", airi_join_elf_start, airi_join_elf_end}, // 同组认领、坏输出及循环等待拒绝。
+    {"identity", airi_identity_elf_start, airi_identity_elf_end}, // 版本化运行头和原始查询对照。
+    {"identity-reset", airi_identity_elf_start, airi_identity_elf_end}, // 成功exec后沿用PID并重建运行头。
+    {"heap-threads", airi_heap_threads_elf_start, airi_heap_threads_elf_end}, // 显式持内部锁yield的用户观察程序。
 ```
 
 宿主运行join并核对四次真实创建和返回。busy记录(target,joiner,owner)应为(B,主,A)，cycle记录(joiner,target)应为(B,A)，再找实际THREAD_JOIN_WAIT中的目标B与joiner A。这样“主争抢B”和“B试图等A”是同一组真实对象，不能拿别的错误日志凑出一张图。

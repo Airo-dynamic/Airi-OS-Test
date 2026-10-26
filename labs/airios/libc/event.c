@@ -19,7 +19,7 @@ long airi_event_wait(airi_event *event, uint32_t expected, unsigned ticks) { // 
     }
     return result; // 包括名义PIT到期-110，仍由上层决定如何退出等待循环。
 }
-long airi_event_publish(airi_event *event) { // 调用者先完成受保护状态变更，再发布版本并通知。
+long airi_event_publish(airi_event *event) { // 以 release CAS 推进版本，再通知等待者；业务状态的先后与可见性由调用者协议保证。
     if (!valid(event)) return -22; // 不允许NULL/未对齐进入CAS或内核。
     uint32_t expected = __atomic_load_n(&event->sequence, __ATOMIC_RELAXED); // 仅用于CAS尝试，尚不读取业务数据。
     do { // 多个发布者失败后沿CAS回填的新版本重试，不重复使用旧值。

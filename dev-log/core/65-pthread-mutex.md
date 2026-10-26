@@ -80,7 +80,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex); // 错误所有者EPERM，成�
 <a id="pmutex-attributes"></a>
 ## 属性先构造，成功后才提交新类型
 
-新建pthread_mutex.c。aligned只检查NULL与对齐，不替代有效对象合同。attribute_valid用于已经初始化的属性；初始化函数本身不读旧ready，直接构造DEFAULT和ready=1。gettype先验证输出，成功才写；settype先分清“已知未实现”和“无效值”，最后才改type。destroy将ready清0，调用者必须先保证没有并发读写。
+新建pthread_mutex.c，先放三个形状与状态助手。aligned只检查NULL与对齐，不替代有效对象合同；attribute_valid用于已经初始化的属性，initialized用于已经发布的互斥。并发lock只读state，init/destroy仍须由调用者排除并发。
 
 <!-- write: labs/airios/libc/pthread_mutex.c -->
 ```c
@@ -95,6 +95,12 @@ static int attribute_valid(const pthread_mutexattr_t *attributes) { // 属性变
 static int initialized(pthread_mutex_t *mutex) { // 并发锁操作只读同一可用标记，不与init/destroy竞赛。
     return aligned(mutex, _Alignof(pthread_mutex_t)) && __atomic_load_n(&mutex->state, __ATOMIC_ACQUIRE) == AIRI_PTHREAD_MUTEX_READY; // 状态不是内核授权。
 }
+```
+
+属性初始化本身不能调用attribute_valid去读随机旧ready；它直接构造DEFAULT和ready=1。destroy则用于已经初始化的属性，将ready清0，调用者必须先保证没有并发读写。
+
+<!-- append: labs/airios/libc/pthread_mutex.c -->
+```c
 int pthread_mutexattr_init(pthread_mutexattr_t *attributes) { // 不读取未初始化对象的旧内容。
     if (!aligned(attributes, _Alignof(pthread_mutexattr_t))) return EINVAL; // 显式坏形状先拒绝。
     *attributes = (pthread_mutexattr_t){PTHREAD_MUTEX_DEFAULT, 1}; // 独占构造，类型与可用标记一起形成。
@@ -105,6 +111,12 @@ int pthread_mutexattr_destroy(pthread_mutexattr_t *attributes) { // 属性无需
     attributes->ready = 0; // 调用者已确保无人并发读写此属性。
     return 0; // 类型字段不再授权后续操作。
 }
+```
+
+属性可用以后，gettype才验证私人输出并写入实际type。settype先分清“已知未实现”和“无效值”，全部通过才改type；拒绝NORMAL、RECURSIVE或未知值时，旧属性保持。
+
+<!-- append: labs/airios/libc/pthread_mutex.c -->
+```c
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *attributes, int *type) { // 输出只在成功以后改动。
     if (!attribute_valid(attributes) || !aligned(type, _Alignof(int))) return EINVAL; // 不把失败写成一个伪造默认类型。
     *type = attributes->type; // 私人有效输出，不能与属性重叠。
@@ -216,8 +228,6 @@ static void *worker(void *argument) { // 两位都通过pthread入口取得独�
 
 main的attributes和dynamic开始尚未初始化，只交给init，不先查询旧标记。默认类型应为ERRORCHECK；设置NORMAL、RECURSIVE、99分别被拒绝，随后gettype仍为原值。用这份属性初始化dynamic，再销毁attributes，dynamic仍可取得和释放。
 
-取得dynamic以后，自锁应报EDEADLK，trylock为EBUSY，destroy也为EBUSY并保留对象可用。释放后静止destroy成功，故意再次lock得到本实现EINVAL诊断；坏属性不能重新构造，而NULL默认属性可以。属性gettype失败时，私人type哨兵99保持，所有pthread操作都不能改变主errno71。
-
 <!-- append: labs/airios/pthread-mutex-probe.c -->
 ```c
 int main(void) { // 静态与动态对象分别观察，均不并发init/destroy。
@@ -228,6 +238,12 @@ int main(void) { // 静态与动态对象分别观察，均不并发init/destroy
     require(pthread_mutexattr_gettype(&attributes, &type) == 0 && type == PTHREAD_MUTEX_ERRORCHECK && pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_ERRORCHECK) == 0, "pthread mutex type unchanged"); // 只接受真正实现的策略。
     require(pthread_mutex_init(&dynamic, &attributes) == 0 && pthread_mutexattr_destroy(&attributes) == 0, "pthread mutex copies policy"); // 互斥不保存属性指针。
     type = 99; require(pthread_mutexattr_gettype(&attributes, &type) == EINVAL && type == 99, "pthread mutex dead attributes"); // 当前诊断扩展，失败不写输出。
+```
+
+取得dynamic以后，自锁应报EDEADLK，trylock为EBUSY，destroy也为EBUSY并保留对象可用。释放后静止destroy成功，故意再次lock得到本实现EINVAL诊断；坏属性不能重新构造，而NULL默认属性可以。属性gettype失败时，私人type哨兵99保持，所有pthread操作都不能改变主errno71。
+
+<!-- append: labs/airios/pthread-mutex-probe.c -->
+```c
     require(pthread_mutex_lock(&dynamic) == 0 && pthread_mutex_lock(&dynamic) == EDEADLK && pthread_mutex_trylock(&dynamic) == EBUSY && pthread_mutex_destroy(&dynamic) == EBUSY, "pthread mutex self and busy destroy"); // 忙时不撤销可用标记。
     require(pthread_mutex_unlock(&dynamic) == 0 && pthread_mutex_destroy(&dynamic) == 0 && pthread_mutex_lock(&dynamic) == EINVAL, "pthread mutex destroy diagnostics"); // 销毁后使用是当前明确诊断，不能当可移植正常用法。
     require(pthread_mutex_init(&dynamic, &attributes) == EINVAL && pthread_mutex_init(&dynamic, 0) == 0, "pthread mutex quiescent reinit"); // 坏属性不构造，NULL默认可重新构造静止对象。
@@ -249,8 +265,6 @@ int main(void) { // 静态与动态对象分别观察，均不并发init/destroy
 
 最后主持有静态guard再创建两位worker。等ready=2以后，主睡205个名义tick但不释放guard；两位都不能更新数据，底层200tick等待会实际到期并撤销，再由公开包装重新等待。主恢复时finished仍应为0，证明没有worker把一次内部到期误当取得。
 
-主释放以后，两人完成64次普通更新并正常返回0锁结果，主join取得各自参数。再持锁检查counter64和对应checksum，释放并在所有使用者结束后destroy。自动会话还会要求实际result=-110及sleep ticks=205记录，不能只根据源码中写了200就宣称测试了重试。
-
 205只是当前已交付PIT事件的名义计数，不是精确墙钟保证。
 
 <!-- append: labs/airios/pthread-mutex-probe.c -->
@@ -261,6 +275,12 @@ int main(void) { // 静态与动态对象分别观察，均不并发init/destroy
     uint64_t start = airi_ticks(); // 夹具准备也有总期限。
     while (atomic_load_explicit(&ready, memory_order_acquire) != 2) { require(airi_ticks() - start < 100, "pthread mutex contenders ready"); airi_yield(); } // 给两位实际执行机会。
     require(airi_sleep(205) == 0 && atomic_load_explicit(&finished, memory_order_acquire) == 0, "pthread mutex internal timeout retry"); // 超过底层200tick仍未取得，公开调用应继续等待。
+```
+
+主释放以后，两人的公开lock取得成功，完成合计64次普通更新并返回原参数；主join取得各自参数。再持锁检查counter64和对应checksum，释放并在所有使用者结束后destroy。自动会话还会要求实际result=-110及sleep ticks=205记录，不能只根据源码中写了200就宣称测试了重试。
+
+<!-- append: labs/airios/pthread-mutex-probe.c -->
+```c
     require(pthread_mutex_unlock(&guard) == 0, "pthread mutex opens critical section"); // 之后两人才能更新普通数据。
     for (unsigned i = 0; i < 2; ++i) require(pthread_join(threads[i], &result) == 0 && result == &tokens[i], "pthread mutex worker results"); // 正常收拢以后才能销毁。
     require(pthread_mutex_lock(&guard) == 0 && counter == 64 && checksum == (64 ^ 0x5a5a) && pthread_mutex_unlock(&guard) == 0, "pthread mutex final ordinary state"); // 所有更新完整且未丢失。

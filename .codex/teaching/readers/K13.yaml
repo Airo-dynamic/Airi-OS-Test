@@ -38,3 +38,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/13-commands.md#command-entry
   establishes: 从一次 run/test 的真实动作串起参数解析、依赖准备、Make、ELF 检查与 QEMU；编辑器数据库只是同规则消费者，保留懒导入、Shell 参数边界及 AiriBoot 失败语义。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/13-commands.md#command-entry
+  establishes: 沿base.c编译行绑定tokens/source/JSON的实际关系；将ELF检查、doctor实际构建、解析后分派和异常入口放到消费位置，持续追踪run与normal，不改CLI动作。

@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
   establishes: 沿旧名称副本、局部 next、提交与原内核栈转移解释 exec，再把退出结果副本交给 console service，保留失败后继续和 PID 不变。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/23-exec-and-monitor.md#exec-transaction
+  establishes: 拆清next准备、当前内核栈转移、真实f与切根后清old；沿run worker区分launch返回0与应用23，接回console环；继承整文件改为带语义说明的唯一旧新窗口。

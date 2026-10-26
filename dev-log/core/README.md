@@ -57,6 +57,8 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 
 接着完成必修的 [Linux 入口对照](../linux/01-entry.md)，把普通函数调用、Linux 系统调用与内核设备访问放到各自的执行环境里。后续阶段继续以串口与 Linux 实验作为必需反馈，图形接入作为可选消费者。
 
+## 用户 CPU 状态与源码接口
+
 [K41 浮点与向量状态](41-user-fpu-state.md)给每个用户独立CPU状态页，沿抢占、fork、exec与退出保持所有权。
 
 [K42 用户FS基址](42-user-fs-base.md)将实际FS寻址接入统一用户保存与恢复，验证不同基址的抢占、fork/exec及释放后缺页。
@@ -73,6 +75,8 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 
 [K48 用户对象分配](48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。
 
+## 共享进程与独立执行者
+
 [K49 用户内存所有权](49-user-memory-owner.md)将页表与页面记录单独持有，exec只转移新旧内存，保持内核栈、FD与进程身份，切根后再回收旧页。
 
 [K50 用户执行现场](50-user-execution.md)将CPU状态、陷入栈与等待条件集中到execution，调度同时选择内存与现场，并保持离开栈后再销毁的顺序。
@@ -88,6 +92,8 @@ K13 的默认操作是 `./airios run` 和 `./airios test`。前者将 UART 接�
 [K55 共享分配器](55-shared-malloc.md)将公开调用与内部操作分开，保护唯一arena与一致快照，验证四执行者分配和跨执行者归还。
 
 [K56 运行头身份](56-runtime-identity.md)由内核在启动、原始fork、exec及工作槽复用时发布版本化TCB，普通TID读取留在用户态，后备查询有独立陷入证据。
+
+## 等待、通知与对象存活
 
 [K57 请求计数](../core/57-syscall-count.md)在真实128号入口按执行者计数，区分fork新建与exec保留，测出八对无竞争锁的八次通知基线。
 

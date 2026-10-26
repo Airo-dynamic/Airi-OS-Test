@@ -25,5 +25,8 @@ first_use:
 borrowed:
 - component: 既有共享malloc、静态TLS、独立内核栈和私有等待
   contract: 八工作槽、固定单CPU；本节只放宽create，join仍主管理，其他POSIX缺项保持
-feedback: []
+feedback:
+- source: B09整章解释性复核
+  observation: 资源归属、TLS模板与创建者运行值以及按creator解析日志已有成熟模型，leaf与echo在一个长替换窗口
+  revision: 保留模型与全部复用数值，将globals/leaf和echo分成准确旧窗口，把creator收拢→replacement→leaf恢复解释移到main消费者前
 not_inferred: 复用和运行不推断掌握；无新Linux/GUI或SMP结论

@@ -25,7 +25,7 @@ CPU 特权、寄存器与页表参考 [Intel SDM](https://www.intel.com/content/
 
 ## IBM Plex 前端字体
 
-界面使用 IBM Plex Sans，代码和终端使用 IBM Plex Mono。来源为 Google Fonts 固定提交 `2eb0b48d5f760f62e286216f0859a8c540dbc1bd`，逐文件 URL 与 SHA-256 在 `frontend/assets/fonts.lock.json`；`config/deps.lock.json` 同时锁定生成图集。
+字体材料属于独立 gui 分支；下面的 frontend 路径在合入该支线后才出现。界面使用 IBM Plex Sans，代码和终端使用 IBM Plex Mono。来源为 Google Fonts 固定提交 `2eb0b48d5f760f62e286216f0859a8c540dbc1bd`，逐文件 URL 与 SHA-256 在 `frontend/assets/fonts.lock.json`；`config/deps.lock.json` 同时锁定生成图集。
 
 字体采用 SIL Open Font License 1.1，原始字体及 `sans-OFL.txt` / `mono-OFL.txt` 一并保留在 `frontend/assets/`。生成的 A8 字形仍受字体许可约束，不能把原始项目 MIT 许可当成字体许可。来源：[IBM Plex](https://github.com/IBM/plex)、[Google Fonts 固定版本](https://github.com/google/fonts/tree/2eb0b48d5f760f62e286216f0859a8c540dbc1bd/ofl)。图集生成使用 Pillow 12.3.0，常规构建只使用已生成图集，不要求安装 Pillow。
 

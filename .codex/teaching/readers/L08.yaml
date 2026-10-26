@@ -25,3 +25,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/08-comparison.md#compare-workload
   establishes: 固定同一消息与 done 前缀后比较三个等待位置；CQ 结果不需再补读写，缓冲寿命相同，补明固定 CQ 等待与循环预算不是严格总两秒。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 三个传输函数分别接到当前动作和done；客户/主流程接到计时范围，解释单次等待与循环预算的不同边界。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

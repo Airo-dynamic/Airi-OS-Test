@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/25-block-device.md#block-own-disk
   establishes: 沿最后扇区的一次 read 连接端口、DMA、链首身份、idx 发布和完成；超时返回不等于 DMA 停止，保留静态隔离、三种故障与 FLUSH 边界。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 分清PCI端口、CPU指针和DMA物理地址；初始化、发布、收集与读回观察相接，旧文件只改真实增量。
+  evidence: 完整正文、编辑动作和原生旁注复读；源码与冻结检查点逐字相同，不推定用户已掌握。

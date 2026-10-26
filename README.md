@@ -2,7 +2,7 @@
 
 AiriOS 用一套逐步写出的 x86-64 内核解释存储与 I/O 的系统边界。比如用户 shell 输入 demo 后，程序怎样取得页、用 FD 找到文件、提交设备请求、暂时让出 CPU，再按自己的完成记录继续。Linux 对照沿真实系统接口观察同类问题，用于理解和开发 BOSS、Taishan。教程从空目录逐步写出内核、构建、验证与平台适配。内核和 Linux 对照是必修主线，图形工作站在独立的 gui 分支中推进。
 
-从[教程入口](dev-log/README.md)继续。已到 day2 可以接 [03](dev-log/core/03-bytes.md)，00–02 的实现字节保持不变。K14–K17 完成异常与内存，K18–K23 完成用户进程，K24–K28 完成文件、管道、VirtIO 与日志，K29–K32 完成阻塞等待和有界异步 I/O；[K33](dev-log/core/33-shell-pipeline.md) 用真实用户态 shell 串起分配、文件、任务切换、设备完成与继续运行。L01–L08 提供同期 Linux 对照，既有个人主机连接记录 SSH255，Linux 实际运行仍未验证。
+从[教程入口](dev-log/README.md)继续。已经完成 02 时，可以接 [03](dev-log/core/03-bytes.md)，00–02 的实现字节保持不变。K14–K17 完成异常与内存，K18–K23 完成用户进程，K24–K28 完成文件、管道、VirtIO 与日志，K29–K32 完成阻塞等待和有界异步 I/O；[K33](dev-log/core/33-shell-pipeline.md) 用真实用户态 shell 串起分配、文件、任务切换、设备完成与继续运行。L01–L08 提供同期 Linux 对照，既有个人主机连接记录 SSH255，Linux 实际运行仍未验证。
 
 ## 默认从串口运行
 
@@ -86,6 +86,8 @@ P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)
 
 [K40 块设备中断](dev-log/core/40-block-interrupts.md)接通q35 PCI/PIC到IRQ43，普通服务仍核对used完成；`block-irq-masked`保留真实DMA并验证PIT后备收集。
 
+## 用户 CPU 状态与源码接口
+
 [K41 用户浮点状态](dev-log/core/41-user-fpu-state.md)允许普通C使用SSE2，独立保存x87/XMM与控制环境，实际验证抢占、fork、失败/成功exec及对齐故障隔离；P8从此继续。
 
 [K42 用户FS基址](dev-log/core/42-user-fs-base.md)将实际FS寻址接入统一用户保存与恢复，验证不同基址的抢占、fork/exec及释放后缺页。
@@ -102,6 +104,8 @@ P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)
 
 [K48 用户对象分配](dev-log/core/48-user-malloc.md)在独立用户arena中提供malloc/free/calloc/realloc，验证原始页不足后的重试、复用清零、扩容失败保持和fork/exec生命周期。
 
+## 共享进程与独立执行者
+
 [K49 用户内存所有权](dev-log/core/49-user-memory-owner.md)将页表与页面记录单独持有，exec只转移新旧内存，保持内核栈、FD与进程身份，切根后再回收旧页。
 
 [K50 用户执行现场](dev-log/core/50-user-execution.md)将CPU状态、陷入栈与等待条件集中到execution，调度同时选择内存与现场，并保持离开栈后再销毁的顺序。
@@ -117,6 +121,8 @@ P7 升级从 [K34 孤儿托管与持续回收](dev-log/core/34-orphan-reaper.md)
 [K55 共享分配器](dev-log/core/55-shared-malloc.md)将公开调用与内部操作分开，保护唯一arena与一致快照，验证四执行者分配和跨执行者归还。
 
 [K56 运行头身份](dev-log/core/56-runtime-identity.md)由内核在启动、原始fork、exec及工作槽复用时发布版本化TCB，普通TID读取留在用户态，后备查询有独立陷入证据。
+
+## 等待、通知与对象存活
 
 [K57 请求计数](dev-log/core/57-syscall-count.md)在真实128号入口按执行者计数，区分fork新建与exec保留，测出八对无竞争锁的八次通知基线。
 

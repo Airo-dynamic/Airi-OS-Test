@@ -22,3 +22,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/linux/06-epoll.md#epoll-pair
   establishes: 以 abc 剩余 bc 区分 LT/ET，再由 send 接受前缀引出应用后缀、订阅和半关闭；epoll 条件与 CQ 操作结果分开，保留真实背压和未验证边界。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 连接/注册助手之后分别建立abc的LT/ET和真实压力连接；补足逻辑失败诊断限制，旧执行器改定位窗口。
+  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。

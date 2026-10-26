@@ -39,7 +39,9 @@ long airi_mutex_unlock(airi_mutex *mutex); // 只允许持有TID释放；非持�
 
 锁不只保护一个整数。change 将先读 counter，yield 后才写 counter+1，再更新 checksum。下一个持有者必须一起看到这两份普通数据，因此释放所有权使用 release，成功取得使用 acquire，二者通过同一个 owner 的发布与读取建立顺序。
 
-实现使用编译器的 __atomic 内建。sizeof 核对整个锁对象为四字节，_Alignof 核对该类型的起点对齐至少四字节；__atomic_always_lock_free(4,0) 在未绑定具体对象指针时检查当前目标的四字节操作能否直接生成指令，不能悄悄调用外部 libatomic。它们是目标编译器提供的扩展，不是自己定义的普通 C 函数。强 CAS 的第四实参为 0，表示不允许无理由失败；成功使用 acquire，失败只需 relaxed，因为失败者尚无权读取受保护的普通数据。observed 是本次调用栈上的输出对象，失败时会改成真实持有者。
+实现使用目标编译器的 __atomic 内建。sizeof 核对整个锁对象为四字节，_Alignof 核对起点对齐至少四字节；__atomic_always_lock_free(4,0) 则在未绑定具体对象指针时，确认这四字节操作可以直接生成指令，不能悄悄依赖外部 libatomic。这些是编译器扩展，不是本项目另外实现的普通 C 函数。
+
+沿刚才TID73的尝试看比较交换：第四实参0选择强CAS，不允许无理由失败。成功时以acquire取得锁并读取受保护数据；失败者尚无读取这些普通数据的权限，只需relaxed取得持有者数值。observed是本次尝试的栈上输出对象，失败后变成72，随后才将这个实际观察值交给WAIT再次比较。
 
 先新建 labs/airios/libc/mutex.c，加入布局检查、valid、acquire 和 trylock。C 函数可先判断 NULL 与未对齐，但无法替任意坏映射完成内核式的 EFAULT 检查；传入已释放对象或随意地址仍可能造成用户 CPU 故障。trylock 只做一次尝试，包含自己已持有时都返回 -16。
 

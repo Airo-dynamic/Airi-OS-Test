@@ -39,7 +39,7 @@ static int round_trip(unsigned finished) { // 两条路径分别覆盖先退出�
     if (finished) { // 先确保孙已运行，再让中间父退出。
         if (airi_read(report[0], &value, 1) != 1 || value != 'Z') // 报告来自孙的用户代码。
             return 107; // 不能用旧字节满足本轮。
-        pass_ticks(4); // 两个时间片让报告后的exit实际执行，作者同时核对finished=1记录。
+        pass_ticks(4); // 让出四个 PIT tick 供孙继续执行 exit，实际僵尸状态由 finished=1 核对。
         if (airi_write(gate[1], "!", 1) != 1) // 放行中间父，不影响已经结束的孙。
             return 108; // 无读者等错误不能忽略。
     }

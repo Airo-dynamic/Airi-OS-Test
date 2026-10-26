@@ -64,6 +64,14 @@ static void change(uint8_t *map, uint64_t index, bool value) { // 只修改当�
     else // 释放或排除范围时清位。
         map[index / 8] &= (uint8_t)~mask; // 取反掩码只清目标位。
 }
+```
+
+bit/change 已能读写一个页号对应的状态。初始化先把完整 usable 页的 managed 位置一，再排除页零和相交内核页；allocated 仍全零，所以 total 统计完成时，free 与它相等。
+
+**继续追加页池初始化：**
+
+<!-- append: kernel/mm/pages.c -->
+```c
 bool airi_pages_init(struct airi_page_pool *pool, const AiriBootInfo *info) { // 调用者持有 pool 的全部寿命。
     if (!pool || airi_boot_validate(info)) // 无效地图不参与任何地址计算。
         return false; // 不把损坏地图解释成可分配物理内存。
@@ -92,6 +100,14 @@ bool airi_pages_init(struct airi_page_pool *pool, const AiriBootInfo *info) { //
     pool->hint = 1; // 从页一开始查找，页零永不分配。
     return pool->total != 0; // 无完整可用页时明确拒绝启动后续机制。
 }
+```
+
+页池现在保存可管理范围。借用稍后主机夹具演算：0x1000 是页号 1，managed[0] 的位 1 为一，allocated 的同一位为零，hint 也从 1 开始。第一次分配先将 allocated[0] 的位 1 置一、free 减一，再交出 0x1000；即使地图仍写 usable，第二次也会跳过它。guest 的真实起点仍由本次启动图决定。
+
+**继续追加借页操作：**
+
+<!-- append: kernel/mm/pages.c -->
+```c
 uint64_t airi_page_alloc(struct airi_page_pool *pool) { // 单核、不可抢占内核下串行修改位图。
     if (!pool || !pool->free) // 空池或耗尽不扫描、不修改统计。
         return 0; // 0 明确表示未取得任何页面。
@@ -106,6 +122,14 @@ uint64_t airi_page_alloc(struct airi_page_pool *pool) { // 单核、不可抢占
     }
     return 0; // 统计失配也不得返回未拥有的页面。
 }
+```
+
+返回的物理页由调用者持有，分配器已不再把它当空闲。归还必须重新确认它属于本池、对齐而且仍标作 allocated，成功只清借出位；managed 继续为一。重复归还因此停在检查处，free 不会第二次增加。
+
+**最后追加归还操作：**
+
+<!-- append: kernel/mm/pages.c -->
+```c
 bool airi_page_free(struct airi_page_pool *pool, uint64_t physical) { // 调用者必须先结束所有借用与映射，再归还页。
     if (!pool || !physical || physical >= AIRI_PHYSICAL_LIMIT || physical % AIRI_PAGE_SIZE) // 拒绝空哨兵、越界和页内地址。
         return false; // 不让无效释放改变位图。
@@ -148,9 +172,17 @@ void airi_memory_init(const AiriBootInfo *info) { // 在异常设施安装后调
     if (!first || !second || first == second) // 耗尽和重复借出都不允许继续写入。
         airi_panic("physical page allocation failed"); // 停止潜在的内存破坏。
     volatile uint64_t *mapped = (volatile uint64_t *)(uintptr_t)(info->direct_map_offset + first); // HHDM 将物理页转换为当前可访问的虚拟别名。
-    *mapped = 0x4149524950414745ull; // 真正写入刚借出的 RAM，volatile 保留设备级观察所需的访问。
+    *mapped = 0x4149524950414745ull; // 真正写入刚借出的 RAM，volatile 保留本次普通 RAM 写读，不提供并发同步。
     if (*mapped != 0x4149524950414745ull || pages.free != before - 2) // 验证内容和所有权统计是同一次分配结果。
         airi_panic("physical page write/accounting failed"); // 不能只凭非零地址宣称可用。
+```
+
+两页已独立借出，mapped 只借第一项的 HHDM 别名完成写读，free 已比 before 少二。下面开始归还与复用，不再解引用 mapped；again 取得的页可以与 first 数值相同，却代表新一次借用。最终两项都还回，计数恢复才报告演示完成。
+
+**继续追加归还、拒绝与复用，闭合 memory_init：**
+
+<!-- append: kernel/mm/memory.c -->
+```c
     if (!airi_page_free(&pages, first) || airi_page_free(&pages, first) || airi_page_free(&pages, second + 1)) // 验证正常归还、重复释放拒绝和未对齐释放拒绝。
         airi_panic("physical page release validation failed"); // 失败释放不应改变 second 的所有权。
     uint64_t again = airi_page_alloc(&pages); // 应复用刚归还的低地址页。
@@ -209,106 +241,40 @@ int main(void) { // 主机只验证地址与所有权算法，不把物理地址
 
 将 pages 与 memory 加入默认内核，将 pages_test 与同一算法加入 host-test。前者随后实际写 RAM，后者只核对范围与所有权，两种观察各保留自己的证据。
 
-**完整替换 `Makefile`：**
+**局部更新 `Makefile` 的源码清单与 host-test：**
 
-<!-- write: Makefile -->
+在文件中依次找到以下旧窗口，分别用对应新文本完整替换；窗口以外保留。
+
+<!-- replace: Makefile -->
+<!-- before -->
 ```make
-# 用既有make_command取得交叉工具参数；统一airios入口在K13加入。
-# 内核C编译器由调用参数覆盖；此处默认clang，不借宿主libc。
-CC := clang
-# ELF链接器默认LLD，调用参数可传入真实找到的路径。
-LD := ld.lld
-# 主机实验用宿主编译器，可以链接宿主libc。
-HOST_CC := cc
-# ?=仅在调用者未赋值时取normal，各测试配置独立构建。
-PROFILE ?= normal
-# $(PROFILE)展开当前配置名称，OUT指向这一配置的产物目录。
-OUT := build/$(PROFILE)
-# 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
+SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
+    kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c
+# 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
+ifneq ($(filter desktop-%,$(PROFILE)),)
+```
+<!-- after -->
+```make
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
     kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c kernel/mm/pages.c kernel/mm/memory.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
-include frontend/sources.mk # 本分支取得图形自己的源码清单。
-# guest 图形适配与纯 C 前端进入同一内核，参考服务和 Cocoa 不进入。
-SOURCES += kernel/console/display.c $(UI_SOURCES)
-else # 没有desktop-前缀时只选择串口实现。
-# 串口实现没有字体、绘图与桌面状态。
-SOURCES += kernel/console/serial_display.c
-endif # 结束当前可选图形分支。
-# 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
-CASE := $(patsubst desktop-%,%,$(PROFILE))
-# patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
-OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o
-# 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
-CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
-          -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
-          -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 预处理器从自有include、固定协议头third_party和前端include取得声明。
-CPPFLAGS := -Iinclude -Ithird_party
-# 只有显式图形配置需要前端头文件。
-ifneq ($(filter desktop-%,$(PROFILE)),)
-CPPFLAGS += -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
-endif # 结束当前可选图形分支。
-# Make条件只在no-framebuffer配置加入下方测试宏。
-ifeq ($(CASE),no-framebuffer)
-# +=追加预处理选项，让启动适配模拟缺少图形响应。
-CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-endif # 结束 no-framebuffer 的编译条件
-# 缺内存响应配置采用独立构建目录和下面宏。
-ifeq ($(CASE),missing-memory)
-# 模拟必需内存地图缺失，内核应打印具体PANIC。
-CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
-endif # 结束 missing-memory 的编译条件
-# 作者故障配置不登记恢复，应报告真实异常后停止。
-ifeq ($(CASE),trap-fatal)
-CPPFLAGS += -DAIRI_TEST_FATAL_TRAP # 仅此构建目录触发未处理 UD2。
-endif # 结束故障配置。
-# 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
-ifeq ($(CASE),edit-experiment)
-# 单引号由shell保护内部双引号，编译器取得C字符串宏值；下一续行同时设置学习日志文字。
-CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
-            -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-endif # 结束 edit-experiment 的文字覆盖条件
+```
 
-# 这些名称是动作目标，即使同名文件存在也执行其规则。
-.PHONY: all kernel image host-test clean
-# 默认动作依赖镜像，触发内核编译、链接和镜像制作。
-all: image
-# 只构建独立内核ELF，不制作启动镜像。
-kernel: $(OUT)/airios.elf
-# 模式规则将相同相对路径的C源文件编成当前配置对象；%匹配路径主体。
-$(OUT)/%.o: %.c
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# 同一对象布局下编译带预处理的汇编入口。
-$(OUT)/%.o: %.S
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# ELF依赖全部对象与链接脚本，任一变化会重新链接。
-$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld
-# 这一完整续行命令用ELF x86-64、无标准库、静态链接、4KiB页对齐和不可执行栈；-T指定自有布局，最后-o写目标。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
-	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-# 镜像先要求独立ELF成功。
-image: $(OUT)/airios.elf
-# 把同一配置的ELF装入UEFI启动镜像。
-	python3 scripts/image.py $(PROFILE)
-# 主机字节算法、启动合同与命令状态检查，保留assert并启用ASan/UBSan。
-host-test:
-# 先建立主机检查产物目录。
-	@mkdir -p build/tests
-# 以下完整续行命令编译主机检查；fno-builtin避免优化绕过被测实现，sanitizer检查内存和未定义行为，AIRI_HOST_TEST避开真实端口指令。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -DAIRI_HOST_TEST -Iinclude tests/unit/base_test.c \
-	    kernel/lib/base.c kernel/boot/info.c \
-	    kernel/console/console.c kernel/arch/x86_64/input.c \
-		    -o build/tests/base_test
+继续替换下一处：
+
+<!-- replace: Makefile -->
+<!-- before -->
+```make
+# 只有全部assert成立才打印PASS，失败状态返回Make。
+	./build/tests/base_test
+# 清理仅删除可重建产物，保留运行证据artifacts。
+clean:
+```
+<!-- after -->
+```make
 # 只有全部assert成立才打印PASS，失败状态返回Make。
 	./build/tests/base_test
 # 独立编译同一物理页算法，主机不解引用 guest 地址。
@@ -319,124 +285,44 @@ host-test:
 	./build/tests/pages_test
 # 清理仅删除可重建产物，保留运行证据artifacts。
 clean:
-# 调用shutil删除build；ignore_errors允许尚不存在目录。
-	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'
-# 后缀替换得到自动依赖文件；前缀-允许首次构建尚无.d。
--include $(OBJECTS:.o=.d)
-
-
-# 手动选择图形动作时才读取支线目标；默认构建不检查该目录。
-ifneq ($(filter ui-preview ui-test lab-editor,$(MAKECMDGOALS)),)
-include frontend/targets.mk # 仅显式图形动作读取相应规则。
-endif # 结束当前可选图形分支。
-
-# 三个观察名称均是动作，即使有同名文件也运行。
-.PHONY: lab-memmove lab-boot-info
-# 重新构建重叠移动与截断输出观察。
-lab-memmove:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/base/memmove_trace.c kernel/lib/base.c -o build/labs/memmove
-# 打印左/右重叠及截断结果。
-	./build/labs/memmove
-# 重新构建合法/损坏启动数据观察。
-lab-boot-info:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/boot/boot_info_probe.c kernel/boot/info.c -o build/labs/boot-info
-# 打印启动合同的正常与独立失败原因。
-	./build/labs/boot-info
 ```
 
 启动信息验证、异常设施就绪以后才调用内存初始化，失败可报告具体原因；成功演示结束才进入命令循环。页面元数据属于长期内核状态，不放在即将返回的入口局部数组中。
 
-**完整替换 `kernel/main.c`：**
+**在 `kernel/main.c` 加入 pages 声明，并在会话初始化前调用 memory_init：**
 
-<!-- write: kernel/main.c -->
+在文件中依次找到以下旧窗口，分别用对应新文本完整替换；窗口以外保留。
+
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+#include <airi/trap.h> // 安装异常表并演示处理器现场。
+#include <airi/arch.h>     // 通过架构边界使用忙等提示。
+```
+<!-- after -->
 ```c
 #include <airi/pages.h> // 在稳定内存地图上建立物理页所有权。
 #include <airi/trap.h> // 安装异常表并演示处理器现场。
 #include <airi/arch.h>     // 通过架构边界使用忙等提示。
-#include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
-#include <airi/console.h>  // 取得命令环、按键与视图类型。
+```
 
-static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
+继续替换下一处：
 
-#ifndef AIRI_DEMO_MESSAGE  // 允许修改实验在编译时替换输出文本。
-#define AIRI_DEMO_MESSAGE "Hello from AiriOS P1"  // 普通配置默认输出的学习标记文字。
-#endif  // 结束默认演示文字的条件定义
-_Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交入稳定启动描述；_Noreturn 声明内核不返回加载器。
-    const char *error = airi_boot_validate(info);  // 校验必需启动字段，NULL 表示通过，字符串给出失败原因。
-    if (error)  // 有具体原因则不能继续读取未经验证的数据。
-        airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
-    airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
-    airi_trap_demo(); // 正常启动验证带与不带硬件错误码的返回路径。
-#ifdef AIRI_TEST_FATAL_TRAP // 只在作者故障镜像中执行未处理异常。
-    airi_trap_fatal_demo(); // 必须报告并停止，不能发布 READY。
-#endif // 普通镜像继续初始化。
-    airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
-             info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
-    airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 串口分别记录内核物理位置、虚拟地址和字节长度。
-             (unsigned long long)info->kernel_physical_base,  // 转换到 %llx 要求的无符号 long long。
-             (unsigned long long)info->kernel_virtual_base, (unsigned long long)info->kernel_size);  // 虚拟地址采用十六进制，内核大小按字节十进制输出。
-    airi_log("[HHDM] offset=0x%llx", (unsigned long long)info->direct_map_offset);  // 记录把物理地址换成直接映射虚拟地址的偏移量。
-    for (uint32_t i = 0; i < info->region_count; ++i) {  // 只遍历启动描述声明的有效区域，不读取固定数组剩余项。
-        const struct airi_memory_region *r = &info->regions[i];  // 借用第 i 条区域描述。
-        airi_log("[MEMORY] index=%u base=0x%llx length=0x%llx kind=%s", i,  // 逐项输出下标、物理起点、长度及用途。
-                 (unsigned long long)r->base, (unsigned long long)r->length,  // 地址和长度都是64位范围，按 long long 适配格式。
-                 airi_memory_name(r->kind));  // 将区域种类转成可读名称，不改变区域数据。
-    }
-    uint64_t usable = airi_memory_bytes(info, AIRI_MEMORY_USABLE);  // 按实际种类累加可用区域字节数，不等同虚拟机总配置内存。
-    airi_log("[MEMORY_SUMMARY] usable_bytes=%llu boot_reclaim_bytes=%llu",  // 输出可用内存与暂由加载器占用的可回收内存两个值。
-             (unsigned long long)usable,  // 可用字节数转换匹配 %llu。
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+             (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 另行累计加载器可回收区域，不混入 usable。
+    airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
+    airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
+    bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
+```
+<!-- after -->
+```c
              (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 另行累计加载器可回收区域，不混入 usable。
     airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
     airi_memory_init(info); // 只借出完整 usable 页，并在真实 RAM 演示写入与归还。
     airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
     bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
-    if (graphics) {  // 有效图形路径才输出图形参数。
-        const struct airi_framebuffer *fb = &info->framebuffer;  // 借用刚用于绘图的同一份帧缓冲描述。
-        airi_log("[FRAMEBUFFER] width=%llu height=%llu pitch=%llu bpp=%u",  // 记录尺寸、字节行距和每像素位数，供截图与日志比对。
-                 (unsigned long long)fb->width, (unsigned long long)fb->height,  // 宽高转为与 %llu 相同的参数类型。
-                 (unsigned long long)fb->pitch, (unsigned)fb->bpp);  // pitch 按字节输出，bpp 按位数输出。
-    } else  // 未完成图形时仍发送串口原因并继续启动。
-        airi_log("[DISPLAY_SERIAL] no frame produced; using serial output");  // 图形不适用时记录原因路径，后面仍进入串口命令循环。
-    /* Written AFTER all drawing, so tests can take a completed screenshot. */
-    airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
-             (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
-    airi_serial_write("airi> ");  // 输出首个串口提示符。
-    for (;;) {  // 没有退出条件，内核持续轮询输入。
-        int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
-        if (!key) {  // 没有新键时不处理命令和重画。
-            airi_arch_relax();  // 提示当前架构正在忙等；这不是睡眠或调度。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        }
-        uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。
-        bool changed = airi_console_key(&console, key);  // 按键改变命令或页面状态，返回是否需要刷新。
-        if (!changed)  // 被忽略的按键不产生新帧。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        if (key == '\n' || key == '\r') {  // 回车完成命令，才把新增输出回显到 UART。
-            uint64_t first = console.total_lines - console.line_count;  // 日志环只保留 line_count 行，first 是尚可读取的最早逻辑行。
-            if (before < first)  // 若本次命令挤掉旧行，先把读取起点限到仍存在的区域。
-                before = first;  // 不访问已经被覆盖的逻辑行。
-            for (uint64_t i = before; i < console.total_lines; ++i) {  // 逐行回显本次命令产生且仍保留的内容。
-                airi_serial_write(airi_console_line(&console, i));  // 逻辑行号由环接口转换为数组下标。
-                airi_serial_write("\n");  // 为该行补串口行结束。
-            }
-            airi_serial_write("airi> ");  // 输出首个串口提示符。
-        }
-        if (graphics)  // 只在启动时建立了图形路径的情况下重画。
-            airi_console_draw(&console);  // 把变更后的命令与页面状态写成完整画面。
-        /* Published after rendering: interaction tests observe completed frames. */
-        if (key == '\n' || key == '\r' || key >= AIRI_KEY_PAGE_UP)  // 命令提交与功能键在绘图后发布可观察完成记录。
-            airi_log("[CONSOLE_UPDATE] view=%u commands=%u page=%u", (unsigned)console.view,  // 输出当前页面、累计命令和内存页号，观察程序据此等待具体状态。
-                     console.commands, console.map_page);  // 这两个计数来自刚处理并重画的同一命令对象。
-    }
-}
 ```
 
 从统一入口运行主机边界与当前 guest 回归，按本次实际日志核对地址和计数。

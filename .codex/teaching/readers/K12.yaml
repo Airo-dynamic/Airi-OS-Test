@@ -41,3 +41,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/12-boot-tests.md#qmp-channel
   establishes: 一次请求用发送前 offset 与新计数关联完成，QMP 控制和 UART 数据分别建模；正常/拒绝成功含义、JSON 分帧、端点与进程寿命完整保留。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/12-boot-tests.md#console-observation
+  establishes: 将路径准备、连接、累计读取、完整等待、实际输入和清理就近分块，沿真实PS2的mem调用绑定text/expect和外层commands，保留UART同一完成条件与独立资源寿命。

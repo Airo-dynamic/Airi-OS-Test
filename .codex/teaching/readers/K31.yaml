@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/31-async-queues.md#async-three-identities
   establishes: 保留已认可完整稿并复查 K30→K31→K32；cookie30、四份 CQ 信用、BUSY 到 pop、epoch/handle 晚完成及唯一硬件消费者保持连续，精确替换配方不变。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 完整复读已认可的cookie30、SQ/CQ信用、BUSY至pop、epoch/handle和主机模型；成熟关系与既有精确配方保持。
+  evidence: 全篇正文、旁注、编辑与运行说明复读；纯内存源码/命令/旧锚点保护通过，本轮不新增行为实测。

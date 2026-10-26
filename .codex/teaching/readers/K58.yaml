@@ -13,6 +13,9 @@ already_explained:
   at: ../../../dev-log/core/57-syscall-count.md#syscalls-sampling
   establishes: 八对局部锁原差值9，其中结束查询一次，真正通知八次
 first_use:
+- concept: 四个SC动作的实际绑定
+  at: ../../../dev-log/core/58-mutex-notification.md#mutex-sc-order
+  establishes: X是登记、Y是登记后CAS复查，A1释放、A2查参与数；保留B登记时A2不能漏看，晚登记由复查与内核比较接续
 - concept: 参与者与已睡人数不同
   at: ../../../dev-log/core/58-mutex-notification.md#mutex-participant-window
   establishes: 登记先于二次争取，取得/超时/错误统一撤销，重试不重复登记
@@ -28,5 +31,8 @@ first_use:
 borrowed:
 - component: 编译器__atomic SC内建和既有私有futex
   contract: 原子定义依照官方文档，锁协议为自有有界实现；对象布局从4到8需全部重编
-feedback: []
+feedback:
+- source: B09完整试点与证明进入顺序复核
+  observation: 成熟协议已具备，四个SC符号与两种观察数值仍需跨段自行绑定
+  revision: 先用实际双方动作绑定X/Y/A1/A2，再按登记是否先于释放推导；参与者观察区分第三人撤销与原两人保留、取得后归零，查询差值1和锁请求0就近区别
 not_inferred: 次数和重建检查不推断掌握；无新Linux或GUI实测

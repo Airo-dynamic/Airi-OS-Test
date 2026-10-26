@@ -17,7 +17,11 @@ Linux 实验与自制内核共同构成主线。以下各章提供完整源码�
 
 以 epoll 为例，`./airios linux-lab --phase p5-epoll` 选择该阶段的源码和 run.sh，上传到个人主机的独立目录，在 Linux 编译运行，再取回该阶段的日志。命令发出不等于实验成功，必须继续看程序和观察器结果。GDB与内核停点操作在L01–L03，`./airios kernel-debug`使用同一主机观察本机QEMU。各章给出具体依赖包名；缺库、权限拒绝和超时都不发布成功。
 
-2026-10-15 至 16 的既有个人 SSH 连接均返回 255，错误为Connection closed by UNKNOWN port 65535。只读检查确认连接经cloudflared access ssh代理，未修改认证、网络或系统策略。Linux分支编译、程序、GDB/strace及文件系统能力尚未验证。Mac对环境拒绝分支的编译与返回77不能替代Linux运行，guest通过也不能替代Linux。每阶段remote.json在连接前撤销旧成功，connection.log保存实际失败；判断新运行时还需区分旧目录残留文件。
+## 怎样辨认本次是否实际运行
+
+2026-10-15 至 16 的既有个人 SSH 连接均返回 255，错误为Connection closed by UNKNOWN port 65535。只读检查确认连接经cloudflared access ssh代理，未修改认证、网络或系统策略。这些记录中的 Linux 分支编译、程序、GDB/strace 及文件系统能力尚未验证。Mac 的拒绝分支编译和返回 77 只确认环境检查，guest 结果也属于另一套内核。
+
+重新运行时，先看本次命令状态，再对照阶段 remote.json、connection.log 与对应程序记录。执行器在连接前撤销旧成功，连接失败保存实际原因；目录里尚未被本轮覆盖的旧文件不能补成新运行结果。
 
 没有真实 Linux 结果时仍可沿源码理解操作与预期，但应把结果保留为待验证；Mac 的拒绝分支只说明环境检查能够退出。
 

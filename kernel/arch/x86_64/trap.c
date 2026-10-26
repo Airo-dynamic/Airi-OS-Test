@@ -1,7 +1,7 @@
 #include <airi/irq.h> // 设备来源先撤销，再确认PIC级联。
 #include <airi/block.h> // 当前固定设备IRQ只做通知，不在中断里收集DMA。
 #include <airi/user.h> // 用户陷入可选择另一条完整返回现场。
-#include <airi/timer.h> // 唯一开放的设备IRQ交给架构时钟驱动。
+#include <airi/timer.h> // IRQ0 的计数与确认交给架构时钟驱动。
 #include <airi/trap.h> // 异常现场的 C 布局。
 #include <airi/kernel.h> // 日志、清零和停止接口。
 struct table_pointer { uint16_t limit; uint64_t base; } __attribute__((packed)); // CPU 要求 2+8 字节，中间不能有填充。
@@ -13,7 +13,7 @@ struct idt_gate { // 一个 64 位中断门占 16 字节。
 } __attribute__((packed)); // 位布局必须符合处理器读取格式。
 struct task_state { // 64 位 TSS 只保存硬件切栈所需地址，不承担任务调度。
     uint32_t reserved0; // 固定保留字段。
-    uint64_t rsp[3]; // 从用户态进入内核时未来使用的栈。
+    uint64_t rsp[3]; // TSS 的 RSP0–RSP2；当前只设置 RSP0 供用户跨权进入 ring0。
     uint64_t reserved1, ist[7], reserved2; // IST1 放双重故障栈，其他保持零。
     uint16_t reserved3, io_offset; // I/O 权限位图起点设到结构之后，当前不提供位图。
 } __attribute__((packed)); // TSS 的硬件偏移不能被 C 对齐改变。
@@ -50,7 +50,7 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     tss.io_offset = sizeof(tss); // 当前 TSS 内没有 I/O 权限位图。
     for (unsigned i = 0; i < 256; ++i) { // 全部项目初始化，避免继承加载器状态。
         uintptr_t address = i < 32 ? airi_trap_entries[i] : (uintptr_t)airi_trap_255; // 未使用向量也有明确停止入口。
-        if (i == 32) // 唯一开放的设备向量有自己的编号，不能冒充未知255。
+        if (i == 32) // 时钟向量有自己的编号，不能冒充未知 255。
             address = (uintptr_t)airi_trap_32; // 指向TRAP32生成的入口。
         if (i == 32u + AIRI_PCI_IRQ) // 唯一登记的PCI设备有自己的43号现场。
             address = (uintptr_t)airi_trap_43; // 与TRAP宏压入的编号一致。

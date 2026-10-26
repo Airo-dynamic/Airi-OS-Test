@@ -18,10 +18,10 @@ first_use:
   establishes: 当前0:3.0 INTA经q35 PIRQ H/0x6b接IRQ11，从片输入3级联到主片IRQ2，得到向量43
 - concept: 撤销设备电平与两片EOI
   at: ../../../dev-log/core/40-block-interrupts.md#block-irq-hint
-  establishes: 读ISR先撤销INTx，再确认PIC；通知计数不能作为完成身份，used仍决定数据可收集
+  establishes: 读ISR先撤销INTx，再确认PIC；队列通知计数和配置标记留在IRQ，正常与屏蔽路径各自消费ISR，used仍决定数据可收集
 - concept: 设备IRQ的完整用户现场交接
   at: ../../../dev-log/core/40-block-interrupts.md#block-irq-context
-  establishes: 先于CS3故障判断处理IRQ，IRQ仅提示，有异步工作时暂回普通栈pump与复制
+  establishes: 先于CS3故障判断处理IRQ，保留被打断用户的完整frame和RUNNABLE资格；有异步工作时暂回普通栈pump与复制
 - concept: 屏蔽通知但保留完成的后备
   at: ../../../dev-log/core/40-block-interrupts.md#block-irq-fallback
   establishes: PIC屏蔽不伪造used，PIT继续唤醒；删除周期后备需要另建防丢唤醒协议

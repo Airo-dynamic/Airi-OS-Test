@@ -1,7 +1,7 @@
 checkpoint: 'T01'
 baseline: baseline.yaml
 start: 'L01'
-current_operation: 从课程资料闭合02与K13的前置，将write/append累积成文件并向新目录重建
+current_operation: 从课程资料闭合02与K13的前置，将write/append/replace累积成文件并向新目录重建
 already_explained:
 - concept: 模块路径与工程根目录
   at: ../../../dev-log/01-tools.md#tool-paths
@@ -18,7 +18,7 @@ first_use:
   establishes: nodes按身份查记录，递归各自保存name而共享三个容器；visiting发现环，visited使共享K11只应用一次
 - concept: 正则捕获、元组拆包和源码状态
   at: ../../../dev-log/tools/01-reconstruction.md#t01-edits
-  establishes: findall每项由mode/name/code组成，write替换与append连接完整字符串；state_for只构造内存文件映射
+  establishes: edits依次交出mode/name/before/code，apply在pending中写入、追加或唯一替换；整章成功才交回state，state_for只构造内存文件映射
 - concept: 累计摘要与完整文件盘点
   at: ../../../dev-log/tools/01-reconstruction.md#t01-audit
   establishes: 每节点重建摘要和命令列表分别对照声明，owned再与实际实现集合比较；字节相同不证明行为或解释正确
@@ -41,3 +41,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/tools/01-reconstruction.md#route-reconstruction
   establishes: 02 的导出目标贯穿声明、前置排序、累计 state、整章事务和独立输出；区分重复前置与循环、编辑围栏与展示、源码核对与真实命令。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 02 的同一导出贯穿记录、依赖、解析、整章提交及目录输出；展示源码与执行动作区分。
+  evidence: 对照冻结正文逐篇复读，并在内存核对源码、原锚点与运行命令；不推定读者已掌握。

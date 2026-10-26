@@ -75,7 +75,7 @@ static bool session_idle, service_from_timer; // 是否暂回启动栈服务，�
 static unsigned supervisor_pid, input_pid; // 可选init身份与当前唯一UART输入身份，不是进程槽。
 static bool session_active; // 只有用户会话活动时才接受用户IRQ或系统调用。
 static int session_result; // 根用户退出结果，不用最后一个孩子的结果覆盖。
-static struct airi_trap_frame *kernel_return; // 启动栈一直保留到整个用户会话结束。
+static struct airi_trap_frame *kernel_return; // 指向本轮 int129 保存的继续 frame；每次进入用户时登记，恢复后不能继续借用旧 frame。
 extern const uint8_t airi_user_probe_start[], airi_user_probe_end[]; // 受控正常映像。
 extern const uint8_t airi_user_bad_start[], airi_user_bad_end[]; // 用户cli故障。
 extern const uint8_t airi_user_load_bad_start[], airi_user_load_bad_end[]; // 用户读supervisor页故障。
@@ -591,7 +591,7 @@ static int prepare_elf(struct user_process *p, const uint8_t *image, size_t byte
     initial_frame(p, view.entry, name); // 用户_start接收最小argc/argv协议。
     airi_log("[ELF_LOAD] entry=0x%llx segments=%u data_pages=%u argc=1", (unsigned long long)view.entry, view.count, p->memory.count); // 不含页表与内核栈的用户数据页数量。
     return 0; // 只准备新空间，尚未切CR3或覆盖旧现场。
-failed: // 长期根仍活动，用户空间从未开始执行。
+failed: // 候选根尚未激活，调用者原根与当前内核栈仍有效；候选用户映像尚未开始执行。
     cleanup(p); // 页表、用户数据和内核栈全部回收。
     return -12; // -ENOMEM，不提供部分映像。
 }
@@ -624,11 +624,11 @@ static struct user_process *unused(void) { // 准备中的槽不会被发布为R
             return &processes[i]; // 后续失败必须清掉全部所有权。
     return NULL; // 表满返回明确失败。
 }
-static void collect_pending(void) { // 只在新的用户陷入入口调用，不在旧进程退出的C调用中释放其栈。
+static void collect_pending(void) { // 在其他用户陷入栈或启动服务栈上回收，跳过仍在使用的当前进程栈。
     for (unsigned i = 0; i < WORKER_COUNT; ++i) // 先收拢已经join且不在当前栈上的工作者。
         if (&workers[i] != running && workers[i].state == USER_REAP_PENDING) // 退出的当前内核调用链尚不能归还。
             destroy_execution(&workers[i]); // 用户栈/TLS映射缓存继续由进程拥有。
-    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 回收父进程已取得状态的孩子。
+    for (unsigned i = 0; i < PROCESS_COUNT; ++i) // 遍历已取得延后回收资格的进程，包括用户 wait 后的孩子与内核托管孤儿。
         if (&processes[i] != current && processes[i].execution.state == USER_REAP_PENDING) { // 当前真正运行的内核栈不能在此回收。
             unsigned pid = processes[i].pid; // cleanup清零控制块前保存诊断身份。
             bool orphan = processes[i].parent == 0; // 用户wait回收与内核托管回收分开观察。
@@ -832,7 +832,7 @@ static long allocate_user(size_t bytes) { // 按页提供有界用户内存，�
     unsigned before = current->memory.count; // 失败只回滚本次新增映射。
     for (unsigned i = 0; i < count; ++i) // 页物理可以不连续，用户VA连续。
         if (!owned_page(&current->memory, address + i * 4096ull, AIRI_VM_WRITE)) // 成功页面已在owned中登记。
-            goto rollback; // 游标尚未前移。
+            goto rollback; // 本批映射尚未完整提交，已有用户页保持。
     airi_log("[USER_ALLOC] pid=%u address=0x%llx pages=%u zeroed=1", current->pid, (unsigned long long)address, count); // 只记录已完整提交的用户映射。
     return (long)address; // 用户可显式归还完整页，未归还页仍在exit统一清理。
 rollback: // 已有用户页面不受本次耗尽影响。
@@ -1155,7 +1155,7 @@ struct airi_trap_frame *airi_user_trap(struct airi_trap_frame *f) { // 内核仍
     } else if (f->rax == 8) // wait可直接回收或真的阻塞。
         return wait_current(f); // 结果恢复到父同一次调用之后。
     else if (f->rax == 9) // 申请零填充用户页。
-        f->rax = (uint64_t)allocate_user((size_t)f->rdi); // 不成功不前移堆游标。
+        f->rax = (uint64_t)allocate_user((size_t)f->rdi); // 失败保持已有用户页与映射。
     else if (f->rax == 11) { // open只消费内核持有的短路径副本。
         char path[32]; // 与平坦目录名容量一致。
         bool copied = false; // 必须看到终止零才可交给文件层。

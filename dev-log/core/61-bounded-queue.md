@@ -56,7 +56,7 @@ long airi_queue_close(airi_queue *queue, unsigned ticks); // 0关闭或原已关
 
 每次公开调用只建立一次deadline，take与wait_changed都使用它。零预算不读时钟，只立即尝试锁与条件；暂不能继续统一为-11。正预算按当前tick计算剩余值，重试不延长；到期仍允许一次立即取得并处理已经就绪的状态，但不会继续睡眠。这是等待预算，不是包含所有计算的硬实时完成期限。
 
-新建queue.c，先写prepare、take、release、wait_changed。release让持锁的每条退出路径都释放一次；wait_changed的合同相反：进来持锁，返回已经不持锁，所以外层重试必须重新take。此时还缺公开操作，暂不链接观察程序。
+新建queue.c，先写prepare、take、release。prepare只建立本次截止，take用剩余预算尝试取得guard；此后持锁的退出路径都借release释放一次，再交出原本结果或释放错误。先完成这三个助手，尚未链接观察程序。
 
 <!-- write: labs/airios/libc/queue.c -->
 ```c
@@ -79,6 +79,12 @@ static long release(airi_queue *queue, long result) { // 所有已经持锁的�
     long error = airi_mutex_unlock(&queue->guard); // 不在持锁返回以后借调用者补救。
     return error ? error : result; // 正常持有者/有效对象不应失败，仍不伪造释放成功。
 }
+```
+
+接着写wait_changed。外层已在guard内看到条件不成立；这个助手在同一把锁内取event版本，再调用release。它返回时已经不持guard：无论是发现版本改变还是收到通知，返回0都只让外层回到take，不能沿用上次读取的count或槽位置。零预算与读版本失败也要先释放，正预算则在释放后重新计算剩余时间。
+
+<!-- append: labs/airios/libc/queue.c -->
+```c
 static long wait_changed(airi_queue *queue, airi_event *event, unsigned ticks, uint64_t deadline) { // 调用时持guard，返回时不持guard。
     if (!ticks) return release(queue, -11); // 谓词不成立而禁止睡眠，不改队列或输出。
     long expected = airi_event_sequence(event); // 必须在同一次谓词检查的锁内取得旧版本。
@@ -304,8 +310,6 @@ probe已排空后，创建两位closing_consumer并让它们真正等待。close
 
 draining先接受6、7、8、9，占满以后再创建closing_producer提交10。主让它登记到space，然后关闭；原put必须被唤醒并返回-32。已接受的6至9仍按FIFO全部取出，最后才EOF。这样两份关闭通知都有实际等待者路径，不只在代码中写了两次publish。
 
-limited尚未被交给任何worker，夹具把它的available初值设为UINT32_MAX；put7返回-75，随后零预算get仍为-11且私人输出保持9，证明饱和在槽提交前被报告。这个对象不重置、不宣称能继续无限发布，寿命随程序结束。
-
 <!-- append: labs/airios/queue-probe.c -->
 ```c
     for (uint64_t i = 6; i <= 9; ++i) require(airi_queue_put(&draining, i, 0) == 0, "queue drain fill"); // 独立队列拥有四个已接受值。
@@ -318,6 +322,12 @@ limited尚未被交给任何worker，夹具把它的available初值设为UINT32_
     airi_puts("[QUEUE_CLOSE_PRODUCER_OK] blocked=1 rejected=closed\n"); // 只有真实返回-32才输出。
     for (uint64_t i = 6; i <= 9; ++i) require(airi_queue_get(&draining, &value, 0) == 1 && value == i, "queue drains before EOF"); // 先排空再结束。
     require(airi_queue_get(&draining, &value, 0) == 0 && value == 9, "queue drained EOF"); // EOF保持最后一次私人输出。
+```
+
+limited尚未被交给任何worker，夹具把它的available初值设为UINT32_MAX；put7返回-75，随后零预算get仍为-11且私人输出保持9，证明饱和在槽提交前被报告。这个对象不重置、不宣称能继续无限发布，寿命随程序结束。
+
+<!-- append: labs/airios/queue-probe.c -->
+```c
     limited.available.sequence = UINT32_MAX; // 尚未发布给worker的独立夹具初值，不重置活对象。
     require(airi_queue_put(&limited, 7, 0) == -75 && airi_queue_get(&limited, &value, 0) == -11 && value == 9, "queue version failure before mutation"); // 饱和在修改槽以前报告，没有半入队。
 ```

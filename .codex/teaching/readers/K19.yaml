@@ -32,3 +32,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/19-kernel-tasks.md#stack-region-owner
   establishes: 保留已认可完整稿，复查 K18 时钟只计数与主动换栈的边界，再接用户态。六寄存器、首次栈、0→1→2→0、DONE 后离栈回收和 DF 演示完整保留。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/19-kernel-tasks.md#switch-call-abi
+  establishes: 保留已认可的换栈、首次对齐、0到1到2到0和DF解释，只将继承文件化为精确增量；区域归还、首次入口、worker和启动回收就近接续完整代码动作。

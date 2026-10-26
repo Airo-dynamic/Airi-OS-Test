@@ -144,7 +144,7 @@ int main(int argc, char **argv) { // 普通Linux C运行时进入，不使用Air
         expect(errno == ENOENT && initialized == 88 && memory[0] == 99 && getpid() == identity, "missing exec keeps old image"); // 失败回到老调用链。
         execve(broken, next_argv, next_env); // 有权限但ELF头截断。
         expect(errno == ENOEXEC && zeroed == 66 && memory[0] == 99 && getpid() == identity, "bad ELF exec keeps old image"); // 不能先丢弃旧映像。
-        printf("[LINUX_BEFORE_EXEC] pid=%ld private=99 global=88 minor_fault_delta=%ld failures=ENOENT,ENOEXEC\n", (long)identity, after.ru_minflt - before.ru_minflt); // delta包含其他进程缺页，保留真实值。
+        printf("[LINUX_BEFORE_EXEC] pid=%ld private=99 global=88 minor_fault_delta=%ld failures=ENOENT,ENOEXEC\n", (long)identity, after.ru_minflt - before.ru_minflt); // delta 还包含本进程其他路径的缺页，保留真实累计差值。
         fflush(NULL); // exec成功不会替旧stdio自动flush。
         execve("./process", next_argv, next_env); // 成功不返回，而是从同一PID的新运行时进入main。
         perror("execve self"); // 只有失败才到这里。

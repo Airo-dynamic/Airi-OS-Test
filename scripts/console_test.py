@@ -113,7 +113,7 @@ def check_console(profile='normal', uart_input=None):  # 每次启动独立guest
                     tail=wait(update(0,number),offset) # 程序会话全部收拢后才完成控制台命令。
                     assert expected in tail # 核对当前请求结果，不能复用旧标记。
                     assert '[AIRI_PANIC]' not in tail # 应用格式或退出错误不能停掉内核。
-                cases=['UART receive / command dispatch' ,'serial-only device report']  # 结果只记录此路径实际运行的两项观察。
+                cases=['UART receive / command dispatch' ,'serial-only device report']  # 本列表仍用 UART 与纯串口两类标签；上方还核对七条程序相关命令。
             else:  # 按当前profile的另一条完整验证路径处理。
                 capture(work/'terminal.ppm')  # READY已到达后保存初始终端画面。
                 run('help','mem map    Complete physical address inventory')  # 验证帮助输出包含完整物理地图命令说明。

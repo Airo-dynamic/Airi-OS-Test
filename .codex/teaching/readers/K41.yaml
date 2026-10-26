@@ -18,7 +18,7 @@ already_explained:
 first_use:
 - concept: x87、XMM与MXCSR的状态布局
   at: ../../../dev-log/core/41-user-fpu-state.md#fpu-state-shape
-  establishes: 普通double也使用SSE2，数据与控制均需隔离，512字节映像要求16字节对齐
+  establishes: 普通double也使用SSE2；保存父状态不改变当前寄存器，选定身份后再恢复它的快照，512字节映像要求16字节对齐
 - concept: CPU能力、允许位与合法模板
   at: ../../../dev-log/core/41-user-fpu-state.md#fpu-enable-template
   establishes: CPUID确认FXSR/SSE2，CR0/CR4只改必要位，清真实数据后以FXSAVE形成模板，不开启AVX

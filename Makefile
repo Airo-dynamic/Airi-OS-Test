@@ -174,7 +174,7 @@ ifneq ($(filter ui-preview ui-test lab-editor,$(MAKECMDGOALS)),)
 include frontend/targets.mk # 仅显式图形动作读取相应规则。
 endif # 结束当前可选图形分支。
 
-# 三个观察名称均是动作，即使有同名文件也运行。
+# 两个观察名称均是动作，即使有同名文件也运行。
 .PHONY: lab-memmove lab-boot-info
 # 重新构建重叠移动与截断输出观察。
 lab-memmove:
@@ -256,7 +256,7 @@ $(OUT)/user/worker.elf: $(USER_COMMON) $(OUT)/user/worker.o labs/airios/program.
 $(OUT)/user/files.o: labs/airios/files.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 按配置建立目录。
 	@mkdir -p $(dir $@)
-# 同样禁止宿主库和浮点寄存器。
+# 沿用当前允许 SSE2 的用户编译策略，不链接宿主运行库。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # 只链接这份工作负载的main。
 $(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
@@ -267,7 +267,7 @@ $(OUT)/user/files.elf: $(USER_COMMON) $(OUT)/user/files.o labs/airios/program.ld
 $(OUT)/user/storage.o: labs/airios/storage.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 建立配置专属目录。
 	@mkdir -p $(dir $@)
-# 保持相同用户整数编译约束。
+# 沿用允许 SSE2 的 USER_FLAGS 与独立配置目录。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # storage与recover由同一ELF按明确argv分支。
 $(OUT)/user/storage.elf: $(USER_COMMON) $(OUT)/user/storage.o labs/airios/program.ld
@@ -289,7 +289,7 @@ $(OUT)/user/pipes.elf: $(USER_COMMON) $(OUT)/user/pipes.o labs/airios/program.ld
 $(OUT)/user/waits.o: labs/airios/waits.c labs/airios/include/airi_libc.h include/airi/io_abi.h Makefile
 # 仍按配置隔离用户对象。
 	@mkdir -p $(dir $@)
-# 只使用自有用户库与整数寄存器。
+# 只链接自有用户库，寄存器策略沿用允许 SSE2 的 USER_FLAGS。
 	$(CC) $(USER_FLAGS) -Ilabs/airios/include -c $< -o $@
 # ELF只选择waits的main。
 $(OUT)/user/waits.elf: $(USER_COMMON) $(OUT)/user/waits.o labs/airios/program.ld

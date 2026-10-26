@@ -29,3 +29,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/24-files.md#fd-three-objects
   establishes: 以 abcdef 的共享 offset 和 /notes 失败 truncate 解释三层对象，读取先保证用户可接收，再推进偏移；FD 引用转移与页所有权保持区分。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 共享offset连续追踪；文件层分块实现，进程表交接与构建改成可定位旧/新窗口。
+  evidence: 完整正文、编辑动作和原生旁注复读；源码与冻结检查点逐字相同，不推定用户已掌握。

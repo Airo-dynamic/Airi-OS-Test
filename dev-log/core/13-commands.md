@@ -10,7 +10,9 @@
 
 辅助 run(cmd) 固定 cwd=ROOT 并等待外部命令，和命令行动作 run 只是同名。build 把 profile 交 Make，normal 还生成 compile_commands.json：每条记录保存 directory、源码绝对 file 与 arguments，供 clangd 按相同目标、头路径与宏分析代码，避免误用主机默认环境。
 
-参数不另抄一份。compilation_database 从 make_command 取 normal/kernel，insert(1,'-Bn') 放到可执行文件之后；-B 强制列全部规则，-n 只打印，收集时不会再执行编译。shlex.split 根据 Shell 引号恢复 argv 边界，找到 -c 后的源路径后写记录。构建规则变化因而同步进入编辑器数据库。
+参数不另抄一份。compilation_database 先调用 `make_command('normal','kernel')`，把 `-Bn` 插到 Make 路径后；-B 强制列全部规则，-n 只打印。check_output 启动这次 Make 并收取文本，Make 本次不会执行打印出的编译器命令。
+
+例如 base.c 的一条编译行经 shlex.split 按 Shell 引号恢复 argv，tokens 中 -c 后的 `kernel/lib/base.c` 成为 source。写入条目的 directory 是 ROOT，file 是 ROOT/source，arguments 保留整张 tokens。clangd 以后读取这个 JSON 对象，才知道这份源码实际采用的目标、头路径和宏；规则变化也随下一次导出进入数据库。
 
 ## 链接完成以后，检查是否仍依赖外部运行时
 
@@ -53,6 +55,14 @@ def build(profile):  # 给指定配置调用同一Make规则，普通配置额�
     run(make_command(profile))  # 组装配置及工具覆盖，执行完整内核与镜像构建。
     if profile=='normal':  # 测试配置不替换日常编辑参数。
         compilation_database()  # 普通配置才导出clangd数据库。
+```
+
+normal 的 build 先完成实际构建，再导出编译数据库。现在还要独立检查刚生成的文件：inspect_elf 的 binary 指向当前 profile 的 airios.elf，readelf/nm 都消费这一个路径，报告合格后才保存 artifacts/kernel-elf.txt。这一步读取文件结构，没有运行 guest。
+
+**继续追加 ELF 检查：**
+
+<!-- append: scripts/manage.py -->
+```python
 def inspect_elf(profile='normal'):  # 核对独立内核目标，不接受宿主解释器、动态依赖或未解析符号。
     binary=ROOT/'build'/profile/'airios.elf'  # 定位本次配置的ELF，避免检查另一目录的旧产物。
     readelf=tool('llvm-readelf','llvm')  # 按既定规则找到 LLVM ELF 检查器。
@@ -92,6 +102,14 @@ def doctor():  # 查工具与版本，再实际准备和构建内核以验证环
         version=(result.stdout+result.stderr).splitlines()[0]  # 版本可能写在任一流，取合并后的第一行。
         record[name]={'path':executable,'version':version}     # 工具键映射到实际路径和版本，不只有安装包名称。
         print(f'OK {name}: {version}')  # 显示本轮查到的工具身份和版本。
+```
+
+版本循环结束时，record 只保存刚探测的路径与首行版本。接下来 prepare 核对材料，Make 实际生成 normal/kernel，随后导出数据库、检查同一 ELF；这些动作全部完成后，toolchain.json 才记录这次环境通过。
+
+**继续追加 doctor 的真实构建和记录出口：**
+
+<!-- append: scripts/manage.py -->
+```python
     prepare()  # 下载并校验当前锁定引导器、协议头与固件。
     run(make_command(target='kernel'))  # 通过真实内核编译和链接验证环境，不仅看工具是否存在。
     compilation_database()  # 使用同一规则生成编辑器参数。
@@ -128,6 +146,14 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
     parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
     parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
     args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
+```
+
+parse_args 已将这次 run/normal 保存到 args。下面先处理能够直接结束的独立动作和按需导入；本次 run 不符合它们，会继续走到共享 prepare，再进入构建分派。learn 入口的特殊参数切片仍在解析器之前处理。
+
+**继续追加独立动作与材料准备：**
+
+<!-- append: scripts/manage.py -->
+```python
     if args.action=='snapshots':  # 只有导出动作需要读取Git教学提交链。
         from snapshots import generate  # 局部导入后续提供的快照模块。
         generate()  # 核对固定main提交链和旧目录保护后导出阶段源码。
@@ -163,6 +189,14 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
         run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
         return  # 调试记录完成后结束本动作。
+```
+
+走到这里，所选动作已有锁定材料，graphics 也已决定实际 profile。本次 run 将走最后的 else：build(normal) 结束后再形成 QEMU 参数。test 则走另一分支，依次调用已有主机、启动和输入观察，每项仍按自己的完成条件返回。
+
+**继续追加 test 与交互运行分派，闭合 main：**
+
+<!-- append: scripts/manage.py -->
+```python
     if args.action=='test':  # 完整验证串联主机算法、前端、四种启动和两种真实输入。
         run(make_command(target='host-test'))  # 编译同一纯C实现并运行带ASan/UBSan的主机边界检查。
         if args.graphics:  # 普通 test 不导入或验证前端。
@@ -193,6 +227,14 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
                 print('Serial console: this terminal. Exit QEMU with Ctrl-A X.', flush=True)  # 字节不再写入文件。
             run(cmd)  # 启动所选串口或图形QEMU，debug动作才带-S和GDB。
 
+```
+
+main 已把一个动作完整交给消费者。文件末尾再把异常转成标准错误与退出 1，使 Make 或 QEMU 失败沿 shell 入口回到终端；正常返回则不制造额外成功。
+
+**最后追加 Python 文件入口：**
+
+<!-- append: scripts/manage.py -->
+```python
 if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义接口。
     try:  # 入口错误统一转成明确的失败状态。
         main()  # 执行解析和分派，异常留给下面处理。

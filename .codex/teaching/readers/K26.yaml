@@ -26,3 +26,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/26-journal.md#journal-format
   establishes: 以 alpha 后追加和旧坏尾引出介质提交证据、三段同步和连续前缀；错误返回的副作用不确定性接到 poisoned，真实位损坏与 live/durable 模型分开。
+
+explanatory_revision:
+  date: 2026-10-26
+  scope: 三次同步各自支持的恢复结论就地展开；编码、扫描、追加、读取按完整动作分块。
+  evidence: 完整正文、编辑动作和原生旁注复读；源码与冻结检查点逐字相同，不推定用户已掌握。

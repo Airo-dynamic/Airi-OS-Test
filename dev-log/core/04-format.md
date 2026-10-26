@@ -18,23 +18,17 @@
 
 `...` 允许调用者在 fmt 后传不同数量的参数，va_list 保存遍历状态。格式决定下一项按什么类型读取，`%s` 取字符指针、`%u` 取 unsigned；实现没有能自动识别真实类型的参数数组。先扩展声明，已有五个字节接口继续保留。
 
-**完整替换 `include/airi/base.h`：**
+**在 `include/airi/base.h` 末尾找到原 endif 行，用后面的新文本替换；已有五个字节接口保持：**
 
 <a id="code-include-airi-base-h-1"></a>
 
-<!-- write: include/airi/base.h -->
+<!-- replace: include/airi/base.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_BASE_H  // 第一次包含时进入此范围，后续同一翻译单元跳过重复声明
-#define AIRI_BASE_H  // 记录基础头文件已处理，配合末尾 endif 构成包含保护
-#include <stddef.h>  // 取得 size_t、ptrdiff_t、NULL 等工具链定义
-#include <stdint.h>  // 取得固定宽度整数及 uintptr_t，不会因此链接宿主 libc
-#include <stdarg.h>  // 取得 va_list 和可变参数遍历宏，稍后的格式函数会使用
-
-void *airi_memcpy(void *dst, const void *src, size_t n);   // 从 src 读 n 字节写入 dst，双方不得重叠，返回原目标地址
-void *airi_memmove(void *dst, const void *src, size_t n);  // 按地址次序选择搬运方向，允许双方范围重叠
-void *airi_memset(void *dst, int value, size_t n);  // 将 value 转成一个无符号字节，填入 dst 的 n 个位置
-int airi_memcmp(const void *a, const void *b, size_t n);  // 按无符号字节比较 n 项，首个差异决定返回值正负
-size_t airi_strlen(const char *s);  // 读到 NUL 才停止，返回前面的字符数，不计 NUL
+#endif  // 结束头文件包含保护，后续使用同一公开声明
+```
+<!-- after -->
+```c
 /* 截断时仍返回完整所需字符数，不含 NUL。
  * 支持 %s/%c/%d/%u/%x/%p/%%、l/ll/z 及整数前导零宽度。 */
 int airi_vsnprintf(char *dst, size_t cap, const char *fmt, va_list args);  // 接收已开始遍历的参数状态，按 cap 截断保存并返回完整所需长度
@@ -42,59 +36,13 @@ int airi_snprintf(char *dst, size_t cap, const char *fmt, ...);  // 普通调用
 #endif  // 结束头文件包含保护，后续使用同一公开声明
 ```
 
-扫描格式时，不同分支都会产生字符，它们应遵守同一套容量规则。一次调用由 airi_vsnprintf 创建 `struct output o={dst,cap,0}`，借用调用者数组，并将逻辑字符数从 0 开始累计。helper 接收这份记录的地址，持续更新同一次输出。
-
-下面先保留已有字节实现，再追加格式化依赖。最终入口尚未写完，中途先不构建。
-
-**完整替换 `kernel/lib/base.c`：**
+普通调用把 `"IO"` 和 123u 放在省略号位置，由 airi_snprintf 开始参数遍历；另一个入口 airi_vsnprintf 接受已经开始的 va_list。两者共享同一份格式扫描实现。这样已经持有参数遍历状态的包装函数也能直接转交，无须再解析一遍格式。
 
 <a id="code-kernel-lib-base-c-1"></a>
 
-<!-- write: kernel/lib/base.c -->
-```c
-#include <airi/base.h>  // 按公开声明编译自己的字节函数，保证定义与调用使用同一签名
-#include <limits.h>     // 取得 INT_MAX，为格式化返回值的饱和处理提供上限
+`kernel/lib/base.c` 中第 03 章的 include 和五个字节函数全部保留，不重敲相同实现。接下来只在文件末尾追加格式化部分，最终入口写齐后再构建。
 
-void *airi_memcpy(void *dst, const void *src, size_t n) {  // 本函数只处理互不重叠的两个已准备范围，不分配内存
-    unsigned char *d = dst;  // 目标转成字节指针，每个下标对应一个可写字节
-    const unsigned char *s = src;   // 源转成只读字节指针，此函数不通过它写入
-    for (size_t i = 0; i < n; ++i)  // 从低下标搬运前 n 个字节，n 为零时不访问源和目标
-        d[i] = s[i];  // 先读取当前源字节，再写同一偏移的目标位置
-    return dst;  // 交回调用者最初提供的目标起点，便于继续处理该范围
-}
-void *airi_memmove(void *dst, const void *src, size_t n) {  // 在调用者提供的范围中搬字节，重叠时保护尚未读取的源内容
-    unsigned char *d = dst;  // 目标转成字节指针，每个下标对应一个可写字节
-    const unsigned char *s = src;  // 源转成只读字节指针，此函数不通过它写入
-    /* 地址转换为整数后比较；本实现依赖 x86-64 和主机实验的平坦地址表示。 */
-    if ((uintptr_t)d <= (uintptr_t)s) {  // 在本目标的平坦地址表示下比较地址整数，目标不高于源时向前搬
-        for (size_t i = 0; i < n; ++i)  // 从低下标搬运前 n 个字节，n 为零时不访问源和目标
-            d[i] = s[i];  // 先读取当前源字节，再写同一偏移的目标位置
-    } else {  // 目标高于源时改为逆序，先保存靠近末尾的源字节
-        for (size_t i = n; i != 0; --i)  // 先从数量 n 开始，每轮使用 i-1；零长度不会下溢
-            d[i - 1] = s[i - 1];  // 依次写最后一个到第一个字节，避免覆盖后续待读源字节
-    }
-    return dst;  // 交回调用者最初提供的目标起点，便于继续处理该范围
-}
-void *airi_memset(void *dst, int value, size_t n) {  // 把调用者已有范围填成相同字节，不创建新对象
-    unsigned char *d = dst;  // 目标转成字节指针，每个下标对应一个可写字节
-    for (size_t i = 0; i < n; ++i)  // 依次填充目标前 n 个字节，n 为零时不访问目标
-        d[i] = (unsigned char)value;  // 转换后的低八位写入当前位置，例如 value=0 清零
-    return dst;  // 交回调用者最初提供的目标起点，便于继续处理该范围
-}
-int airi_memcmp(const void *a, const void *b, size_t n) {  // 首个不同字节确定次序；n=0 时两指针都不解引用
-    const unsigned char *x = a, *y = b;  // 把两个输入都按无符号字节查看，避免高位字符产生负值
-    for (size_t i = 0; i < n; ++i)  // 依次比较前 n 个字节，n 为零时不读取任一输入
-        if (x[i] != y[i])  // 只有当前字节不相等才结束比较，前面各项均已相等
-            return (int)x[i] - (int)y[i];  // 先提升成 int 再相减，返回负、零、正值表达字节次序
-    return 0;  // 前 n 项全部相同，返回相等结果
-}
-size_t airi_strlen(const char *s) {  // 输入必须在可读范围内存在 NUL，本函数没有额外容量参数
-    size_t n = 0;  // 从字符串第零字节开始累计可见字符长度
-    while (s[n])   // 当前字节非零时继续，NUL 使条件为假
-        ++n;  // 计入一个非零字节，下一轮检查紧随其后的字节
-    return n;  // 交回 NUL 前的字节数量，终止零本身未被计入
-}
-```
+不同转换分支都要向同一数组写字符，因此先准备统一的输出记录。实际调用时，airi_vsnprintf 创建 `struct output o={dst,cap,0}`，借用 text 的地址、保存容量 5，并从 count=0 开始。emit 和 number 都接这份记录的地址，持续更新同一次输出。
 
 ## 所有字符经过 emit，截断也继续统计
 
@@ -137,17 +85,13 @@ static void number(struct output *o, uint64_t value, unsigned radix, unsigned wi
 
 ## 格式指针和参数遍历各自前进
 
-airi_vsnprintf 先建立输出记录，再沿 fmt 扫描。本次遇到 `%s`，从 args 取第一项指针，沿它输出 I、O；fmt 随后读到普通冒号，只输出而不取参数。遇到 `%u` 才取第二项 unsigned 123，交给 number。字符串内容指针、格式指针与参数状态各自推进，不能因为都在循环中就看成同一位置。
+airi_vsnprintf 建立输出记录以后，先沿 fmt 找到本次转换项。对 `"%s:%u"`，第一次跳过百分号，没有零填充宽度，也没有 l/ll/z 修饰，length 保持 NORMAL；`char spec=*fmt++` 取到 s，fmt 已移到后面的冒号。此刻尚未读取 `"IO"`，因为扫描格式和消费实参是两个动作。
 
-`*fmt++` 先取当前字符再前移指针。遇 `%` 后先收集零填充宽度、再判 l/ll/z 长度，最后取转换字母。另一种 `%08x` 会形成 width=8、spec=x，将无符号值 0xab 输出为 `000000ab`；宽度限制到 64，畸形巨大输入不会产生无界补零。普通字符与 `%%` 都不消耗实参。
+格式中的转换字母决定怎样解释这一项，例如 s 输出字符串、u 输出十进制无符号数、x 输出十六进制数。长度修饰 l/ll/z 则决定该按哪种整数类型取值，不是输出字符数；零填充宽度规定整数至少占多少个数位，不够才补零。这些区别分别保存在 spec、length、width 中。
 
-va_arg 按指定类型取下一项，调用方必须匹配：小整数经默认提升，`%c` 取 int；l/ll 分别取 long/long long 及其无符号类型。`%zu/%zx` 取 size_t；当前 x86-64 ELF 和 macOS/Linux 主机采用 LP64，size_t 为 unsigned long，因此 `%zd` 用 long。这个选择限定当前目标，格式类型不符不是有定义的自动转换。
+`*fmt++` 先取当前位置再前移。对另一种 `%08x`，扫描先得到 width=8，再取到 spec=x；unsigned 值 0xab 因而输出为 `000000ab`。整数宽度限制到 64，畸形巨大输入也不会产生无界补零。普通字符直接交给 emit，不进入参数分支；残缺的末尾百分号会保留一个百分号后结束。
 
-字符串空指针显示 `(null)`，`%p` 取 void 指针并产生 0x 前缀与地址数位。有符号负数先转 uint64_t，再用无符号的 `0-value` 求量级，最小有符号值也不会因直接取负而溢出。未知 `%q` 保留百分号和字母且不取参数，残缺末尾保留百分号；当前不支持浮点和精度。
-
-最后在 cap 非零时，将 NUL 写到 `min(count,cap-1)`。返回完整 count，超出 INT_MAX 时饱和；本次实际保存 `I O : 1 NUL`，返回 6。即使截断，扫描和参数消费仍按完整格式继续。
-
-**追加到 `kernel/lib/base.c` 末尾：**
+**追加 airi_vsnprintf 的输出记录和格式扫描，后面继续接本函数的分派部分：**
 
 <a id="code-kernel-lib-base-c-3"></a>
 
@@ -193,6 +137,18 @@ int airi_vsnprintf(char *dst, size_t cap, const char *fmt, va_list args) {  // �
             break;  // 格式已结束，退出扫描后统一写终止零和返回长度
         }
         char spec = *fmt++;  // 保存转换字母，然后让格式指针指向下一个普通字符
+```
+
+现在 spec 为 s，分派才用 va_arg 从 args 取得第一项字符指针。字符串内容指针逐字节读 I、O，emit 使 count 到 2；fmt 回到外层循环后遇到普通冒号，只输出而不取参数。下一次 `%u` 才从同一 args 取得 unsigned 123，交给 number 生成 1、2、3。格式指针、字符串指针与参数遍历各自前进，只有输出记录把产生的字符汇在一起。
+
+每次 va_arg 的类型由格式决定，调用方必须匹配：`%c` 的小整数经默认提升按 int 取；l/ll 按 long/long long 及对应无符号类型取；`%zu/%zx` 按 size_t 取。当前 x86-64 ELF 与 macOS/Linux 主机采用 LP64，size_t 为 unsigned long，所以 `%zd` 用 long。这里没有自动识别参数真实类型的数组，类型不符也没有定义好的自动转换。
+
+其余分支仍各自生成字符：字符串空指针改为 `(null)`；`%p` 取 void 指针，先输出 0x 再按十六进制转换地址。有符号负数先转 uint64_t，用无符号 `0-value` 求量级，避免直接对最小有符号值取负。`%%` 不取实参，未知 `%q` 保留百分号和字母且不取实参；浮点与精度尚未支持。
+
+**继续追加分派、终止零与返回，闭合 airi_vsnprintf：**
+
+<!-- append: kernel/lib/base.c -->
+```c
         if (spec == '%')     // 双百分号形成一个字面字符，不消耗额外实参
             emit(&o, '%');  // 保留一个字面百分号；完整百分号转换和残缺转换都使用此出口
         else if (spec == 's') {  // 字符串转换读取一项字符指针，逐字节输出到 NUL
@@ -236,6 +192,8 @@ int airi_vsnprintf(char *dst, size_t cap, const char *fmt, va_list args) {  // �
     return o.count > INT_MAX ? INT_MAX : (int)o.count;  // 返回完整字符数，超过 int 可表示范围时饱和为 INT_MAX
 }
 ```
+
+本次五字节数组在 emit 期间只保存 I、O、冒号和 1，2、3 仍计入 count。扫描全部格式后 count=6，cap 非零使最后一格写 NUL，得到 `IO:1\0`；返回 6 才能告诉调用者发生截断。一般位置取 `min(count,cap-1)`，cap=0 不写数组，完整长度超过 INT_MAX 时按 INT_MAX 饱和。
 
 格式扫描已能消费一个建立好的 va_list，普通调用方还需要有人初始化它。airi_snprintf 用最后一个具名参数 fmt 建立 va_start，转交同一数组、格式和参数状态给 airi_vsnprintf，再用 va_end 结束遍历并返回完整长度。包装入口不再解析一遍格式，也不复制一份输出数组。
 

@@ -12,7 +12,9 @@
 
 门中的 CS 还要指向 GDT 的有效代码段。长模式虽少用分段算地址，CPU 仍检查代码段权限和 64 位属性，所以先建立自己的 GDT，不继续借加载器表。选择子 8 指第一个八字节项，16 指第二项，24 指占两项的 TSS 描述符。这里 TSS 提供硬件切栈地址，不负责自动调度任务。
 
-CPU 压入 SS、RSP、RFLAGS、CS、RIP，有些向量再压错误码。栈向低地址增长，结构从低到高看便是相反次序。汇编只给无硬件错误码者补零，再压 vector 与全部通用寄存器，C 才能通过一种布局检查现场。故障能打断任意指令，不能只保留普通函数调用所要求的少数寄存器。
+先跟本章的 ud2：CPU 保存 SS、RSP、RFLAGS、CS、RIP，这个异常没有硬件错误码。栈向低地址增长，因此保存后从当前 RSP 向高地址读取，依次是 RIP、CS、RFLAGS、原 RSP、SS。稍后的 TRAP 6 先补一个零作为 error，再压入 vector=6；从低地址看，便在 RIP 前多了 vector、error 两格。
+
+公共入口还要保存被打断时的通用寄存器。它先压 RAX，最后压 R15，使新的 RSP 指向 r15；头文件便从 r15 开始按这个地址次序声明，直到末尾的 ss。故障可能打断任意指令，原值稍后都要继续使用，因此不能只保存普通 C 调用要求保留的少数寄存器。GP 自带硬件错误码，只压 vector 就能得到相同布局；再补零反而会使所有后续字段错位。
 
 **新建 `include/airi/trap.h`。** 每项 uint64_t 八字节，声明次序须和实际压栈一致，停止接口用 _Noreturn 标记。
 
@@ -40,7 +42,9 @@ _Noreturn void airi_trap_fatal_demo(void); // 演示未登记故障的停止路�
 
 TRAP 宏在汇编阶段为各向量生成入口，不是运行时函数。AT&T 的源/目标次序、寄存器与立即数前缀沿用入口；`\number` 替换宏参数，.if 决定是否生成补零。已有硬件错误码时若再补，整个字段位置都会错，恢复也会取错内容。
 
-公共入口清方向标志、保存全部寄存器，将当前现场地址放 RDI 传 C，再用 R12 记住原位置。C ABI 保证被调用者保留 R12，所以即使向下对齐 RSP 后发生普通 call，回来仍能找到完整异常现场。随后恢复原 RSP、逆序 pop，去掉 vector/error，iretq 才按 CPU 现场恢复执行；普通 ret 没有恢复这些状态的能力。
+公共入口形成的现场现在可以按 airi_trap_frame 读取，但 CPU 尚未按 C ABI 发起调用。入口先清方向标志，把指向 r15 的 RSP 复制到 RDI，作为 airi_trap_dispatch 的第一个实参，再复制到 R12 留住现场起点。随后向下对齐 RSP，普通 call 才能使用符合 ABI 的调用栈。C 必须保留 R12，返回后便能用它找回对齐前那份现场。
+
+恢复分两层：先从原现场逆序 pop 全部通用寄存器，再略过 vector/error 两格，剩下的栈顶就是 CPU 保存的 RIP。iretq 从这里恢复 RIP、CS、RFLAGS、RSP、SS；普通 ret 只取返回地址，无法完成这组恢复。C 若修改了现场中的 rip，iretq 使用的也就是修改后的值。
 
 lgdt/lidt 从虚拟地址读取表描述。DF 门选择 IST1，处理异常时再发生双重故障可先换到独立栈；本章实际故障证据只覆盖 UD/GP，尚未破坏栈验证 DF。独立栈安装可在调试器查看。
 
@@ -68,6 +72,14 @@ airi_tables_load: /* rdi 指向 GDT 描述符，rsi 指向 IDT 描述符。 */
     ret /* 返回 C 初始化函数。 */
 .size airi_tables_load, .-airi_tables_load /* 记录函数长度。 */
 
+```
+
+自己的表加载入口已写齐，接下来生成 CPU 查到的异常入口。UD 的 TRAP 6 会补零，GP 的 TRAP 13,1 则保留硬件错误码；两条路径随后汇到同一公共入口。
+
+**继续追加向量入口与公共现场保存/恢复：**
+
+<!-- append: kernel/arch/x86_64/traps.S -->
+```asm
 .macro TRAP number, error=0 /* 为每个异常生成同形的栈；默认没有硬件错误码。 */
 .global airi_trap_\number /* C 入口表引用这个符号。 */
 airi_trap_\number: /* 宏参数拼成唯一标签。 */
@@ -150,6 +162,14 @@ airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
     addq $16, %rsp /* 移除软件 vector 与统一 error 两个槽位。 */
     iretq /* 恢复 RIP、CS、RFLAGS、RSP、SS，继续被打断代码。 */
 
+```
+
+公共入口现在能把同形现场交给 C 并取回。演示还需要两个精确故障地址和各自的恢复地址：ud2 后直接 ret；GP 在装载 DS 的指令处失败，原 DS 未变，恢复后同样 ret 回到普通 C 调用者。
+
+**继续追加两份探针及只读入口表，完成汇编文件：**
+
+<!-- append: kernel/arch/x86_64/traps.S -->
+```asm
 .global airi_probe_ud, airi_probe_ud_site, airi_probe_ud_resume /* C 用精确地址登记预期故障。 */
 airi_probe_ud: /* 普通 C 调用进入演示函数。 */
 airi_probe_ud_site: /* 仅这个地址的 UD 可以在演示时恢复。 */
@@ -219,6 +239,14 @@ extern char airi_probe_gp_site[], airi_probe_gp_resume[]; // GP 精确指令与�
 static uintptr_t expected_site, expected_resume; // 仅同步演示期间非零，不允许一般内核故障被吞掉。
 static uint64_t expected_vector, expected_error; // 同时核对向量与硬件错误码。
 static bool recovered; // 处理器真正进入处理函数后才置位。
+```
+
+静态对象为硬件表和演示登记提供了持续存储，接下来才将它们填好并装入 CPU。idt[6] 取汇编表下标 6 的入口，代码段选择子为 8；只有 idt[8] 选择 IST1，它的栈顶来自 tss.ist[0]。局部 gdtr/idtr 把这些静态地址交给加载函数后即可结束寿命。
+
+**继续追加表初始化：**
+
+<!-- append: kernel/arch/x86_64/trap.c -->
+```c
 void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备中断。
     gdt[1] = 0x00af9a000000ffffull; // present、ring0、64 位可读代码段。
     gdt[2] = 0x00cf92000000ffffull; // present、ring0、可写数据段。
@@ -237,6 +265,14 @@ void airi_trap_init(void) { // 调用时 IF 仍为零，尚不接收普通设备
     airi_tables_load(&gdtr, &idtr); // 装载表和选择子，函数返回后表已经由本内核拥有。
     airi_log("[TRAP_READY] vectors=32 cs=8 double_fault_ist=1 interrupts=off"); // 该标记只表示异常设施，不宣称调度或 IRQ 完成。
 }
+```
+
+表安装完成后，CPU 的向量入口经公共汇编把现场指针交到 f。处理函数先报告现场，再判断这是不是正在演示的同一条指令：site、vector、error 三项必须同时符合。成功时只改保存的 rip，并消费一次登记；它返回汇编之后，iretq 才真正进入恢复标签。
+
+**继续追加报告与精确恢复：**
+
+<!-- append: kernel/arch/x86_64/trap.c -->
+```c
 void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指向当前异常栈。
     uint64_t cr2; // 读取最近页故障的线性地址，非 PF 时仅作为附带状态。
     __asm__ volatile("mov %%cr2,%0" : "=r"(cr2)); // =r 请求输出到编译器分配的通用寄存器。
@@ -251,6 +287,14 @@ void airi_trap_dispatch(struct airi_trap_frame *f) { // 汇编传入的指针指
     }
     airi_panic("unhandled CPU exception"); // 未预期异常不返回有问题的指令。
 }
+```
+
+处理器已经有了核对登记的出口，普通调用侧还要在 probe 之前写好登记。第一项实际参数是 ud 探针、ud site/resume、向量 6 和错误码 0；probe 返回后再检查 recovered，防止没有经历故障却误判成功。第二项沿相同过程验证 GP 的 13/0xfffc。fatal 入口先撤掉 site，再执行同一 ud2，因而必须走 panic。
+
+**最后追加演示调用与未登记路径：**
+
+<!-- append: kernel/arch/x86_64/trap.c -->
+```c
 static void demonstrate(void (*probe)(void), char *site, char *resume, uint64_t vector, uint64_t error) { // 普通函数指针调用可触发不同演示。
     expected_site = (uintptr_t)site; // 保存故障指令的精确地址。
     expected_resume = (uintptr_t)resume; // 保存对应的恢复位置。
@@ -281,56 +325,60 @@ Make 增加 trap.c 与 traps.o。原 no-red-zone 仍必要：异常可能向 RSP
 
 main 在启动描述验证后安装表，自动运行两个恢复点。trap-fatal 另在独立产物目录定义宏，再触发没有登记的 ud2，应该 PANIC 而无 READY；缺必需启动信息仍由前面的适配先拒绝。
 
-**完整替换 `Makefile`。** 默认串口编入异常实现，desktop 条件才读取图形依赖。
+**局部更新 `Makefile` 的源码/对象清单和故障宏条件。** 默认串口编入异常实现，desktop 条件才读取图形依赖。
 
-<!-- write: Makefile -->
+在文件中依次找到下列 before 窗口，各用对应 after 完整替换；窗口以外保留。
+
+<!-- replace: Makefile -->
+<!-- before -->
 ```make
-# 用既有make_command取得交叉工具参数；统一airios入口在K13加入。
-# 内核C编译器由调用参数覆盖；此处默认clang，不借宿主libc。
-CC := clang
-# ELF链接器默认LLD，调用参数可传入真实找到的路径。
-LD := ld.lld
-# 主机实验用宿主编译器，可以链接宿主libc。
-HOST_CC := cc
-# ?=仅在调用者未赋值时取normal，各测试配置独立构建。
-PROFILE ?= normal
-# $(PROFILE)展开当前配置名称，OUT指向这一配置的产物目录。
-OUT := build/$(PROFILE)
-# 基础目标只编译文本会话与设备；不读取 frontend 的目录或字体。
+SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
+    kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
+    kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c
+# 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
+ifneq ($(filter desktop-%,$(PROFILE)),)
+```
+<!-- after -->
+```make
 SOURCES := kernel/main.c kernel/boot/limine.c kernel/boot/info.c \
     kernel/lib/base.c kernel/lib/runtime.c kernel/arch/x86_64/serial.c \
     kernel/console/console.c kernel/arch/x86_64/input.c kernel/arch/x86_64/cpu.c kernel/arch/x86_64/trap.c
 # 只有 desktop- 前缀目标才读取图形支线自己的构建片段。
 ifneq ($(filter desktop-%,$(PROFILE)),)
-include frontend/sources.mk # 本分支取得图形自己的源码清单。
-# guest 图形适配与纯 C 前端进入同一内核，参考服务和 Cocoa 不进入。
-SOURCES += kernel/console/display.c $(UI_SOURCES)
-else # 没有desktop-前缀时只选择串口实现。
-# 串口实现没有字体、绘图与桌面状态。
-SOURCES += kernel/console/serial_display.c
-endif # 结束当前可选图形分支。
-# 去掉图形前缀后，两种呈现方式使用同一故障配置含义。
+```
+
+继续找到下一处旧窗口，用对应新文本替换：
+
+<!-- replace: Makefile -->
+<!-- before -->
+```make
+CASE := $(patsubst desktop-%,%,$(PROFILE))
+# patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
+OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o
+# 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
+CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
+```
+<!-- after -->
+```make
 CASE := $(patsubst desktop-%,%,$(PROFILE))
 # patsubst把每个.c相对路径改为当前OUT下的.o，汇编入口对象另加入。
 OBJECTS := $(patsubst %.c,$(OUT)/%.o,$(SOURCES)) $(OUT)/kernel/arch/x86_64/entry.o $(OUT)/kernel/arch/x86_64/traps.o
 # 交叉目标为无宿主ELF；C11/O2/调试信息/警告作为错误。freestanding与fno-builtin关闭宿主假设；禁栈保护和PIC/PIE；不使用red zone与浮点寄存器；kernel地址模型；MMD/MP生成头文件依赖。
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g -Wall -Wextra -Werror \
-          -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
-          -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -MMD -MP
-# 预处理器从自有include、固定协议头third_party和前端include取得声明。
-CPPFLAGS := -Iinclude -Ithird_party
-# 只有显式图形配置需要前端头文件。
-ifneq ($(filter desktop-%,$(PROFILE)),)
-CPPFLAGS += -Ifrontend/include # 为已选择的图形实现提供头文件搜索位置。
-endif # 结束当前可选图形分支。
-# Make条件只在no-framebuffer配置加入下方测试宏。
-ifeq ($(CASE),no-framebuffer)
-# +=追加预处理选项，让启动适配模拟缺少图形响应。
-CPPFLAGS += -DAIRI_TEST_NO_FRAMEBUFFER
-endif # 结束 no-framebuffer 的编译条件
-# 缺内存响应配置采用独立构建目录和下面宏。
-ifeq ($(CASE),missing-memory)
-# 模拟必需内存地图缺失，内核应打印具体PANIC。
+```
+
+继续找到下一处旧窗口，用对应新文本替换：
+
+<!-- replace: Makefile -->
+<!-- before -->
+```make
+CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
+endif # 结束 missing-memory 的编译条件
+# 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
+ifeq ($(CASE),edit-experiment)
+```
+<!-- after -->
+```make
 CPPFLAGS += -DAIRI_TEST_NO_MEMMAP
 endif # 结束 missing-memory 的编译条件
 # 作者故障配置不登记恢复，应报告真实异常后停止。
@@ -339,103 +387,39 @@ CPPFLAGS += -DAIRI_TEST_FATAL_TRAP # 仅此构建目录触发未处理 UD2。
 endif # 结束故障配置。
 # 修改实验仅改变标题与输出文本，普通配置不继承这两个宏。
 ifeq ($(CASE),edit-experiment)
-# 单引号由shell保护内部双引号，编译器取得C字符串宏值；下一续行同时设置学习日志文字。
-CPPFLAGS += -DAIRI_PANEL_TITLE='"LOCAL / MAINTENANCE CONSOLE"' \
-            -DAIRI_DEMO_MESSAGE='"I changed the output and rebooted"'
-endif # 结束 edit-experiment 的文字覆盖条件
-
-# 这些名称是动作目标，即使同名文件存在也执行其规则。
-.PHONY: all kernel image host-test clean
-# 默认动作依赖镜像，触发内核编译、链接和镜像制作。
-all: image
-# 只构建独立内核ELF，不制作启动镜像。
-kernel: $(OUT)/airios.elf
-# 模式规则将相同相对路径的C源文件编成当前配置对象；%匹配路径主体。
-$(OUT)/%.o: %.c
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# 同一对象布局下编译带预处理的汇编入口。
-$(OUT)/%.o: %.S
-# @隐藏命令回显；$@是目标路径，dir取得其目录并确保存在。
-	@mkdir -p $(dir $@)
-# $<取第一项依赖即当前源文件，$@取输出对象；-c只编译不链接。
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
-# ELF依赖全部对象与链接脚本，任一变化会重新链接。
-$(OUT)/airios.elf: $(OBJECTS) kernel/linker.ld
-# 这一完整续行命令用ELF x86-64、无标准库、静态链接、4KiB页对齐和不可执行栈；-T指定自有布局，最后-o写目标。
-	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=0x1000 \
-	    -z noexecstack -T kernel/linker.ld $(OBJECTS) -o $@
-# 镜像先要求独立ELF成功。
-image: $(OUT)/airios.elf
-# 把同一配置的ELF装入UEFI启动镜像。
-	python3 scripts/image.py $(PROFILE)
-# 主机字节算法、启动合同与命令状态检查，保留assert并启用ASan/UBSan。
-host-test:
-# 先建立主机检查产物目录。
-	@mkdir -p build/tests
-# 以下完整续行命令编译主机检查；fno-builtin避免优化绕过被测实现，sanitizer检查内存和未定义行为，AIRI_HOST_TEST避开真实端口指令。
-	$(HOST_CC) -std=c11 -g -O1 -Wall -Wextra -Werror -fno-builtin \
-	    -fsanitize=address,undefined -DAIRI_HOST_TEST -Iinclude tests/unit/base_test.c \
-	    kernel/lib/base.c kernel/boot/info.c \
-	    kernel/console/console.c kernel/arch/x86_64/input.c \
-		    -o build/tests/base_test
-# 只有全部assert成立才打印PASS，失败状态返回Make。
-	./build/tests/base_test
-# 清理仅删除可重建产物，保留运行证据artifacts。
-clean:
-# 调用shutil删除build；ignore_errors允许尚不存在目录。
-	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'
-# 后缀替换得到自动依赖文件；前缀-允许首次构建尚无.d。
--include $(OBJECTS:.o=.d)
-
-
-# 手动选择图形动作时才读取支线目标；默认构建不检查该目录。
-ifneq ($(filter ui-preview ui-test lab-editor,$(MAKECMDGOALS)),)
-include frontend/targets.mk # 仅显式图形动作读取相应规则。
-endif # 结束当前可选图形分支。
-
-# 三个观察名称均是动作，即使有同名文件也运行。
-.PHONY: lab-memmove lab-boot-info
-# 重新构建重叠移动与截断输出观察。
-lab-memmove:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/base/memmove_trace.c kernel/lib/base.c -o build/labs/memmove
-# 打印左/右重叠及截断结果。
-	./build/labs/memmove
-# 重新构建合法/损坏启动数据观察。
-lab-boot-info:
-# 建立观察程序目录，保持所有可重建产物在build。
-	@mkdir -p build/labs
-# 下面续行按O0保留便于调试的步骤，链接当前观察所需的同一自有实现。
-	$(HOST_CC) -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude \
-	    labs/host/boot/boot_info_probe.c kernel/boot/info.c -o build/labs/boot-info
-# 打印启动合同的正常与独立失败原因。
-	./build/labs/boot-info
 ```
 
 入口先让异常表可用，再执行演示，回到普通调用链后才继续已有会话初始化与输入循环。两个演示恢复不改变串口、文字环和可选绘图的所有者。
 
-**完整替换 `kernel/main.c`：**
+**在 `kernel/main.c` 加入异常声明，并在启动验证成功后接入安装和演示：**
 
-<!-- write: kernel/main.c -->
+继续找到下一处旧窗口，用对应新文本替换：
+
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+#include <airi/arch.h>     // 通过架构边界使用忙等提示。
+#include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
+```
+<!-- after -->
 ```c
 #include <airi/trap.h> // 安装异常表并演示处理器现场。
 #include <airi/arch.h>     // 通过架构边界使用忙等提示。
 #include <airi/kernel.h>   // 取得启动信息、基础库与串口日志接口。
-#include <airi/console.h>  // 取得命令环、按键与视图类型。
+```
 
-static struct airi_console console;  // 静态保存终端命令与日志，不在每次重画时重建。
+继续找到下一处旧窗口，用对应新文本替换：
 
-#ifndef AIRI_DEMO_MESSAGE  // 允许修改实验在编译时替换输出文本。
-#define AIRI_DEMO_MESSAGE "Hello from AiriOS P1"  // 普通配置默认输出的学习标记文字。
-#endif  // 结束默认演示文字的条件定义
-_Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交入稳定启动描述；_Noreturn 声明内核不返回加载器。
-    const char *error = airi_boot_validate(info);  // 校验必需启动字段，NULL 表示通过，字符串给出失败原因。
+<!-- replace: kernel/main.c -->
+<!-- before -->
+```c
+    if (error)  // 有具体原因则不能继续读取未经验证的数据。
+        airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
+    airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
+             info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
+```
+<!-- after -->
+```c
     if (error)  // 有具体原因则不能继续读取未经验证的数据。
         airi_panic(error);  // 输出失败原因并停止当前 CPU 执行。
     airi_trap_init(); // 通过启动校验后先接管异常，不启用设备中断。
@@ -445,62 +429,6 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 #endif // 普通镜像继续初始化。
     airi_log("[BOOT_INFO] version=%u regions=%u loader=%s", info->version, info->region_count,  // 打印协议版本和有效内存区域数，%u 与无符号参数匹配。
              info->loader);  // 输出适配层复制且有 NUL 终止的加载器名称。
-    airi_log("[KERNEL] physical=0x%llx virtual=0x%llx size=%llu",  // 串口分别记录内核物理位置、虚拟地址和字节长度。
-             (unsigned long long)info->kernel_physical_base,  // 转换到 %llx 要求的无符号 long long。
-             (unsigned long long)info->kernel_virtual_base, (unsigned long long)info->kernel_size);  // 虚拟地址采用十六进制，内核大小按字节十进制输出。
-    airi_log("[HHDM] offset=0x%llx", (unsigned long long)info->direct_map_offset);  // 记录把物理地址换成直接映射虚拟地址的偏移量。
-    for (uint32_t i = 0; i < info->region_count; ++i) {  // 只遍历启动描述声明的有效区域，不读取固定数组剩余项。
-        const struct airi_memory_region *r = &info->regions[i];  // 借用第 i 条区域描述。
-        airi_log("[MEMORY] index=%u base=0x%llx length=0x%llx kind=%s", i,  // 逐项输出下标、物理起点、长度及用途。
-                 (unsigned long long)r->base, (unsigned long long)r->length,  // 地址和长度都是64位范围，按 long long 适配格式。
-                 airi_memory_name(r->kind));  // 将区域种类转成可读名称，不改变区域数据。
-    }
-    uint64_t usable = airi_memory_bytes(info, AIRI_MEMORY_USABLE);  // 按实际种类累加可用区域字节数，不等同虚拟机总配置内存。
-    airi_log("[MEMORY_SUMMARY] usable_bytes=%llu boot_reclaim_bytes=%llu",  // 输出可用内存与暂由加载器占用的可回收内存两个值。
-             (unsigned long long)usable,  // 可用字节数转换匹配 %llu。
-             (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 另行累计加载器可回收区域，不混入 usable。
-    airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 发送当前配置的学习文本，修改实验可据此核对版本。
-    airi_console_init(&console, info);  // 初始化内核静态控制台，借用整个启动期间有效的 info。
-    bool graphics = airi_console_draw(&console);  // 实际完成首帧后取得布尔结果，不能仅凭描述存在认定成功。
-    if (graphics) {  // 有效图形路径才输出图形参数。
-        const struct airi_framebuffer *fb = &info->framebuffer;  // 借用刚用于绘图的同一份帧缓冲描述。
-        airi_log("[FRAMEBUFFER] width=%llu height=%llu pitch=%llu bpp=%u",  // 记录尺寸、字节行距和每像素位数，供截图与日志比对。
-                 (unsigned long long)fb->width, (unsigned long long)fb->height,  // 宽高转为与 %llu 相同的参数类型。
-                 (unsigned long long)fb->pitch, (unsigned)fb->bpp);  // pitch 按字节输出，bpp 按位数输出。
-    } else  // 未完成图形时仍发送串口原因并继续启动。
-        airi_log("[DISPLAY_SERIAL] no frame produced; using serial output");  // 图形不适用时记录原因路径，后面仍进入串口命令循环。
-    /* Written AFTER all drawing, so tests can take a completed screenshot. */
-    airi_log("[AIRI_P1_READY] graphics=%u usable_bytes=%llu", graphics ? 1u : 0u,  // 首帧调用结束后才发布完成标记，布尔转换为明确的0/1无符号值。
-             (unsigned long long)usable);  // 完成记录附同一实际可用字节数。
-    airi_serial_write("airi> ");  // 输出首个串口提示符。
-    for (;;) {  // 没有退出条件，内核持续轮询输入。
-        int key = airi_input_poll();  // 从虚拟键盘或 UART 取得一个共享键值，0 表示暂无输入。
-        if (!key) {  // 没有新键时不处理命令和重画。
-            airi_arch_relax();  // 提示当前架构正在忙等；这不是睡眠或调度。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        }
-        uint64_t before = console.total_lines;  // 记录输入前日志尾，回车后只回显本次产生的新行。
-        bool changed = airi_console_key(&console, key);  // 按键改变命令或页面状态，返回是否需要刷新。
-        if (!changed)  // 被忽略的按键不产生新帧。
-            continue;  // 跳过当前不适用项，继续检查下一项。
-        if (key == '\n' || key == '\r') {  // 回车完成命令，才把新增输出回显到 UART。
-            uint64_t first = console.total_lines - console.line_count;  // 日志环只保留 line_count 行，first 是尚可读取的最早逻辑行。
-            if (before < first)  // 若本次命令挤掉旧行，先把读取起点限到仍存在的区域。
-                before = first;  // 不访问已经被覆盖的逻辑行。
-            for (uint64_t i = before; i < console.total_lines; ++i) {  // 逐行回显本次命令产生且仍保留的内容。
-                airi_serial_write(airi_console_line(&console, i));  // 逻辑行号由环接口转换为数组下标。
-                airi_serial_write("\n");  // 为该行补串口行结束。
-            }
-            airi_serial_write("airi> ");  // 输出首个串口提示符。
-        }
-        if (graphics)  // 只在启动时建立了图形路径的情况下重画。
-            airi_console_draw(&console);  // 把变更后的命令与页面状态写成完整画面。
-        /* Published after rendering: interaction tests observe completed frames. */
-        if (key == '\n' || key == '\r' || key >= AIRI_KEY_PAGE_UP)  // 命令提交与功能键在绘图后发布可观察完成记录。
-            airi_log("[CONSOLE_UPDATE] view=%u commands=%u page=%u", (unsigned)console.view,  // 输出当前页面、累计命令和内存页号，观察程序据此等待具体状态。
-                     console.commands, console.map_page);  // 这两个计数来自刚处理并重画的同一命令对象。
-    }
-}
 ```
 
 <a id="trap-check"></a>
@@ -509,79 +437,43 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 引导适配交�
 
 启动工具仍删旧日志、有截止时间并在 finally 回收自己进程。正常版除了 READY，还必须有两次恢复标记；trap-fatal 必须出现 unhandled CPU exception 且禁止 READY。两条路径从相同设施进入，区别是当前故障有没有精确登记。
 
-**完整替换 `scripts/boot.py`。** 只扩展配置预期和标记核对，QMP、超时与清理沿用 K12。
+**局部更新 `scripts/boot.py` 的预期标记和成功条件。** 只扩展配置预期和标记核对，QMP、超时与清理沿用 K12。
 
-<!-- write: scripts/boot.py -->
+在文件中依次找到下列 before 窗口，各用对应 after 完整替换；窗口以外保留。
+
+<!-- replace: scripts/boot.py -->
+<!-- before -->
 ```python
-"""QEMU launch and bounded boot checks; success requires a kernel marker."""  # 固定虚拟机参数并按本轮内核标记判断启动结果
-import json  # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-from pathlib import Path  # Path 表示主机路径对象，/ 在这里拼接路径片段。
-import shutil      # 取得目录复制、文件复制与临时结果清理接口。
-import socket      # 取得主机通信连接接口，QMP/调试器通过独立连接交接。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import tempfile    # 创建互不冲突的临时路径，用完后显式回收。
-import time  # 单调时钟计算截止时间，sleep 给设备与进程处理时间。
-from tools import ROOT, tool  # ROOT 确定项目位置，tool 按已建立优先级寻找工具。
-
-def command(profile, work, gui=False, debug=False, debug_port=1234):  # 返回 QEMU 参数列表；profile 选镜像，work 保存本轮可写固件与日志。
-    work.mkdir(parents=True,exist_ok=True)  # 建立本轮输出目录，已有目录允许复用。
-    firmware=ROOT/'third_party/firmware'    # 定位固定固件目录。
-    variables=work/'ovmf-vars.fd'  # 本轮固件变量单独存放，避免改动锁定的原始模板。
-    shutil.copyfile(firmware/'edk2-i386-vars.fd',variables)  # 复制变量模板，QEMU 可写副本而保持外部依赖原件。
-    cmd=[tool('qemu-system-x86_64','qemu'),'-machine','q35','-accel','tcg',  # 先选 QEMU 路径与 q35/TCG，参数列表按元素边界传递。
-         '-cpu','qemu64','-smp','1','-m','256M','-vga','std',  # 固定CPU型号、单核、256MiB及标准VGA。
-         '-drive',f'if=pflash,format=raw,unit=0,readonly=on,file={firmware/"edk2-x86_64-code.fd"}',  # 只读代码固件是第0个 pflash 单元，f 字符串填入实际路径。
-         '-drive',f'if=pflash,format=raw,unit=1,file={variables}',  # 第1个 pflash 单元使用本轮可写变量副本。
-         '-monitor','none','-cdrom',str(ROOT/'build'/profile/'airios.iso'),'-boot','d','-no-reboot',  # 挂载对应配置镜像，从光盘启动，故障时不循环重启。
-         '-serial',f'file:{work/"serial.log"}']  # 默认 UART 输出保存到本轮 serial.log。
-    if not gui: cmd+=['-display','none']  # 无人操作时隐藏显示窗口，guest 仍可绘图并经 QMP 截帧。
-    if debug: cmd+=['-S','-gdb',f'tcp:127.0.0.1:{debug_port}']  # -S 暂停CPU，GDB只监听回环地址指定端口。
-    return cmd  # 仅返回参数列表，调用者决定何时启动与回收进程。
-def qmp_execute(sockpath, execute, arguments=None):  # 本机连接只执行本次指定的控制请求。
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:  # 外层拥有底层连接，最后关闭。
-        sock.settimeout(5)  # 连接、发送和读取最多阻塞五秒。
-        sock.connect(str(sockpath))  # 路径定位QEMU控制端点，不是普通输出文件。
-        with sock.makefile('rb') as stream:  # 内层包装按行读取字节，先关闭包装再关闭连接。
-            json.loads(stream.readline())  # 消费服务器问候，JSON库直接接受bytes。
-            result = None  # 尚未收到动作结果，不与空字典混淆。
-            request = {'execute': execute}  # 当前控制动作保存为请求字段。
-            if arguments is not None:  # 空字典也是显式参数，只有None表示不提供。
-                request['arguments'] = arguments  # 将本次参数加到同一请求。
-            for req in ({'execute': 'qmp_capabilities'}, request):  # 先协商能力再发实际动作。
-                sock.sendall((json.dumps(req) + '\n').encode())  # 直到全部消息字节交出或失败，不假设一次write写完。
-                while True:  # 跳过异步事件，等待当前请求的结果。
-                    reply = json.loads(stream.readline())  # 按消息换行取得完整JSON字节。
-                    if 'error' in reply:  # QEMU拒绝了当前请求。
-                        raise RuntimeError(str(reply['error']))  # 保留服务器的具体错误。
-                    if 'return' in reply:  # event不满足完成条件。
-                        result = reply['return']  # 取得当前请求结果。
-                        break  # 此请求已完成，进入下一个或返回。
-            return result  # 返回实际动作结果，两个with仍按由内到外关闭资源。
-
-def qmp_screenshot(sockpath, output):  # 把本轮截图目标路径交给QEMU控制端点。
-    qmp_execute(sockpath, 'screendump', {'filename': str(output)})  # 控制显示设备保存PPM，不向UART发送命令。
-def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条件由配置对应完成标记决定。
-    work=ROOT/'artifacts'/('boot-'+profile)  # 不同配置分开保存启动证据。
-    work.mkdir(parents=True,exist_ok=True)   # 建立本轮输出目录，已有目录允许复用。
-    (work/'result.json').unlink(missing_ok=True)  # 删除上次汇总，失败不能留下旧成功身份。
-    serial=work/'serial.log'  # 当前检查只读取这次启动的串口文件。
-    serial.unlink(missing_ok=True)  # 删去旧日志；不存在不报错，旧 READY 不会使新启动提前通过。
-    # AF_UNIX paths are capped at 104 bytes on macOS. Source exports can be deep.
-    endpoints=tempfile.TemporaryDirectory(prefix='airios-qmp-',dir='/tmp')  # 在短/tmp路径建立控制端点，避免 macOS UNIX socket 路径过长。
-    sockpath=Path(endpoints.name)/'qmp.sock'  # 临时目录中的 qmp.sock 命名本次控制连接。
-    cmd=command(profile,work)+['-qmp',f'unix:{sockpath},server=on,wait=off']  # 在固定启动参数后追加控制端点，QEMU不等待客户端才启动。
-    (work/'command.json').write_text(json.dumps(cmd,indent=2))  # 保存实际参数列表供本轮复现。
-    case = profile.removeprefix('desktop-')  # 图形前缀不改变故障注入含义。
+    graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
+    expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P1_READY]'  # 缺内存响应要看具体 PANIC，其他配置要看 READY。
+    started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
+    with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
+```
+<!-- after -->
+```python
     graphics = profile.startswith('desktop-') and case != 'no-framebuffer'  # 有绘图实现且设备存在才应生成画面。
     expected='[AIRI_PANIC] required Limine memory map is missing' if case=='missing-memory' else '[AIRI_P1_READY]'  # 缺内存响应要看具体 PANIC，其他配置要看 READY。
     if case == 'trap-fatal': # 未处理异常镜像必须进入具体停止路径。
         expected = '[AIRI_PANIC] unhandled CPU exception' # 不以 QEMU 存活推断故障已处理。
     started=time.monotonic()  # 单调秒数作为经过时间起点，不受系统时钟调整影响。
     with (work/'qemu.log').open('w') as errors:  # 主机 QEMU 输出单独存档，with 保证文件最终关闭。
-        process=subprocess.Popen(cmd,stdout=errors,stderr=errors)  # 启动后立即取得进程句柄，轮询 guest 标记而非等待进程退出。
-        try:  # 受保护区域失败也必须进入后面的资源回收。
-            while time.monotonic()-started<timeout:  # 按实际经过秒数限制整次启动等待。
-                text=serial.read_text(errors='replace') if serial.exists() else ''  # 日志尚未创建时取空串；暂时不完整的字节以替代字符读取。
+```
+
+继续找到下一处旧窗口，用对应新文本替换：
+
+<!-- replace: scripts/boot.py -->
+<!-- before -->
+```python
+                complete_lines = text.splitlines(keepends=True)  # 保留行结束符，完整记录与写到一半的标记可区分。
+                if any(line.endswith('\n') and line.startswith(expected) for line in complete_lines):  # 生成器逐行检查，至少一个完整且以预期标记开头才成立。
+                    if case=='missing-memory':  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
+                        assert '[AIRI_P1_READY]' not in text  # 错误路径不得出现成功标记。
+                    else:  # 按当前profile的另一条完整验证路径处理。
+                        assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
+                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。
+```
+<!-- after -->
+```python
                 complete_lines = text.splitlines(keepends=True)  # 保留行结束符，完整记录与写到一半的标记可区分。
                 if any(line.endswith('\n') and line.startswith(expected) for line in complete_lines):  # 生成器逐行检查，至少一个完整且以预期标记开头才成立。
                     if case in ('missing-memory', 'trap-fatal'):  # 失败配置只允许具体拒绝记录，不能同时宣布启动完成。
@@ -589,146 +481,38 @@ def check(profile='normal',timeout=35):  # 每次启动最多35秒，成功条�
                     else:  # 按当前profile的另一条完整验证路径处理。
                         assert '[TRAP_DEMO_OK] ud=6 gp=13 resumed=2' in text # 正常启动必须真的从两种异常栈返回。
                         assert '[AIRI_PANIC]' not in text  # 正常完成路径不得混入内核停止记录。
-                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。。
-                        assert '[MEMORY_SUMMARY]' in text  # 完成之前应已记录实际内存总计。
-                        if case=='edit-experiment':  # 修改实验额外核对替换后的文字。
-                            assert 'I changed the output and rebooted' in text  # 确认运行的是实验配置的输出行为。
-                        if graphics:  # 有图形的完成路径才请求显示面截图。
-                            qmp_screenshot(sockpath,work/'screen.ppm')  # 在完整 READY 之后读取对应已完成画面。
-                    result={'profile':profile,'passed':True,'expected_marker':expected,  # 记录配置、成功与本次实际等待的标记。
-                            'seconds':round(time.monotonic()-started,2)}  # 记录经过秒数，round(...,2) 保留两位小数。
-                    (work/'result.json').write_text(json.dumps(result,indent=2)+'\n')  # 结果编码为便于阅读的 JSON，并补文件末尾换行。
-                    print(f'PASS boot/{profile} ({result["seconds"]}s)')  # 打印本次配置和耗时，而非以QEMU仍运行判定通过。
-                    return result  # 当前配置标记与截图核对成功，返回这次启动记录。
-                if process.poll() is not None:  # poll 非 None 表示主机 QEMU 已退出，不能继续等 guest 标记。
-                    raise RuntimeError(f'QEMU exited before marker; see {work}')  # 提前退出时报告证据目录。
-                time.sleep(0.1)  # 给虚拟CPU和日志写入100毫秒处理时间，再检查。
-            raise RuntimeError(f'Boot timeout after {timeout}s; see {work}')  # 耗尽截止时间后明确失败，并保留该配置的日志。
-        finally:  # 成功返回与异常离开都进入收尾。
-            process.terminate()  # 先请求主机 QEMU 进程结束。
-            try:  # terminate只是结束请求，随后仍需收回子进程。
-                process.wait(timeout=5)  # 最多等待五秒，防止清理本身无限卡住。
-            except subprocess.TimeoutExpired:  # QEMU没有在正常终止期限内退出。
-                process.kill()  # 强制结束本轮仍存活的QEMU。
-                process.wait()  # 收回已结束子进程的退出状态和资源。
-            sockpath.unlink(missing_ok=True)  # 删除本轮控制端点，端点已消失时允许继续。
-            endpoints.cleanup()  # 回收临时目录，不删除保留在 artifacts 的证据。
+                        assert f'graphics={int(graphics)}' in text  # 报告值须与本次选择的呈现实现一致。
 ```
 
 把 trap-fatal 加入 PROFILES，它同时约束 CLI 的合法配置和完整回归会启动哪些镜像。只定义宏而不实际加入运行列表，无法取得停止路径的证据。
 
-**完整替换 `scripts/manage.py`：**
+**在 `scripts/manage.py` 将 trap-fatal 加入原 PROFILES；其他入口规则保留：**
 
-<!-- write: scripts/manage.py -->
+继续找到下一处旧窗口，用对应新文本替换：
+
+<!-- replace: scripts/manage.py -->
+<!-- before -->
 ```python
-import argparse  # 命令行解析器把字符串选项转换为带名称的属性。
-import json      # 在 Python 对象与 JSON 文本之间转换，不执行其中内容。
-import shlex     # 按 Shell 引用规则拆分或引用文本，区别于实际执行。
-import subprocess  # 以参数列表启动已有外部程序，并读取输出或退出码。
-import sys  # 取得当前解释器路径、入口参数及标准错误流。
-from tools import ROOT, tool, make_command  # 复用路径、工具查找与构建参数，不另建工具选择规则。
-from deps import prepare  # 复用外部依赖下载与校验，统一入口先调用它。
-from boot import check, command  # check 等待启动完成，command 只组装交互QEMU参数。
 from console_test import check_console  # 复用真实键盘和UART输入验证。
 
-PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal')  # 元组固定四种构建配置，CLI choices 与 test 遍历共用。
+PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment')  # 元组固定四种构建配置，CLI choices 与 test 遍历共用。
 def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
     subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
-def compilation_database():  # 从 Make 干跑输出收集每个C/汇编文件的实际编译参数。
-    # GNU Make dry-run is the single source of compiler flags, including headers.
-    command=make_command('normal','kernel')  # 局部 command 是 Make 参数列表，不是导入的QEMU command函数。
-    command.insert(1,'-Bn')  # 在可执行路径之后插入 -B强制列规则、-n只打印的选项。
-    lines=subprocess.check_output(command,cwd=ROOT,text=True).splitlines()  # 读取命令文本并按行拆分，不执行打印出的编译器命令。
-    entries=[]  # 保存编译数据库条目，每项对应一份源文件及参数。
-    for line in lines:  # 逐条检查 Make 打印的命令。
-        if ' -c ' not in line or ' -o ' not in line: continue  # 过滤目录创建与链接命令，只考虑单文件编译。
-        tokens=shlex.split(line)  # 按shell引号解析参数边界，列表值随后直接保存。
-        if '-c' not in tokens or '-o' not in tokens: continue  # 分词后再确认编译选项，排除仅字符串碰巧匹配的行。
-        source=tokens[tokens.index('-c')+1]  # index 找到-c位置，其后一个元素是被编译的源文件路径。
-        entries.append({'directory':str(ROOT),'file':str(ROOT/source),'arguments':tokens})  # 保存工作目录、绝对源路径和完整参数列表供 clangd 消费。
-    target=ROOT/'build/normal/compile_commands.json'  # 数据库放在普通配置目录，.clangd 从此处读取。
-    target.parent.mkdir(parents=True,exist_ok=True)   # 数据库父目录缺失时创建，已有目录保持。
-    target.write_text(json.dumps(entries,indent=2)+'\n')  # 列表编码为JSON数组，输出本次真实构建参数。
+```
+<!-- after -->
+```python
+from console_test import check_console  # 复用真实键盘和UART输入验证。
 
-def build(profile):  # 给指定配置调用同一Make规则，普通配置额外更新编辑器数据库。
-    run(make_command(profile))  # 组装配置及工具覆盖，执行完整内核与镜像构建。
-    if profile=='normal':  # 测试配置不替换日常编辑参数。
-        compilation_database()  # 普通配置才导出clangd数据库。
-def inspect_elf(profile='normal'):  # 核对独立内核目标，不接受宿主解释器、动态依赖或未解析符号。
-    binary=ROOT/'build'/profile/'airios.elf'  # 定位本次配置的ELF，避免检查另一目录的旧产物。
-    readelf=tool('llvm-readelf','llvm')  # 按既定规则找到 LLVM ELF 检查器。
-    report=subprocess.check_output([readelf,'-h','-l','-d','-s',str(binary)],text=True)  # 合并ELF头、程序段、动态信息和符号表的文本报告。
-    nm=subprocess.check_output([tool('llvm-nm','llvm'),'-u',str(binary)],text=True)  # -u 只列未定义符号，独立内核应没有内容。
-    if nm.strip() or 'INTERP' in report or '(NEEDED)' in report:  # 非空未定义项、解释器段或动态依赖任一存在就拒绝。
-        raise RuntimeError('Kernel is not a fully resolved freestanding executable')  # 报告不满足完全解析的独立目标约定。
-    if 'X86-64' not in report and 'x86-64' not in report:  # 兼顾工具文字大小写，必须出现x86-64机器类型。
-        raise RuntimeError('Wrong ELF target')  # 错误机器目标不能作为此次内核成功结果。
-    if 'EXEC (Executable file)' not in report:  # 要求固定地址静态ET_EXEC，与链接脚本装载方式一致。
-        raise RuntimeError('Expected a static ET_EXEC ELF')  # PIE或其他ELF种类不满足目前启动路径。
-    (ROOT/'artifacts').mkdir(exist_ok=True)  # 建立检查报告目录。
-    (ROOT/'artifacts/kernel-elf.txt').write_text(report)  # 保存实际ELF检查输出，便于后续调试查看。
-    print('PASS ELF: x86-64 ET_EXEC, no interpreter/dependencies/undefined symbols')  # 只在机器、类型、依赖和符号全部符合后打印通过。
+PROFILES=('normal','no-framebuffer','missing-memory','edit-experiment','trap-fatal')  # 元组固定5种构建配置，CLI choices 与 test 遍历共用。
+def run(cmd):  # 所有统一入口外部命令都从同一根目录执行。
+    subprocess.run(cmd,cwd=ROOT,check=True)  # 非零状态转成异常传至入口。
+```
 
-def doctor():  # 查工具与版本，再实际准备和构建内核以验证环境。
-    record={}  # 字典以工具名称为键，值保存路径和首行版本。
-    for name,formula in [('clang','llvm'),('ld.lld','lld'),('qemu-system-x86_64','qemu'),  # 每项二元组给可执行名称与对应软件包标识。
-                         ('xorriso','xorriso'),('gmake','make'),('llvm-readelf','llvm')]:  # 继续列镜像制作、GNU Make和ELF检查器；循环解包到name/formula。
-        executable=make_command()[0] if name=='gmake' else tool(name,formula)  # GNU Make沿用gmake再make的选择，其余工具按既有规则查找。
-        flag='-version' if name=='xorriso' else '--version'  # xorriso 使用单横线，其余工具使用双横线版本参数。
-        result=subprocess.run([executable,flag],capture_output=True,text=True)  # 启动版本命令，分别收集标准输出与错误文本。
-        version=(result.stdout+result.stderr).splitlines()[0]  # 版本可能写在任一流，取合并后的第一行。
-        record[name]={'path':executable,'version':version}     # 工具键映射到实际路径和版本，不只有安装包名称。
-        print(f'OK {name}: {version}')  # 显示本轮查到的工具身份和版本。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    run(make_command(target='kernel'))  # 通过真实内核编译和链接验证环境，不仅看工具是否存在。
-    compilation_database()  # 使用同一规则生成编辑器参数。
-    inspect_elf()  # 检查刚构建出的普通配置ELF。
-    (ROOT/'artifacts/toolchain.json').write_text(json.dumps(record,indent=2)+'\n')  # 保存本次实际工具路径和版本。
-def main():  # 解析统一入口动作，并把它交给先前实现的脚本。
-    if len(sys.argv)>1 and sys.argv[1]=='learn':  # 先检查有动作参数，再识别采用独立子解析器的learn。
-        from learning import main as learn  # 只进入learn时导入后续提供的学习模块，别名避免与当前main混淆。
-        learn(sys.argv[2:])  # 切片丢掉程序名和learn，把余下参数交给子入口。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    parser=argparse.ArgumentParser(description='AiriOS P1 build and learning tools')  # 建立动作解析器，不合法参数由argparse给出用法。
-    parser.add_argument('action',choices=['doctor','build','run','test','debug','kernel-debug','linux-lab','clean','ui-preview','ui-test','docs-check','snapshots'])  # 位置参数限定动作集合，拼错动作不能落到默认运行QEMU。
-    parser.add_argument('--app',choices=('terminal','files','editor','tasks','system','settings','viewer'),default='editor')  # 主机窗口默认Editor，只接受已知应用名。
-    parser.add_argument('--state',choices=['normal','empty','loading','error','offline'],default='normal')  # 状态名限定到共享视图已有的五种状态。
-    parser.add_argument('--profile',choices=PROFILES,default='normal')  # 镜像默认普通配置，只接受固定四项。
-    parser.add_argument('--host',default='airi@ssh.airi-dynamic.top')   # 个人Linux主机可以显式替换，不涉及公司机器。
-    parser.add_argument('--graphics', action='store_true', help='explicitly enable the optional desktop')  # 默认 False，不读取图形目录。
-    args=parser.parse_args()      # 把进程参数转为Namespace，后续通过args.action等属性读取。
-    if args.action=='snapshots':  # 只有导出动作需要读取Git教学提交链。
-        from snapshots import generate  # 局部导入后续提供的快照模块。
-        generate()  # 核对固定main提交链和旧目录保护后导出阶段源码。
-        return      # 当前动作完成，不继续后面的构建或分派。
-    if args.action=='docs-check':  # 只检查重建与导航时无需启动QEMU。
-        from docs_check import check_docs  # 只有明确来源检查才读取全部课程。
-        check_docs()  # 核对正文重建与本地导航，不阻塞默认 test。
-        return  # 当前动作完成，不继续后面的构建或分派。
-    if args.graphics:  # G24已提供纯标准库资产检查，运行图形不依赖G26的截图工具。
-        from graphics_assets import verify_fonts  # 显式选择后才读取图形目录。
-        verify_fonts()  # 不导入Pillow或Cocoa。
-    if args.action in ('ui-preview', 'ui-test') or (args.action == 'test' and args.graphics):  # 完整图形回归在G26后使用。
-        from ui_preview import preview, check_frontend  # 主线不会导入这份可选工具。
-    if args.action=='ui-preview':  # 主机窗口无需内核启动依赖。
-        preview(args.app,args.state)  # 打开指定应用和服务状态。
-        return  # 此动作已完成。
-    if args.action=='ui-test':  # 主机行为与图像观察采用前章接口。
-        check_frontend()  # 运行共享C测试与平台可用快照。
-        return  # 此动作已完成。
-    if args.action=='clean':  # 清理不需要再构建内核。
-        run(make_command(target='clean'))  # 调用Make既有删除规则。
-        return  # 清理结束。
-    if args.action=='linux-lab':  # Linux对照程序由独立脚本传到个人主机运行。
-        run([sys.executable,str(ROOT/'scripts/linux_lab.py'),'--host',args.host])  # 当前解释器执行个人主机实验。
-        return  # 远程实验结束后不启动另一台虚拟机。
-    if args.action=='doctor':  # doctor自己按需准备和构建。
-        doctor()  # 查工具、构建、生成编辑器参数并检查ELF。
-        return    # 环境检查结束。
-    prepare()  # 下载并校验当前锁定引导器、协议头与固件。
-    if args.graphics:  # 图形和串口使用不同产物目录，不复用旧目标。
-        args.profile = 'desktop-' + args.profile  # 如 normal 变为 desktop-normal。
-    if args.action=='kernel-debug':  # 内核GDB观察需要先得到普通配置带符号ELF。
+在 `scripts/manage.py` 中同步本阶段已变化的条件说明；执行语句保留。旧块用于定位，只写回对应新块。
+
+<!-- replace: scripts/manage.py -->
+<!-- before -->
+```python
         build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
         run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
         return  # 调试记录完成后结束本动作。
@@ -747,27 +531,27 @@ def main():  # 解析统一入口动作，并把它交给先前实现的脚本�
         prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
         console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
         (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
-    else:  # 普通build/run/debug共用指定配置构建路径。
-        build(args.profile)  # build/run/debug先构建调用者选择的配置。
-        if args.action!='build':  # 单独构建到此结束，run和debug继续启动虚拟机。
-            work=ROOT/'artifacts'/('interactive-'+args.profile)  # 交互日志按配置分开保存。
-            if args.action=='debug':  # debug把CPU停在复位并打开回环GDB端点。
-                print('QEMU waits at reset. Remote GDB: target remote localhost:1234\n'  # 告诉调试者当前CPU尚未前进及连接地址。
-                      'Then hbreak _start; continue. See dev-log/linux/01-entry.md.',flush=True)  # 提示入口硬件断点，flush保证运行虚拟机前已打印。
-            if args.graphics:  # 图形交互仍将UART写入本轮文件。
-                print(f'Serial log: {work/"serial.log"}',flush=True)  # 显示本次实际串口日志路径，立即刷新输出。
-            cmd = command(args.profile,work,gui=args.graphics,debug=args.action=='debug')  # 先形成具体 QEMU 参数。
-            if not args.graphics:  # 串口交互直接连接当前主机终端。
-                cmd[cmd.index('-serial')+1] = 'mon:stdio'  # QEMU 用 Ctrl-A X 退出，Ctrl-A C 切监视器。
-                print('Serial console: this terminal. Exit QEMU with Ctrl-A X.', flush=True)  # 字节不再写入文件。
-            run(cmd)  # 启动所选串口或图形QEMU，debug动作才带-S和GDB。
-
-if __name__=='__main__':  # 直接执行脚本才启动CLI，导入时仅定义接口。
-    try:  # 入口错误统一转成明确的失败状态。
-        main()  # 执行解析和分派，异常留给下面处理。
-    except (RuntimeError,subprocess.CalledProcessError,AssertionError) as error:  # 三类异常都保留具体原因并转成非零退出。
-        print(f'ERROR: {error}',file=sys.stderr)  # 错误文字送标准错误，不混入正常结果流。
-        sys.exit(1)  # 失败状态交给shell和调用脚本，不能继续宣称通过。
+```
+<!-- after -->
+```python
+        build('normal')  # 调试默认仍使用串口目标，测试宏不进入调试对象。
+        run([sys.executable,str(ROOT/'scripts/kernel_debug.py'),'--host',args.host])  # 远端GDB连接本地QEMU。
+        return  # 调试记录完成后结束本动作。
+    if args.action=='test':  # 完整验证串联主机算法、前端、5种启动和三次真实输入观察。
+        run(make_command(target='host-test'))  # 编译同一纯C实现并运行带ASan/UBSan的主机边界检查。
+        if args.graphics:  # 普通 test 不导入或验证前端。
+            check_frontend(screenshots=False)  # 图形模型检查仍有自己的一组断言。
+        results=[]  # 列表依次保存各配置的实际启动结果。
+        profiles = [('desktop-' + p) if args.graphics else p for p in PROFILES]  # 呈现方式和故障场景正交。
+        for profile in profiles:  # 按固定5种配置独立编译与启动。
+            build(profile)  # 生成对应配置的ELF和镜像，产物目录彼此隔离。
+            if profile.endswith('normal'):  # 普通目标额外检查ELF结构。
+                inspect_elf(profile)  # 保存机器、类型、依赖与符号报告。
+            results.append(check(profile))  # 等待该配置完成标记并保存结果，任一失败异常中止。
+        (ROOT/'artifacts'/('desktop-boot-tests.json' if args.graphics else 'boot-tests.json')).write_text(json.dumps(results,indent=2)+'\n')  # 5种启动结果编码为JSON数组。
+        prefix = 'desktop-' if args.graphics else ''  # 本轮输入验证选择同一呈现方式。
+        console_results=[check_console(prefix+'normal'),check_console(prefix+'no-framebuffer'),check_console(prefix+'normal',uart_input=False)]  # 顺序验证normal UART、无帧缓冲UART与normal PS/2三条真实输入路径。
+        (ROOT/'artifacts'/('desktop-console-tests.json' if args.graphics else 'console-tests.json')).write_text(json.dumps(console_results,indent=2)+'\n')  # 保存三次实际输入验证结果。
 ```
 
 全部改动就绪后，从统一入口运行本章回归。正常与 fatal 各用自己的镜像和日志。

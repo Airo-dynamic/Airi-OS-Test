@@ -44,3 +44,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/09-console.md#console-state
   establishes: 同一 mem 从三次字符输入到回车分派、历史副本和输出环，再由主机显示；逻辑号与槽位、草稿与历史、状态变化与命令执行分别解释。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/09-console.md#logical-keys
+  establishes: 查询助手逐个形成文本，execute分开保存提交与分派；实际首次mem的10到17逻辑行演算连接输出环，六条历史的三次Up/Down明确draft身份，键处理按完整分支就近解释。

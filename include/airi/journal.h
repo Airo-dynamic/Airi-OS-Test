@@ -17,7 +17,7 @@ struct airi_journal { // 只缓存已确认前缀，不缓存用户buffer。
     bool truncated, poisoned; // 尾记录无效可覆盖；I/O错误后需重新扫描。
 };
 int airi_journal_scan(struct airi_journal *journal, const struct airi_journal_io *io, uint64_t base, unsigned slots); // 从磁盘重建有效前缀，最多64条。
-long airi_journal_append(struct airi_journal *journal, const void *data, size_t bytes); // 返回一开始的sequence，失败负错误且不自动重试。
+long airi_journal_append(struct airi_journal *journal, const void *data, size_t bytes); // 返回从 1 开始的 sequence，失败负错误且不自动重试。
 long airi_journal_read(struct airi_journal *journal, unsigned index, void *data, size_t capacity); // index从0开始，成功返回实际内容长度。
 void airi_journal_demo(void); // 正常设备上的真实恢复演示，独立占用扇区4–7。
 #endif // 结束保护。

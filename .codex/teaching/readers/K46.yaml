@@ -15,7 +15,7 @@ first_use:
   establishes: SET0、CUR共享offset、END节点size，定位不扩内容，后续写才清零洞
 - concept: 有符号差值的无溢出验证
   at: ../../../dev-log/core/46-signed-seek.md#seek-arithmetic
-  establishes: 正向先比容量差，负向以-(delta+1)后转无符号补1求幅度，INT64_MIN不直接取负，失败不提交
+  establishes: 从位置3回退1先确认幅度不超过基准，再推广到INT64_MIN；-(delta+1)转无符号后补1不直接取最小负数，正向先比容量差，失败不提交
 - concept: 一次内核对象操作承接有符号位模式
   at: ../../../dev-log/core/46-signed-seek.md#seek-boundary
   establishes: 37号完整检查FD/whence后解释RSI，旧14号绝对接口保留，用户不拆成查询再设置

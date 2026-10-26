@@ -32,3 +32,8 @@ full_prose_review:
   date: 2026-10-24
   at: ../../../dev-log/core/21-user-elf.md#elf-file-memory
   establishes: 以 initialized、8192 字节 zeroed 和用户 main 串起文件描述、整份校验、用户库、初始栈及两次链接，明确 view 尚未分配页。
+
+prose_revision:
+  date: 2026-10-26
+  at: ../../../dev-log/core/21-user-elf.md#elf-load-owner
+  establishes: 保留文件与内存跨度、独立链接和完整校验模型；hello真实字符串推到0x70000ffa与初始RSP四槽，再交用户_start；新装载助手分别精确插入，既有代码只改实际窗口。

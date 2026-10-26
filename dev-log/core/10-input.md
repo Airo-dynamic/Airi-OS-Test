@@ -10,55 +10,17 @@
 
 先在原控制台头文件加入 airi_input_poll 与扫描码转换器的声明，输入、历史和日志结构保持。poll 供 guest 主循环调用，转换器也可在主机用构造扫描码检查；声明只连接接口，下面的定义才实施设备处理。
 
-完整替换 `include/airi/console.h`：
+**在 `include/airi/console.h` 找到原 endif 行，用第二块替换第一块；第09章的模型声明保持：**
 
 <a id="code-include-airi-console-h-1"></a>
 
-<!-- write: include/airi/console.h -->
+<!-- replace: include/airi/console.h -->
+<!-- before -->
 ```c
-#ifndef AIRI_CONSOLE_H  // 第一次包含控制台接口时保留以下声明，重复包含时跳过
-#define AIRI_CONSOLE_H  // 标记本编译单元已经读取控制台接口
-#include <airi/boot.h>  // 引入启动结构、固定宽整数和内存范围接口
-#define AIRI_CONSOLE_LINES 256  // 输出环最多保存256条文字记录
-#define AIRI_CONSOLE_WIDTH 128  // 一条输出的数组容量为128字节，含终止零
-#define AIRI_COMMAND_SIZE 64    // 命令与历史项各用64字节，最多63个内容字节
-#define AIRI_HISTORY_SIZE 8     // 最多记住8条已提交的命令
-enum airi_view { AIRI_VIEW_TERMINAL, AIRI_VIEW_MEMORY, AIRI_VIEW_DEVICES, AIRI_VIEW_JOURNAL };  // 按顺序编号当前airi_view可接受的状态或事件
-enum airi_key {  // 按顺序编号当前airi_key可接受的状态或事件
-    AIRI_KEY_UP = 256,  // 向上浏览命令历史或移动选择
-    AIRI_KEY_DOWN,      // 向下浏览命令历史或移动选择
-    AIRI_KEY_PAGE_UP,   // 向上滚动显示或翻内存页
-    AIRI_KEY_PAGE_DOWN,  // 向下滚动显示或翻内存页
-    AIRI_KEY_F1,    // 切到Terminal的逻辑事件
-    AIRI_KEY_F2,    // 切到Memory的逻辑事件
-    AIRI_KEY_F3,    // 切到Devices的逻辑事件
-    AIRI_KEY_F4,    // 切到Journal的逻辑事件
-    AIRI_KEY_CLEAR  // 清控制台可见历史的逻辑事件
-};
-/* Fixed storage owned by the kernel. No heap, process or filesystem dependency. */
-struct airi_console {  // 独立保存文本输入、历史与输出环
-    const AiriBootInfo *boot;  // 借用启动信息，描述与内存地图须持续有效
-    enum airi_view view;  // 当前命令视图编号
-    char lines[AIRI_CONSOLE_LINES][AIRI_CONSOLE_WIDTH];  // 256行文字环，每行容量128字节
-    uint64_t total_lines;  // 累计逻辑输出行号，覆盖旧槽也继续增加
-    unsigned line_count;   // 当前环中仍保存的有效行数
-    unsigned scroll;    // 显示滚动量，单位由当前视图决定
-    unsigned map_page;  // 内存地图每12条一页的页编号
-    unsigned commands;  // 已提交非空命令次数
-    char input[AIRI_COMMAND_SIZE];  // 尚未提交的NUL命令字符串
-    char history[AIRI_HISTORY_SIZE][AIRI_COMMAND_SIZE];  // 最多8条已提交命令的独立文字副本
-    unsigned input_length;   // 当前输入内容字节数，不含NUL
-    unsigned history_count;  // 有效命令历史条数
-    unsigned history_back;   // 离当前草稿有多远，0表示草稿而非历史
-    char draft[AIRI_COMMAND_SIZE];  // 首次浏览历史前保存的未提交输入
-};
-void airi_console_init(struct airi_console *c, const AiriBootInfo *boot);  // 清命令状态并绑定只读启动结构，形成初始文字
-bool airi_console_key(struct airi_console *c, int key);  // 消费一个逻辑键并报告显示状态是否变化
-const char *airi_console_line(const struct airi_console *c, uint64_t sequence);  // 按逻辑行号借用仍保留的日志文字
-unsigned airi_journal_count(void);  // 返回当前固定启动记录数量
-void airi_journal_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定启动事件格式化到调用者输出缓冲
-void airi_device_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定设备描述格式化到调用者输出缓冲
-void airi_map_line(const struct airi_console *c, unsigned index, char *out, size_t size);  // 把指定物理内存范围格式化成一行文字
+#endif  // 结束当前条件编译范围
+```
+<!-- after -->
+```c
 int airi_input_poll(void);  // 当前内核循环从UART或PS/2读取一个逻辑事件
 int airi_keyboard_decode(uint8_t code);  // 主机观察和设备路径共用同一个扫描码转换器
 #endif  // 结束当前条件编译范围
@@ -128,7 +90,9 @@ int airi_keyboard_decode(uint8_t code) {  // 保留修饰键状态并把一个�
         return AIRI_KEY_F1 + (code - 0x3b);  // 按相对扫描码偏移转换成连续逻辑功能键编号
 ```
 
-收到 E0 时只置 extended 并返回 0；下一次把它取到局部 ext，再清静态前缀，影响只持续一个后续字节。Shift 按下也只改状态；随后 a 的按下码借该状态产生 A，a 释放不产字符，修饰键释放则更新各自位。
+收到E0时只置extended并返回0。下一次若是0x48，局部ext接住此前的true，静态extended立即清掉，本次才返回Up；后面的普通扫描字节不再继承这个前缀。
+
+修饰键的状态持续到对应释放。按代码推演，左Shift的0x2a使shift=1，右Shift的0x36再使shift=3；左侧释放0xaa只清位0，shift仍为2，此时a按下的0x1e仍应产生A。普通a释放0x9e只返回0，不改变Shift；右侧0xb6释放后shift才归零。每次输入只是一字节，保留的左右状态才把这些调用连起来。
 
 去掉前缀和释放含义以后，plain 才按扫描位置取普通字符。`[0x1e]='a'` 是指定下标初始化，未列槽为零；Shift 字母按 ASCII 差转换，数字/标点按 from、to 的相同下标配对，Ctrl-L 产生清屏事件。扩展键与 F1..F4 则直接返回功能编号。
 
@@ -209,13 +173,9 @@ int airi_input_poll(void) {  // 每轮从键盘或UART取一个事件，无事�
 
 ## 模型已改变，还要把新行送给 UART
 
-收到 m 只改变 input，不生成查询结果；回车执行 mem，才追加多行。主循环处理键之前保存 total_lines，处理之后从这个旧尾部读到新尾部，逐行发送，所以不会每按一次键就重发启动日志。若环已覆盖旧起点，先把起点提高到仍保留范围。
+入口先保留第08章的启动验证和地图日志，再建立静态console。本次会话继续借用已经验证的info；graphics保持false，初始化与后续输入都走串口，不需要图形实现。
 
-发送后写出 CONSOLE_UPDATE，包含新的命令计数与视图。主机因而可以用 commands=1 加查询结果证明一次回车已处理，不能只凭字节已写进 QEMU 就判完成。
-
-无输入时 pause/continue 仍是忙等轮询，不是调度器睡眠；graphics 当前为 false，输出独立走串口。初始化 console、发布 READY 和后续处理均使用同一个静态会话。
-
-**完整替换 `kernel/main.c`：**
+**完整更新 `kernel/main.c`，先写头文件、静态会话与启动日志；后面继续同一主函数：**
 
 <a id="code-kernel-main-c-1"></a>
 
@@ -250,6 +210,14 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 校验启动信�
              (unsigned long long)usable,  // 把当前64位字段转成格式要求的unsigned long long
              (unsigned long long)airi_memory_bytes(info, AIRI_MEMORY_BOOT_RECLAIM));  // 把当前64位字段转成格式要求的unsigned long long
     airi_log("[LESSON] %s", AIRI_DEMO_MESSAGE);  // 把当前启动状态记录送到UART
+```
+
+启动描述已验证并打印以后，console_init才生成第09章的初始模型。它的文字先留在环里；入口另外发布READY与airi>提示，表示设备循环即将接手。此处没有绘图，显示描述即使存在也只作为可选数据保留。
+
+**继续追加模型初始化与串口就绪发布：**
+
+<!-- append: kernel/main.c -->
+```c
     airi_console_init(&console, info);  // console绑定已验证的同一启动结构，初始化命令历史和输出环
     bool graphics = false;  // 当前只接串口，图形状态尚未启用
     if (graphics) {  // 只有本次图形真正启用时才报告成功显示参数
@@ -264,6 +232,16 @@ _Noreturn void airi_kernel_main(const AiriBootInfo *info) {  // 校验启动信�
              (unsigned long long)usable);  // 把当前64位字段转成格式要求的unsigned long long
     airi_log("[AIRI_LESSON_READY] serial command loop active");  // 把当前启动状态记录送到UART
     airi_serial_write("airi> ");  // 发送没有换行的提示符，等待下一条输入
+```
+
+现在跟一条真正到来的mem：m、e、m每次只改变input，回车才让execute增加commands并生成新行。主循环每次调用模型前先记before=total_lines，返回后只在回车分支发送新增范围；如果环已覆盖before，就先提高到最早仍保留的first。初始化时已有的旧行不会因为按一个字符又全部发送。
+
+新行发送后，入口再发布包含view、commands、page的CONSOLE_UPDATE。对第一条mem，主机要同时看到本条查询内容和commands=1，才能确认回车已经处理。无逻辑事件时pause/continue仍是忙等，没有调度器睡眠；不支持的事件由changed=false略过。
+
+**最后追加持续轮询、新行发送与处理后标记，闭合主函数：**
+
+<!-- append: kernel/main.c -->
+```c
     for (;;) {  // 本操作持续循环，只有明确终点或分支才能退出
         int key = airi_input_poll();  // 每轮从键盘或UART取一个事件，无事件返回0
         if (!key) {  // 当前轮询没有逻辑事件时保持输入输出状态并继续等待
@@ -378,13 +356,11 @@ image: $(OUT)/airios.elf
 
 本次改用 `-serial stdio`：QEMU 标准输入进入 guest UART 接收端，发送端进入主机标准输出。这里 stdio 属于主机进程，AiriOS 还没有自己的标准文件描述符。`-monitor none` 关闭 QEMU 监控台，避免它和 UART 竞争输入。
 
-父 Python 用 stdin=PIPE 建主机字节管道，写 `b"mem\n"` 再 flush，将字节交给 QEMU；后者送到虚拟 UART，poll 读取、模型积累并在换行时执行，再沿 UART 的另一方向返回结果。b 前缀表示 bytes，读回日志则解码为 str，两种表示分别服务传输和文本比较。
+父Python用stdin=PIPE建立主机字节管道，写入 `b"mem\n"` 并flush以后，QEMU才把字节递交虚拟UART。内核poll得到字符，模型在换行时提交，再沿UART反向输出。b前缀表示传输用的bytes；读回日志解码成str，才做文字比较。
 
-脚本先等本轮完整 READY，再发送一项。requests 的每项是 `(输入bytes,预期str)`，二元组解包交给 request/expected；offset 记发送前日志长度，后续只在新尾部检查该项结果与递增计数。收到完成再发下一条，避免把主机管道容量误当有限 UART 的接收容量，也避免拿旧输出证明新请求。
+先准备这一次的路径和参数。serial接QEMU标准输出，qemu.log只接诊断；新的vars副本仍按第07章准备，主机stdio由UART独占。
 
-输出文件本轮截断，错误另存 qemu.log。列表推导按 splitlines 的候选行筛出有换行者；`airi> ` 本身无换行，可能连在记录前，removeprefix 只去这一个确定前缀，再比较完整字段，不任意剥空白。六次请求共享 90 秒预算，继承固定 QEMU 参数与 finally 清理。
-
-**新建 `scripts/first_input.py`：**
+**新建 `scripts/first_input.py`，先写本轮文件与QEMU参数：**
 
 <a id="code-scripts-first-input-py-1"></a>
 
@@ -408,6 +384,16 @@ command = [tool('qemu-system-x86_64', 'qemu'), '-machine', 'q35', '-accel', 'tcg
            '-drive', f'if=pflash,format=raw,unit=0,readonly=on,file={firmware / "edk2-x86_64-code.fd"}',  # 只读固件代码区用固定路径，f字符串将Path转进参数文字
            '-drive', f'if=pflash,format=raw,unit=1,file={work / "vars.fd"}',  # 可写变量区用本轮副本，避免污染锁定固件
            '-cdrom', str(ROOT / 'build/normal/airios.iso'), '-boot', 'd']  # 把Path转为进程参数字符串，从本轮光盘镜像启动
+```
+
+接下来打开输出文件。wb按字节写并截断旧日志，所以ready不会由上次运行满足；Popen保留输入管道，把UART输出与诊断分别接到两份文件。requests的每项是输入bytes与预期str组成的二元组，第一项正是mem换行与它应该产生的说明。
+
+index从0开始，ready记启动是否完成，waiting记是否已经发出一项但尚未收齐结果。三者分别回答当前是哪条请求、能否开始、能否再发。六次请求共享同一个90秒deadline，不给每项重新续时。
+
+**继续追加QEMU启动、请求数据和本轮状态，保持with/try缩进：**
+
+<!-- append: scripts/first_input.py -->
+```python
 with serial.open('wb') as output, (work / 'qemu.log').open('wb') as errors:  # wb按字节写并截断旧日志，with退出时关闭两份文件
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=output, stderr=errors)  # 启动QEMU，父进程保留输入管道，UART输出与QEMU错误分文件保存
     try:  # 观察主体失败后也必须进入下面的QEMU清理
@@ -422,6 +408,16 @@ with serial.open('wb') as output, (work / 'qemu.log').open('wb') as errors:  # w
         waiting = False  # 当前没有已发送却未完成的请求
         offset = 0  # 本次请求发出前已有文本的字符长度
         deadline = time.monotonic() + 90    # 本次启动和六次交互共同最多90秒
+```
+
+循环先读日志，只从有换行的完整行判断READY。ready为真且waiting为假时，二元组解包给request/expected，offset记下发送前text的字符长度，再写本项字节并flush，waiting变真；下一轮不会重复发送。第一项等待的不是管道已经接收四个字节，而是guest完成这次mem。
+
+后续只比较text[offset:]的新尾部。第0项必须取得完整 `commands=1` 更新行和对应说明，才把index加一、waiting清零，允许发echo；其余各项同样推进。列表推导筛完整行，removeprefix只去确定的无换行提示符airi>，再比较整个标记，不任意剥空白。六条全收齐才break，提前退出或截止无结果都失败。
+
+**继续追加逐项发送与结果等待：**
+
+<!-- append: scripts/first_input.py -->
+```python
         while time.monotonic() < deadline:  # 在截止前继续检查真实输出，运行中的进程并不代表成功
             text = serial.read_text(errors='replace')  # 输出文件字节解码为str，异常编码用替代字符保留其他结果
             lines = [line for line in text.splitlines(keepends=True) if line.endswith('\n')]  # 只处理有完整换行的记录，尾部未写完的行暂不使用
@@ -450,6 +446,14 @@ with serial.open('wb') as output, (work / 'qemu.log').open('wb') as errors:  # w
             time.sleep(0.1)  # 轮询间隔100毫秒，不在主机占满CPU忙等
         else:  # 没有成功break而耗尽截止时间时进入超时分支
             raise RuntimeError('UART command timed out')  # 未出现应收记录不能当作成功
+```
+
+无论正常收齐还是中途异常，finally都关闭本次写管道并回收自己的QEMU。close也可能因子进程已退出而失败，所以内层finally仍执行terminate、限时wait和必要的kill/wait；日志则留在本轮目录供查看。
+
+**最后追加清理，闭合本轮观察：**
+
+<!-- append: scripts/first_input.py -->
+```python
     finally:  # 不论观察成败都执行本轮资源清理
         try:  # 关闭写端可能遇到QEMU已退出导致的管道错误。
             process.stdin.close()  # 释放父进程写端，不再提交设备字节。
