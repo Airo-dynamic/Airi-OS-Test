@@ -1,8 +1,28 @@
 # G17 · 把一次按键变成可回退的文档修改
 
-Editor 已经从服务读入 main.lua：editor 是当前工作文字，saved 是这次完整读取留下的保存点，服务仍持有自己的正文。现在在同一 desktop 中全选，把工作文字替换为 print(42) 加换行，再撤销、恢复替换、保存和请求运行。按键先决定交给哪个输入对象，Editor 接到粘贴后才修改 editor；保存键再通过回调改变服务，Run 仍会得到执行未连接的错误。
+G16 已经把服务中的 main.lua 读到 Editor，窗口能显示这份正文。现在让同一个桌面接收全选、粘贴、撤销和保存：将原文替换为 `print(42)` 加换行，撤销一次，再恢复这次替换，最后把新文交回服务。按键需要改变的是可以继续使用的文档状态，重画只负责把这些状态显示出来。
 
-替换前要另存原文，否则覆盖后就无法撤销。因此新增独立的 undo 数组；clipboard 则持有拟粘贴的文字。它们都不代替 saved：撤销只交换工作文字与上次快照，保存成功才更新保存点。下面先加入按键、反馈与副本字段，随后依次接服务、可见反馈和输入操作。
+服务仍保留自己的正文，桌面里的 `editor` 是独立工作数组，`saved` 是最近一次完整读取或成功保存留下的副本。输入先改 editor，保存才调用 G14 建立的 `backend.action`。回调返回 true 后，前端才能把 saved 更新为当前 editor；服务拒绝时，工作文字仍须留在窗口中。
+
+撤销还需要另一份修改前的文字。新增的 `undo` 保存这份快照，`clipboard` 保存本次要粘贴的输入。undo 与 editor 交换可以撤销，也可以把刚撤销的文字换回来；saved 始终用于判断工作文字是否已经保存。这样，回到原文会重新成为干净状态，保存新文以后，撤销也仍能把原文带回来。
+
+<a id="edit-state-model"></a>
+
+本次输入共有十个内容字节：`print(42)` 的九个字符和一个换行。结尾 NUL 另占一个存储位置。沿观察程序的实际顺序，四份正文会经过以下状态；表中的“原文”均指本次初始化读入的同一份 main.lua。
+
+| 操作完成后 | editor 工作文字 | undo 撤销槽 | saved 保存点 | 服务正文 | dirty |
+| --- | --- | --- | --- | --- | --- |
+| 初始化 | 原文 | 尚无有效快照 | 原文 | 原文 | false |
+| 全选后粘贴 | 十字节新文 | 原文 | 原文 | 原文 | true |
+| 第一次 Undo | 原文 | 十字节新文 | 原文 | 原文 | false |
+| 第二次 Undo | 十字节新文 | 原文 | 原文 | 原文 | true |
+| Save 成功 | 十字节新文 | 原文 | 十字节新文 | 十字节新文 | false |
+
+随后请求 Run，会显示执行服务未连接的错误。它不回退刚才成功的保存。这个主机观察进程中的参考服务把文件放在会话内存中，进程退出后这些修改就结束；本章先接通按键、文档副本、服务提交和可见反馈之间的关系。
+
+## 为一次编辑分别保存文字、输入目标与反馈
+
+下面更新共同头文件，使随后各实现都使用同一套字段和功能键编号。原有窗口矩形、绘制次序、主题和目录快照继续承担原来的用途。新增部分可以沿三组状态阅读：editor/saved/undo/clipboard 保存文字；dialog/focus/active 决定同一个键交给谁；dialog_title/text/input 与 toast 留下下一帧要显示的反馈。`pending_close` 则把“先保存再关闭”的后续动作留到服务结果返回以后。
 
 **完整写入 `frontend/include/ui.h`：**
 
@@ -146,13 +166,13 @@ void ui_apps_draw(struct ui_desktop *, enum ui_app, struct ui_rect);  // 以应�
 #endif  // 结束完整桌面接口的重复包含保护
 ```
 
+## 服务接受正文以后，保存才算成功
+
 <a id="edit-save-run"></a>
 
-观察程序送入 print(42) 加换行，含九个可见字符和一个换行，共十字节；末尾 NUL 另占存储，不计入长度。全选后粘贴会把原 main.lua 存进 undo，再令 editor 成为十字节新文，cursor=10。此时 saved 与服务正文仍是原文，所以 dirty=true。
+工作数组的声明已经齐备，接下来先完成保存将调用的服务端。沿章首的 Save：前端交出 `editor_id=1`、名称 main.lua 和 editor 中的十字节；参考服务用 `id-1` 定位原槽，把正文复制进服务自己的 text，再更新 bytes。这里的 id 仍是服务身份，与 Files 的可见行号无关。
 
-第一次 Undo 将 editor 换回原文、undo 换成十字节新文，editor 又与 saved 相同，dirty=false。第二次 Undo 再交换回来，dirty=true。只有之后 Save 成功，服务正文和 saved 才一同成为十字节，dirty=false。最后 Run 失败只产生反馈，已经保存的文字继续保留。容量检查或服务失败也不能留下半次文字修改；下面把这些条件放到各自改变状态的位置。
-
-先让服务能接收当前编辑结果。保存请求带现有 editor_id=1、名称 main.lua 和 editor 的十字节正文；参考服务通过 id-1 找到原槽，在普通文档上更新 text 与 bytes。UI_EXECUTE 则在改变任何记录之前返回未连接原因。创建、重命名、复制、移动与删除也使用这一个 action 入口，下面按这些分支的实际参数给出实现。
+`UI_EXECUTE` 在修改记录前返回未连接原因。创建、重命名、复制、移动与删除也共用 action 入口，但 name 与 id 的含义随动作确定。下面先恢复记录容器、目录查询和完整读取，再逐段完成 action；本次保存会走已有 id 的 UI_SAVE 分支。
 
 **完整写入 `frontend/backends/reference.c`：**
 
@@ -228,7 +248,7 @@ static bool valid_name(const char *name) {  // 检查文件名非空、长度与
 }
 ```
 
-上面的记录容器、目录查询和完整读取仍遵守 G14 的合同。接下来更新动作处理：执行请求直接拒绝；创建和 editor_id<0 的新文档保存先验证名称、完整路径与重名，再占一个空槽。新建保存使用 data 填正文，普通创建仍为空。这段尚未闭合 action，已有 id 的动作随后接上。
+目录查询仍复制元信息，read 仍在容量足够时复制整份正文，失败前不写调用者数组。action 在这份服务状态上接受修改：执行请求先拒绝；创建和 `editor_id<0` 的新文档保存先检查名称、完整路径与重名，再寻找空槽。新文档保存把 data 写入新槽，普通创建则从空正文开始。当前 main.lua 已有 id，稍后会越过这组创建分支。
 
 <!-- append: frontend/backends/reference.c -->
 ```c
@@ -389,9 +409,13 @@ void ui_fixture_backend(struct ui_backend *b) {  // 重置当前主机参考服�
 }
 ```
 
+## 将调用中的错误保存到下一帧
+
 <a id="dialog-lifetime"></a>
 
-保存与执行现在会产生错误反馈。ui_app_dialog复制标题、原因和输入初值到desktop，ui_command的保存失败分支也写入这些数组。调用者的局部error数组随后退出仍不会使提示失效，因为下一帧读的是独立副本。错误框最后写像素，覆盖普通窗口；输入处理先检查dialog，Escape关闭反馈后才恢复正常编辑。
+服务已经能接受或拒绝动作，前端还需要把结果留下来。action 使用调用者提供的 error 数组交回原因；这个局部数组只在本次调用中有效，而提示框要到之后重画时才读取文字。
+
+`ui_app_dialog` 因而把标题、原因和输入初值复制进 desktop，`ui_command` 的保存失败分支也写入这组持久数组。后续绘图读取 desktop 中的副本，原局部 error 结束寿命后提示仍然有效。错误框最后写像素以覆盖普通窗口，按键入口先检查 dialog；Escape 关闭反馈以后，输入才恢复到 Editor。
 
 **完整写入 `frontend/apps/internal.h`：**
 
@@ -554,7 +578,9 @@ void u_icon(int x, int y, int id, uint32_t c) {  // 按应用编号绘制20像�
 
 ```
 
-提示状态有了保存位置，还需要让下一帧显示出来。窗口绘完后检查 dialog，在整屏范围覆盖提示框；普通窗口仍保留原状态，关闭提示后可以继续编辑。
+## 在窗口绘完以后覆盖反馈
+
+对话框文字现在已经保存在 desktop 中，显示发生在下一次 `ui_draw`。先沿用原来的窗口遍历画正文，再在整屏范围读取 toast 与 dialog 并覆盖反馈。窗口本身的文字和几何保持原状态，关闭提示后下一帧会重新显示它们。
 
 paint.c 的窗口遍历、标题和应用内容沿用 G16。依次更新下面三处：函数开头的说明、顶栏图标这一行，以及文件末尾从 tx 增量到函数闭合的窗口。新增的提示与对话框绘制接在底栏之后。顶栏资源图标本章仍只画外观，资源栏展开状态在 G18 才加入。每处旧块用于唯一定位，只把新块写回对应位置。
 
@@ -664,6 +690,8 @@ void ui_draw(struct ui_desktop *s, const struct airi_framebuffer *f) {  // 按�
     }
 }
 ```
+
+## 用服务结果更新保存点与关闭请求
 
 <a id="save-transition"></a>
 
@@ -780,7 +808,9 @@ void ui_open_document(struct ui_desktop *s, unsigned index) {  // 按快照下�
 }
 ```
 
-错误框只需关闭，有名称或危险动作的确认框则还要继续操作。ui_confirm 先把当前 dialog 种类保存到局部 kind，再清掉显示状态，随后按 kind 生成 ui_command。关闭前选择保存会设置 pending_close；已有 id 直接 Save，新文档先进入 Save As 等待名称。这里建立可由输入调用的确认入口，标题栏鼠标操作尚未接入。
+## 把确认框转换成一次具体服务动作
+
+读取别的文档已有保护，关闭和命名还需要把用户的确认接回服务。错误框只需关闭，有名称或危险动作的确认框则还要继续操作。ui_confirm 先把当前 dialog 种类保存到局部 kind，再清掉显示状态，随后按 kind 生成 ui_command。关闭前选择保存会设置 pending_close；已有 id 直接 Save，新文档先进入 Save As 等待名称。这里建立可由输入调用的确认入口，标题栏鼠标操作尚未接入。
 
 保存路径只有在服务返回 true 后才能更新 saved 并清 dirty。撤销等编辑动作则仍按 editor 与 saved 是否相同计算 dirty。取消操作会清 pending_close，避免将关闭请求留给之后普通保存。
 
@@ -880,7 +910,9 @@ static void insert(struct ui_desktop *s, const char *text) {  // 整份检查输
 }
 ```
 
-文件名和搜索串是短输入框，使用独立 field_key。field_all 标记全字段选中，复制取得整个字段，粘贴只保留可打印 ASCII 并受 cap 限制；这些字段不借用多行文档的选区和撤销数组。
+## 短字段与文档各自处理输入
+
+文档插入已经能够在检查通过后一次完成修改。接下来同一个按键还可能交给 Save As 名称框、Files 筛选框或 Editor 查找框。这些字段保存一行短文字，使用独立 `field_key`：field_all 表示整个字段选中，复制取得整个字段，粘贴只保留可打印 ASCII 并受 cap 限制。它们各自传入数组和容量，不使用文档的 cursor/anchor 或 undo。
 
 **追加到 `frontend/core/editing.c` 末尾：**
 
@@ -920,7 +952,9 @@ static void field_key(struct ui_desktop *s, char *field, size_t cap, int key) { 
 }
 ```
 
-文档光标移动后还要保持可见。reveal_cursor扫描到cursor得到行列，再从u_window_body取得实际内容宽高。纵向扣正文前88像素和底部裁剪30像素，查找栏打开再扣44；横向扣当前实际项目栏与72像素行号、边距，24像素为一行、10像素为一列。光标刚越过可见末行才卷动，文字仍容纳得下时不提前藏起首列。
+## 由文档间隙计算光标的可见位置
+
+修改文字以后，cursor 指向新文中的字节间隙，屏幕还需要显示这个位置。reveal_cursor 扫描到 cursor 得到行列，再从 u_window_body 取得实际内容宽高。纵向扣正文前88像素和底部裁剪30像素，查找栏打开再扣44；横向扣当前实际项目栏与72像素行号、边距，24像素为一行、10像素为一列。光标刚越过可见末行才卷动，文字仍容纳得下时不提前藏起首列。
 
 内容改变时 changed 比较 editor 与 saved 决定 dirty，撤销回保存内容会重新变为干净状态。
 
@@ -962,6 +996,8 @@ static void changed(struct ui_desktop *s) {  // 比较编辑与保存副本，�
     reveal_cursor(s);  // 按文档行列和窗口可见范围调整滚动，使光标可见
 }
 ```
+
+## 先选择按键接收者，再执行编辑规则
 
 <a id="key-routing"></a>
 
@@ -1162,6 +1198,8 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
     }
 ```
 
+## 交换撤销快照，并保持光标与选区一致
+
 现在补 Undo。本轮第一次替换后，editor 是十字节新文、undo 是原 main.lua、saved 还是原文。第一次 Undo 用 temp 暂存 editor，交换后 editor 恢复原文、undo 留住新文，changed 比较 saved 得到 dirty=false。第二次 Undo 再交换回来，dirty=true。当前只有这一个可交换槽，没有多步历史；保存点始终由 saved 单独保存。
 
 交换后光标移到文尾，清选区，再比较 saved。左右移动一个 ASCII 字节间隙，Home/End 找本行边界，上下移动保留原列并限制在目标行长度内。
@@ -1269,7 +1307,11 @@ bool ui_key(struct ui_desktop *s, int key, bool shift) {  // 按对话框、字�
 }
 ```
 
-输入入口已接好，观察程序现在按章首的顺序驱动同一个 desktop，打印 cursor、dirty、dialog 和字节数。它不先画界面，而是先核对替换、撤销、保存和执行失败的对象状态；后面再另设窗口尺寸检查光标像素，最后重置服务检查字段路由。先写初始化与全选替换。
+## 在同一个桌面中完成替换、撤销与保存
+
+实现已经从按键接收者连到工作数组，并从保存回调连到服务正文。现在由主机观察入口按章首的顺序驱动同一个 desktop，打印 cursor、dirty、dialog 和字节数。前半段直接核对副本状态，随后才绘图检查光标像素，最后重新初始化服务检查字段路由。这三段共享一次主机进程，但最后一段会明确重置文档。
+
+先让 `ui_fixture_backend` 建立参考记录，`ui_init` 按 G16 读取 main.lua，并在 reference 模式中打开 Editor。全选将 anchor 放到 0、cursor 放到原文末尾；粘贴十字节后，观察第一次检查输入修改是否与服务正文分离。
 
 **新建 `labs/host/frontend/editor_transaction.c`：**
 
@@ -1340,7 +1382,9 @@ int main(void) {  // 在主机准备输入、运行当前观察并以退出码�
     ui_key(&desktop, UI_ESCAPE, false);  // 关闭Run错误，下一次输入回到同一Editor
 ```
 
-下面进入同一进程里的光标观察。先把普通外框固定成 800×400，正文按当前标题、起点和底部裁剪只容纳九条完整 24 像素行；十行文字将光标放在第十行末尾。粘贴触发 reveal_cursor 后再 ui_draw，程序逐个检查光标竖线的 19 个蓝色像素，而不只检查滚动数值。继续追加纵向观察。
+## 通过实际光标像素检查滚动，再重置输入接收者
+
+文档保存和执行失败已经分别核对，下面在同一进程里转向光标观察。先把普通外框固定成 800×400，正文按当前标题、起点和底部裁剪只容纳九条完整 24 像素行；十行文字将光标放在第十行末尾。粘贴触发 reveal_cursor 后再 ui_draw，程序逐个检查光标竖线的 19 个蓝色像素，而不只检查滚动数值。继续追加纵向观察。
 
 <!-- append: labs/host/frontend/editor_transaction.c -->
 ```c
@@ -1432,13 +1476,19 @@ static inline void copy(char *out, size_t n, const char *text) {  // 按调用�
 
 **在学习目录根目录运行：**
 
+整个块交给同一个 `sh -eu` 执行；编译失败时会立即结束，不会接着运行目录里以前留下的 `build/editor`。结束行 `SH` 单独顶格输入。
+
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 任一编译或运行步骤失败便结束本次命令。
 mkdir -p build  # 保存本次主机程序和图像，已有目录可以继续
 cc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude -Ifrontend/include labs/host/frontend/editor_transaction.c kernel/lib/base.c kernel/boot/info.c kernel/console/console.c frontend/core/*.c frontend/apps/*.c frontend/backends/reference.c frontend/render/draw.c -o build/editor  # Shell展开两个通配符，把当前已经写出的核心和应用一起链接
 ./build/editor  # 运行当前完整观察程序，退出非零表示本组观察失败
+SH
 ```
 
 替换后 cursor=10、dirty=1、editor_bytes=10；第一次Undo恢复原main.lua，dirty=0；第二次Undo交换回替换文字，dirty=1；保存后 dirty=0。请求运行得到 UI_DIALOG_ERROR，文档内容仍在，错误说明执行服务未连接。
 
-输入、服务提交与反馈已经贯通。接着加入任务状态和设置，再读取 CSV 形成曲线，再用真实鼠标操作它们。
+这次观察从服务读入的 main.lua 出发，键事件先改变工作副本，撤销只交换前端文字，保存成功再改变服务正文与保存点。执行失败留下错误框，Escape 后仍能继续使用已保存文档；光标像素和字段路由观察又分别核对显示位置与事件接收者。
+
+Files 和 Editor 现在能通过同一份服务表查询、修改并报告失败。下一章把这组交接扩展到任务与设置：服务提供任务和资源快照，界面保存选择，确认动作再请求停止或更新。CSV 随后沿读取出的文字建立自己的数据解析过程。

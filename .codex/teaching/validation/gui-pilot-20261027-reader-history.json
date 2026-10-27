@@ -1,0 +1,7 @@
+{
+  "date": "2026-10-27",
+  "baseline": "4eb559d",
+  "readers/G17.yaml": {
+    "feedback": "feedback:\n- source: B12 编辑与服务各次状态复核\n  observation: 长段界面重贴隔开了修改、撤销、保存和观察；同一文件各副本在中途容易失去状态\n  revision: 以真实十字节输入追踪 editor、undo、saved 与服务记录，局部更新 paint/state，逐组解释观察程序每次操作的前后状态及重置边界\n- source: 用户本轮连续教程要求\n  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。\n  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。\n"
+  }
+}

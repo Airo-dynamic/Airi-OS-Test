@@ -11,8 +11,8 @@ already_explained:
   establishes: read复制正文到editor和独立saved；编辑工作数组不会自动修改服务记录，dirty比较两份内容。
 first_use:
 - concept: 真实编辑序列中的四份文字
-  at: ../../../dev-log/graphics/17-editing.md#edit-save-run
-  establishes: 替换后editor十字节、undo原文、saved与服务原文；两次Undo交换前端副本，Save成功后saved与服务十字节，Run失败不撤回保存
+  at: ../../../dev-log/graphics/17-editing.md#edit-state-model
+  establishes: 章首状态表沿同一次main.lua读取、十字节替换、两次Undo与Save追踪editor/undo/saved/服务正文；dirty比较工作文字与保存点，Run错误保留已保存内容
 - concept: 修改前校验、重叠移动与单步撤销
   at: ../../../dev-log/graphics/17-editing.md#edit-transaction
   establishes: 先验证输入与最终容量，后保存undo、删除选区、搬含NUL尾部、复制；ABCD在2插xy得到ABxyCD。
@@ -34,37 +34,24 @@ first_use:
 borrowed:
 - component: G12生成的八套字体数据
   usage: 按fonts.lock.json固定来源和轴，font_atlas.py生成字形覆盖率，u_text借用只读数组；前端不是新的字体引擎。
-feedback:
-- source: B12 编辑与服务各次状态复核
-  observation: 长段界面重贴隔开了修改、撤销、保存和观察；同一文件各副本在中途容易失去状态
-  revision: 以真实十字节输入追踪 editor、undo、saved 与服务记录，局部更新 paint/state，逐组解释观察程序每次操作的前后状态及重置边界
-- source: 用户本轮连续教程要求
-  observation: 基础语法、对象来源与状态寿命不能只由作者假设，界面应直接从新版设计逐步形成。
-  revision: 本章按同一个具体操作承接，旁注解释当前值与局部表达式，正文追踪跨函数状态；共享字段在实际消费者出现时加入。
 not_inferred: 已生成文档、运行观察通过、注释覆盖或前文已解释都不记录为已掌握；共享画像明确经历与本章解释范围分别维护。
 source_reading:
 - concept: 修改前校验、重叠移动与单步撤销
   at: ../../../dev-log/graphics/17-editing.md#edit-transaction
   establishes: 先验证输入与最终容量，后保存undo、删除选区、搬含NUL尾部、复制；ABCD在2插xy得到ABxyCD。
-  status: 本版就地解释；不推断读者已掌握
 - concept: 保存成功后更新提交点与失败保留
   at: ../../../dev-log/graphics/17-editing.md#save-transition
   establishes: 仅服务true时刷新、复制saved、清dirty；失败保留editor与saved差异。pending_close在成功或失败出口消耗。
-  status: 本版就地解释；不推断读者已掌握
 - concept: 局部错误数组转为持久反馈副本
   at: ../../../dev-log/graphics/17-editing.md#dialog-lifetime
   establishes: dialog_title/text/input复制入desktop，局部error寿命结束后下一帧仍读取独立数组；错误框最后盖过窗口。
-  status: 本版就地解释；不推断读者已掌握
 - concept: 按实际正文裁剪显露光标
   at: ../../../dev-log/graphics/17-editing.md#code-frontend-core-editing-c-3
   establishes: u_window_body先去48px标题及边框；高度扣88px正文起点和30px裁剪，宽度按项目栏与72px行号边距计算。800×400窗口十行输入与400px宽31个A均用实际19px竖线观察。
-  status: 本版就地解释；不推断读者已掌握
 - concept: 按键接收者、字段输入与多行输入
   at: ../../../dev-log/graphics/17-editing.md#key-routing
   establishes: 先判断dialog/focus/active；同一个键仅送当前接收者。UI_SAVE_KEY不是字符S，先选择操作语义再修改状态。
-  status: 本版就地解释；不推断读者已掌握
 - concept: 应用接口随实际消费者增长
   at: ../../../dev-log/graphics/17-editing.md#code-frontend-apps-internal-h-1
   establishes: 错误框首次持有独立数组，ui_app_dialog才成为当前应用接口；函数复制局部输入而不借用其寿命。
-  status: 本版就地解释；不推断读者已掌握
 route_note: 知识与源码按requires承接：G11依赖K11，G24额外依赖K13；Git的gui分支则与main共享00根，只加入自身路径。两条学习路线可交替。已有解释只在所列范围内承接，不记录为已掌握。
