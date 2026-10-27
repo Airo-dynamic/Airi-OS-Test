@@ -17,9 +17,9 @@ REQUEST static volatile struct limine_bootloader_info_request loader_request = {
     .id = LIMINE_BOOTLOADER_INFO_REQUEST_ID};  // 按引导器身份类别填写此请求 id
 REQUEST static volatile struct limine_paging_mode_request paging_request = {  // 请求并限制虚拟地址翻译使用的页表层数
     .id = LIMINE_PAGING_MODE_REQUEST_ID,     // 协议标识说明这项请求针对页表模式
-    .mode = LIMINE_PAGING_MODE_X86_64_4LVL,  // 首选四级模式，本项目按该模式理解地址
-    .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,   // 不接受超过四级的模式，保护固定布局前提
-    .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL};  // 不接受低于四级的模式，三项共同限制为四级
+    .mode = LIMINE_PAGING_MODE_X86_64_4LVL,  // 修订0以首选四级作为模式上界，下界为架构最低四级
+    .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,   // 显式上界字段从请求修订1起生效，本请求修订0忽略此字段
+    .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL};  // 显式下界也属于修订1，本次下界由协议的架构最低模式给出
 __attribute__((used, section(".limine_requests_end"))) static volatile uint64_t request_end[] =  // 保留放到结束标记节的静态数组
     LIMINE_REQUESTS_END_MARKER;  // 固定结束字节告诉引导器请求区在哪里结束
 extern char __kernel_start[], __kernel_end[];  // 声明链接脚本给出的两个地址标签，不在 C 中创建数组

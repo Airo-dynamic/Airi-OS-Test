@@ -1,10 +1,14 @@
 # 07 · 把 ELF 放入 UEFI 镜像并看到第一行
 
-已有内核 ELF，尚未有机器装载它。本章把载荷放进启动介质，交给 OVMF，再等待内核发送 `_start → C → UART` 的标记。主机的编译文件、介质的目录与固件实际读取的启动映像需要分清，否则同名 EFI 文件容易造成装载关系的误判。
+<a id="boot-medium"></a>
 
-ISO 表示光盘文件与启动信息，QEMU 把它当虚拟光盘。主机 `build/normal/airios.elf` 会复制到其中的 `/boot/airios.elf`，配置引用后者；guest 不会按这条路径去打开 Mac 工程目录。
+上一章已经链接出完整内核文件。现在要把它送进第 02 章建立的启动路径：主机制作介质，QEMU 将介质接到虚拟 PC，OVMF 启动 Limine，Limine 再装载这份内核。最终由 `_start → C → UART` 的实际输出确认各次交接已经发生。
 
-本次 UEFI 光盘入口由 xorriso 登记的 `limine-uefi-cd.bin` 提供。它内部已有一份 FAT 文件系统，包含 `/EFI/BOOT/BOOTX64.EFI`；OVMF 从该启动映像取得 EFI 程序。外层 ISO 也保存同名 EFI 路径，但不能据此把它当成这次光盘启动的直接读取来源。Limine 固定版本的[构建规则](https://github.com/Limine-Bootloader/Limine/blob/v12.9.2/GNUmakefile.in#L229-L246)明确先建立 FAT，再把 EFI 目录放入其中。
+介质采用 ISO 光盘映像，它是主机上的一个文件，保存虚拟光盘的目录、文件内容和启动信息。QEMU 把它接成 guest 的光盘后，固件和引导器读取的是这个介质。打包脚本会把主机的 `build/normal/airios.elf` 复制到介质内 `/boot/airios.elf`，后面的配置使用介质内路径。
+
+UEFI 还需要先找到可执行的引导程序。这里使用 Limine 已经制好的 `limine-uefi-cd.bin`：内部是一份 FAT 文件系统映像，按目录和文件记录保存着 `/EFI/BOOT/BOOTX64.EFI`。FAT 的目录结构让固件能够按路径找到 EFI 程序；其中的机器码才是随后运行的 Limine。
+
+xorriso 制作外层 ISO 时，将这份 bin 登记为 UEFI 光盘启动映像。OVMF 因而从 bin 内部取得 EFI 程序。脚本也会在外层 ISO 保存同名 EFI 路径，本次光盘入口的来源仍是已登记的 bin。Limine 固定版本的[构建规则](https://github.com/Limine-Bootloader/Limine/blob/v12.9.2/GNUmakefile.in#L229-L246)可以对应到这份预制内容：先建立 FAT，再放入 EFI 目录。
 
 EFI 程序开始运行以后，Limine 再找到介质上的 limine.conf，按配置读取外层 `/boot/airios.elf`，装入并跳到 `_start`。前一次装载启动引导程序，后一次装载自己的内核；编译 ELF 与打包介质分别为它们提供输入。
 
@@ -44,7 +48,7 @@ Make执行 `python3 scripts/image.py normal` 时，sys.argv[1]给出normal，out
 | 已展开的BOOTX64.EFI | EFI/BOOT/BOOTX64.EFI | 外层ISO保存的EFI文件 |
 | 已展开的limine-uefi-cd.bin | boot/limine/limine-uefi-cd.bin | 内含FAT与EFI程序，登记为本次光盘启动映像 |
 
-copyfile只复制现成字节，不会重新制作bin内部的FAT。xorriso随后消费整个staging目录，以mkisofs参数风格写出airios.iso；`--efi-boot`指向目录中的bin，登记UEFI启动信息。因而OVMF首先进入bin内部那份EFI程序，运行中的Limine才按外层配置取得内核。
+复制结束时，`staging` 仍是主机目录，bin 内部的 FAT 则保持外部材料的原字节。xorriso 随后消费整个目录树，以 mkisofs 参数风格写出 `airios.iso`；`--efi-boot` 指向目录中的 bin，将它登记为 UEFI 启动映像。这样，介质上的启动信息、Limine 配置和内核文件才共同具备下一次装载所需的位置关系。
 
 所有路径仍各占argv的一项。脚本打印Image时，完成的是主机磁盘上的镜像文件，尚未启动QEMU或执行内核。
 
@@ -88,7 +92,9 @@ print(f'Image: {out/"airios.iso"}')  # 打印实际生成的主机镜像路径�
 
 <a id="qemu-machine"></a>
 
-机器固定为 q35 主板、qemu64 CPU、单 CPU、256 MiB，采用 TCG 将 guest 指令翻译为主机操作，所以 Apple Silicon 也能运行 x86-64 内核。cdrom 选择新 ISO，boot d 优先光盘；pflash 两份 drive 分别放只读固件 code 与本轮可写 vars 副本，参考固件保持不变。
+机器固定为 q35 主板、qemu64 CPU、单 CPU、256 MiB。主板型号决定当前可用的设备和连线，CPU 型号决定暴露的指令能力；TCG 将 guest 指令翻译成主机可执行的操作，所以 Apple Silicon 也能运行这份 x86-64 内核。`cdrom` 连接新 ISO，`boot d` 让固件优先尝试光盘。
+
+固件另由两份 `pflash` drive 提供。这里 pflash 模拟保存固件的 Flash 内容，code 放第 02 章校验过的只读机器码，vars 则采用本轮新复制的可写变量区。QEMU 创建机器后，虚拟 CPU 先执行这些固件代码；ISO 中的 Limine 直到 OVMF 完成启动选择后才运行。每轮复制 vars 使一次启动对变量的修改留在本轮目录中。
 
 **新建 `scripts/first_boot.py`，先准备本轮文件和QEMU参数：**
 
@@ -153,16 +159,20 @@ with (work / 'qemu.log').open('w') as errors:  # 打开 QEMU 自身诊断文件�
 
 材料沿用第 02 章锁定版本。先执行 image，Make 会先满足 ELF 依赖，再打包本轮 ISO；随后 first_boot 才启动机器并等待设备输出。两步任一失败都不能用已有文件或旧标记替代。
 
+命令块在独立的 `sh -eu` 中顺序执行，任一构建或检查失败都会结束这次 shell，后面的命令不会消费旧产物。外层 SH 与内层 PY 各自关闭完整程序，保留它们所在的独占行。
+
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 本次构建成功后才继续检查或启动；失败时结束独立shell
 PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开
 import subprocess  # 启动主机工具，取得退出状态或保存进程对象
 from tools import make_command  # 取得指向当前工具和目标的 Make 参数列表
 subprocess.run(make_command(target='all'), check=True)  # 按当前源文件生成 ELF 与 ISO；任一步非零退出停止此观察
 PY
 python3 scripts/first_boot.py  # 启动本轮虚拟机并等待完整串口标记，成功或失败后都回收进程
+SH
 ```
 
 应收到 `[AIRI_LESSON_READY] _start -> C -> UART`。它位于 C 入口的成功分支，说明本次已装入载荷、建立栈、进入 C 并通过 UART 送出记录，而不是仅仅成功生成了 ISO。

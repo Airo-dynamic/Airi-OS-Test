@@ -31,18 +31,4 @@ first_use:
 borrowed:
 - component: QEMU的QMP和字符设备socket
   contract: QMP模拟键盘或继续CPU，UART连接交接设备字节；两条主机连接均不向guest传Python对象
-feedback:
-- source: 2026-10-15独立教程审查
-  observation: 完整记录要求仅在boot.check成立，console等待原先只匹配子串。
-  revision: console等待完整换行，去确定提示符和CRLF后精确比较命令字段；READY按独立标记加空格边界接受字段。
 not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/12-boot-tests.md#qmp-channel
-  establishes: 一次请求用发送前 offset 与新计数关联完成，QMP 控制和 UART 数据分别建模；正常/拒绝成功含义、JSON 分帧、端点与进程寿命完整保留。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/12-boot-tests.md#console-observation
-  establishes: 将路径准备、连接、累计读取、完整等待、实际输入和清理就近分块，沿真实PS2的mem调用绑定text/expect和外层commands，保留UART同一完成条件与独立资源寿命。

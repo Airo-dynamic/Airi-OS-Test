@@ -2,11 +2,17 @@
 
 <a id="boot-materials"></a>
 
-工具已经选好，但编译得到内核文件以后，还没有任何程序负责把它装入虚拟机器。QEMU 启动后先执行固件，固件按 UEFI 接口找到启动介质中的 EFI 引导程序，后者才装入内核、建立早期映射并跳转到入口。本项目先借用 OVMF 固件和 Limine 引导程序，内核代码仍由后续章节实现。
+上一章已经选好了编译工具。它们以后会把 C 和汇编源文件变成内核文件；接下来还需要一条启动路径，让虚拟 CPU 真正执行其中的指令。
 
-因此主机准备脚本要交出三类用途不同的材料：Limine 的可执行文件和光盘启动映像，编译时读取的 C 协议头，以及虚拟机器启动时执行的 OVMF 固件。协议头只有结构与常量声明，不会执行装载。它们会分别进入编译命令、启动介质或 QEMU 参数，不能仅凭文件都在 third_party 中就当成同一种依赖。
+平时在 Mac 上运行程序，已有的操作系统负责读取可执行文件、准备内存并进入程序。现在要运行的程序本身就是内核。它开始执行以前，装载工作需要由先运行的程序完成。CPU 复位后从体系结构规定的入口取指，机器预先保存的启动软件从这里接手；这类随机器提供的软件称为固件。QEMU 模拟 PC 硬件，我们还要为这台虚拟 PC 提供实际可执行的固件内容。
 
-同一个文件名也可能对应不同版本的字节。先固定 URL、版本和摘要，下载与复制都按同一组记录核对，后面的装载和响应格式才有确定输入。
+本项目采用 OVMF，它是适用于虚拟机器的 UEFI 固件实现。UEFI 规定固件向启动程序提供的接口和装载约定。OVMF 先初始化启动所需的环境，再从启动介质找到 EFI 可执行程序并运行它。这份 EFI 程序采用 Limine：它是独立于内核的引导程序，负责读取内核文件，安排代码和数据的内存位置，建立早期地址映射，最后进入内核入口。
+
+这段分工让固件提供通用的启动环境，由引导器处理内核采用的文件格式与交接协议。进入内核时，Limine 还会留下内存地图等启动数据；内核适配代码读取这些描述，再逐步建立自己的内存管理和设备服务。第 05 章先设计自有启动描述，第 06–08 章把这条路径实际接通。
+
+因此准备脚本要取得三类材料：虚拟机器首先执行的 OVMF 固件、随后执行的 Limine 引导程序，以及编译内核适配代码时读取的 C 协议头 `limine.h`。协议头声明双方约定的数据布局和标识常量；真正装载内核、填写响应的是运行中的 Limine。光盘启动还需要它提供的启动映像，第 07 章会把这些文件放进介质。
+
+同一个文件名可能对应不同版本的字节。先固定 URL、版本和摘要，下载与复制都按同一组记录核对，后面的装载和响应格式才有确定输入。
 
 ## 锁文件描述材料，脚本据此取得真实文件
 
@@ -62,7 +68,7 @@
 
 取得 URL 还不够，下载内容需要与 sha256 比较。SHA-256 消费文件的完整原始字节，给出固定长度摘要；期望摘要来自锁文件，实际摘要由脚本重新计算。文本读取用于解释 JSON，`read_bytes()` 用于核对材料身份，文件名和版本打印文字都不能代替字节检查。
 
-检查也分两层：limine.sha256 核对整个归档，files 再核对展开后的 BOOTX64.EFI 与 CD 启动映像。protocol 的 commit 固定声明版本，url 定位头文件，sha256 核对返回内容。qemu_reference_version 提供寻找固件的参考版本，两条固件记录中的摘要才是最终采用条件。
+归档与缓存分别检查：limine.sha256 核对本次展开所用的完整归档，files 中的摘要判断已有 BOOTX64.EFI 与 CD 启动映像能否复用；需要重新展开时，输入由归档摘要固定。protocol 的 commit 固定声明版本，url 定位头文件，sha256 核对返回内容。qemu_reference_version 提供寻找固件的参考版本，两条固件记录中的摘要才是最终采用条件。
 
 图形字段的 manifest 指资产清单，atlas 指生成的 C 像素数组，atlas_sha256 核对其内容，generator 记录生成工具；选择图形支线后才消费它们。材料的来源与许可另保存在 `THIRD_PARTY.md`。
 
@@ -209,28 +215,40 @@ OVMF 的 code 是只读机器码，vars 是可写变量的初始映像。候选�
 
 传输失败会在临时文件校验和解包之前停止，先前经过校验的正式缓存仍可保留。修复网络后运行同一准备命令，版本与摘要不随网络失败改变。需要代理时可在 shell 中设置 HTTPS_PROXY，curl 子进程继承它；参考环境的 `export HTTPS_PROXY=http://127.0.0.1:7897` 指本机 7897 端口，其他电脑应采用自己的实际通路。代理只改变传输，不改变摘要条件。
 
-运行块中的 source 指向参考工程 `/Users/bilibili/Desktop/AiriOS/third_party/firmware`。先从这里取得锁定的两份外部固件机器码，再调用学习工程自己刚写好的 prepare。若目标正是参考工程本身，路径比较会跳过自复制；source 不存在时也不复制，prepare 随后按候选目录寻找匹配固件。Limine 归档与协议头仍按 URL 获取，复制来的固件也仍须通过摘要检查。
+<a id="firmware-inputs"></a>
+
+QEMU 的固定源码版本也保存了本章所需的两份压缩固件。下面从 `qemu/qemu` 的 `v11.1.2/pc-bios` 取得它们，展开后的字节须与刚写好的锁文件一致。这个来源不依赖作者的电脑，也不要求本机软件包恰好附带相同固件；来源与许可见 [外部材料](../THIRD_PARTY.md)。
+
+`curl -o` 保存压缩文件，`bzip2 -dc` 解压并将原始字节写到标准输出，shell 的 `>` 再把它们存入 `.download` 临时路径。bzip2 是 macOS 自带工具，Linux 需要安装 `bzip2` 包，传输仍需 curl。随后 Python 沿用已经写好的 digest，按锁文件核对解压后的完整内容；相符才用 replace 放入正式缓存，prepare 再继续取得 Limine、协议头并确认固件。
+
+整个运行块交给独立的 `sh -eu`。`-e` 使未处理的失败立即结束这次 shell，`-u` 拒绝未定义变量；两条 SH 标记之间的命令由这个 shell 按顺序运行。传输、解压或摘要失败都会停在 prepare 以前，终端本身仍可继续使用。`<<'SH'` 的引号使外层 shell 将这些内容原样交入，内层的 PY 则界定那段 Python 程序。
 
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
-PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开
-from pathlib import Path  # 将文件名包装为可拼接、可读取的路径对象
-import shutil  # 复制文件及移除旧的打包目录树
-from tools import ROOT  # 取得这份学习工程的绝对根路径
-# 固件是外部二进制材料；仅从已校验的参考缓存取得这两份，不复制任何项目源码。
-source = Path('/Users/bilibili/Desktop/AiriOS/third_party/firmware')  # 参考工程中只有这两份外部固件可借用，项目源码仍手敲
-if source.is_dir() and source.resolve() != (ROOT / 'third_party/firmware').resolve():  # 仅从另一个已存在目录借用外部固件，避免把同一文件复制到自己
-    target = ROOT / 'third_party/firmware'  # 本次学习工程的固件目录，与参考缓存不同
-    target.mkdir(parents=True, exist_ok=True)  # 建立目标固件目录，允许已有缓存
-    for name in ('edk2-x86_64-code.fd', 'edk2-i386-vars.fd'):  # 元组限定可复制的两个外部文件名
-        shutil.copyfile(source / name, target / name)  # 将当前固件字节放入学习目录，prepare 仍会重新校验
-from deps import prepare  # 取得刚写好的材料准备函数，不在 import 时自动准备
-print('Limine', prepare()['limine']['version'])  # 全部准备成功才从返回字典取出版本，打印 Limine 12.9.2
+sh -eu <<'SH'  # 在独立shell中连续准备；任一步失败即停止后续操作
+mkdir -p third_party/firmware  # 为两份外部固件准备缓存目录
+curl -fL --retry 3 https://raw.githubusercontent.com/qemu/qemu/v11.1.2/pc-bios/edk2-x86_64-code.fd.bz2 -o third_party/firmware/edk2-x86_64-code.fd.bz2  # 取得固定版本的固件代码压缩文件
+curl -fL --retry 3 https://raw.githubusercontent.com/qemu/qemu/v11.1.2/pc-bios/edk2-i386-vars.fd.bz2 -o third_party/firmware/edk2-i386-vars.fd.bz2  # 取得同版变量区初值
+bzip2 -dc third_party/firmware/edk2-x86_64-code.fd.bz2 > third_party/firmware/edk2-x86_64-code.fd.download  # 展开代码到待校验文件
+bzip2 -dc third_party/firmware/edk2-i386-vars.fd.bz2 > third_party/firmware/edk2-i386-vars.fd.download  # 展开变量初值到待校验文件
+PYTHONPATH=scripts python3 - <<'PY'  # 将以下完整程序交给学习工程的Python
+import json  # 读取两份固件的期望摘要
+from tools import ROOT  # 取得当前学习工程的稳定根目录
+from deps import digest, prepare  # 使用本章自己写好的摘要与材料准备函数
+lock = json.loads((ROOT / 'config/deps.lock.json').read_text())  # 将锁文件转为嵌套字典
+for item in lock['firmware']:  # 每次处理一份含名称和摘要的固件记录
+    target = ROOT / 'third_party/firmware' / item['name']  # 形成正式缓存路径
+    temporary = target.with_suffix(target.suffix + '.download')  # 定位刚展开的待校验字节
+    if digest(temporary) != item['sha256']:  # 与锁文件比较完整原始内容
+        raise RuntimeError(f"firmware SHA-256 mismatch: {item['name']}")  # 摘要不符时结束，不发布错误固件
+    temporary.replace(target)  # 仅将已匹配的文件放进正式缓存
+print('Limine', prepare()['limine']['version'])  # 其余材料也准备成功后才打印版本
 PY
+SH
 ```
 
-出现 `Limine 12.9.2`，意味着这次 prepare 已经走完引导文件、协议头与两份固件的准备，而不是只读到了版本字段。若固件未缓存，程序会寻找本机 QEMU 的 share 目录；发行版固件字节可能不同，没有符合项就仍需把锁定文件放进 `third_party/firmware/` 后重跑。
+出现 `Limine 12.9.2`，表示两份公开来源固件已按锁文件核对，prepare 也完成了引导文件与协议头的准备。后续 prepare 会复用这些已校验缓存；重新执行上面的完整命令会重新取得并核对同一固定版本。失败时保留的压缩包和临时文件都还不是成功材料，按报错修复网络、工具或来源后重跑本块。
 
 固定协议声明见 [Limine 协议](https://github.com/Limine-Bootloader/limine-protocol/blob/3a0526b700e356f0eac1b71a77697b3fd1c707a3/PROTOCOL.md)。到这里准备的是以后装载内核的环境，还没有自己的内核入口。接下来先实现字节操作与格式化：它们先由主机观察入口调用，之后再进入同一工程构建的内核。

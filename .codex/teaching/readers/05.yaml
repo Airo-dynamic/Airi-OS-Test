@@ -12,39 +12,16 @@ already_explained:
 first_use:
 - concept: 内存地图与地址映射
   at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
-  establishes: 地图描述不是范围内字节；HHDM别名与内核链接虚拟起点可以对应同一物理内容，主机夹具只检查整数不安装映射
+  establishes: 读取regions条目得到物理起点整数；实际访存使用当前有效虚拟映射，HHDM别名与内核链接虚拟地址可以对应同一物理内容；主机夹具只检查记录
 - concept: 启动结构与帧缓冲
   at: ../../../dev-log/core/05-boot-contract.md#boot-layout
   establishes: 自有ABI按固定位置和宽度保存地图与可选显示；boot_validate不调用framebuffer_valid，缺少图形仍可验证必需数据
 borrowed: []
-feedback:
-- source: author independent replay/review, not a reader mastery test
-  observation: 独立复敲发现复合字面量/指定初始化前提缺失，已就地主体说明值对象、零初始化与复制。
-- source: 作者全文顺读，响应用户对主线和语言的反馈
-  observation: 交接结构、检查条件与内存观察需要从同一数据格式展开。
-  revision: 先定义地址和容量，再用相邻两个区域分别演示合法与拒绝路径。
 not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
 source_reading:
 - concept: 像素跨度与颜色位掩码
   at: ../../../dev-log/core/05-boot-contract.md#code-kernel-boot-info-c-1
   establishes: width 乘像素字节数不能超过 pitch；height 乘 pitch 先核对乘法范围；三个颜色掩码的位数和起点不能超过像素宽度
-  status: 本版就地解释；不推断读者已掌握
 - concept: 地图数量与物理范围溢出
   at: ../../../dev-log/core/05-boot-contract.md#code-kernel-boot-info-c-2
   establishes: 有效区域循环以 region_count 为终点；先用最大整数减长度核对 base 加 length，拒绝超出可表示范围的地址
-  status: 本版就地解释；不推断读者已掌握
-
-prose_revision:
-  date: 2026-10-24
-  establishes: 先字段和范围校验，再在验证器内部统计usable；外部消费者等待完整验证成功。地图观察完成后独立处理显示检查。
-  feedback: 独立审阅指出显示实现打断地图状态链，已改为先完成地图和观察入口再精确插入显示函数；实现字节不变。
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/05-boot-contract.md#memory-addresses
-  establishes: 保留已认可完整稿，复查其与新 04/06/08 的交接。两段地图、地址别名、验证内部统计、独立显示检查和主机观察仍完整成立。
-
-followalong_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/05-boot-contract.md#boot-layout
-  establishes: 显示字段首次出现前解释地址借用、像素/字节单位与通道位；地图验证和四状态观察先闭合，可选显示检查保留独立作用，内部统计与外部使用顺序分清。

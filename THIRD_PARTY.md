@@ -11,7 +11,7 @@
 
 ## QEMU 与 OVMF
 
-验证版本：QEMU 11.1.2。固件来自该版本 Homebrew QEMU 包中的 edk2-x86_64-code.fd 和 edk2-i386-vars.fd，SHA-256 分别锁定。
+验证版本：QEMU 11.1.2。固件最初取自该版本 Homebrew QEMU 包中的 edk2-x86_64-code.fd 和 edk2-i386-vars.fd，SHA-256 分别锁定。可复现取得方式见第 02 章：从 QEMU 固定标签的 [代码压缩映像](https://github.com/qemu/qemu/blob/v11.1.2/pc-bios/edk2-x86_64-code.fd.bz2)与[变量区压缩映像](https://github.com/qemu/qemu/blob/v11.1.2/pc-bios/edk2-i386-vars.fd.bz2)解压，所得内容与锁文件逐字节摘要匹配。该方式只取得同版外部固件，不改变内核或工具实现。
 
 QEMU 为 GPL-2.0；EDK2/固件组件的许可集合复制在 third_party/edk2-licenses.txt。本仓库不将引导器与固件二进制作为自制内核源码提交。
 

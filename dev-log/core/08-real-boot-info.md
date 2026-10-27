@@ -6,13 +6,25 @@
 
 ## 请求先成为 ELF 中的记录，引导器在 C 执行前写回
 
-先沿 memory_request 看数据如何进来。它是一份编译进 ELF 的静态结构，id 标明需要内存地图，response 留给引导器填写。初始化只指定 id，未指定成员置零，因此编译完成时 response 仍为空；这里没有网络发送或内核线程等待。
+要取得本次地图，先在内核文件中留下引导器能识别的需要。`memory_request` 是 C 源码引用这份静态对象的名字，它的 `id` 保存四个固定的 64 位整数，用来标识内存地图请求。`LIMINE_MEMMAP_REQUEST_ID` 在编译前展开为这组初始化值；未指定的 `response` 初值为零，等待装载阶段填写。
 
-Limine 装入 ELF 后，按协议找到请求，为本次机器准备响应，并将地址写入装入内存的 `memory_request.response`。这发生在跳到 `_start` 之前，改变的是内存对象，不是把主机磁盘 ELF 改写了一遍。汇编建栈后进入 airi_limine_start，C 才能沿该指针取得地图。
+第 06 章已经建立标记区和修订检查，现在把实际请求记录放进同一个区域。起止标记本身是固定字节序列，链接脚本按起点、请求、终点排列。Limine 装入 ELF 后，在内存映像中识别这些记录，为本次启动建立响应，再把响应地址写入 `memory_request.response`。随后才进入 `_start`，汇编建立自己的栈，C 入口开始读取。磁盘上的 ELF 仍保留原来的初值。
 
-地图描述物理范围，访问时还需要直接映射偏移；内核装载地址与链接地址也由独立请求取得。页表模式请求限制为四级，本章只沿用已有映射，不安装新页表。可选显示与引导器名称各有自己的请求。
+一项内存地图请求会得到以下形状。响应对象保存数量和条目指针数组，每个数组元素再指向一条区域描述：
 
-第 06 章的链接脚本已经用 KEEP 按起点、请求、终点收集节。这里 section 选择输入节，used 保留对象，volatile 让 C 按实际存储读取外部填入的状态；REQUEST 宏只是共用属性的简写。基础修订仍为 6，并将在入口检查支持结果。
+```text
+memory_request.response → 响应对象
+                           entry_count = N
+                           entries → [条目指针0, 条目指针1, …]
+                                         ↓
+                                   {base, length, type}
+```
+
+`entries[i]` 先取得第 i 条描述的指针，`entries[i]->base` 才读取物理起点。响应和条目指针使用启动环境中已经有效的虚拟地址，base 字段保存的是所描述范围的物理地址整数。内核还会用独立请求取得 HHDM 偏移和自身的物理、虚拟起点，才能把这些地址关系写入自有接口。
+
+这里继续要求基础修订 6；它选择整套交接的行为。请求结构自己的 `revision` 则描述该种记录的修订，本次没有显式指定，随静态初始化取零。两者与第 02 章的引导程序发布版本 12.9.2 分别处理。页表模式请求也采用记录修订 0：按协议，mode 给出上界，下界采用 x86-64 的最低模式，两者在这里都是四级。结构中仍填写 max_mode/min_mode，但这两个显式字段要到请求修订 1 才参与选择。可选显示和引导器名称也各有自己的请求。
+
+沿同一个 `memory_request` 看构建过程：`used` 使编译器输出对象，`section` 将它放入 `.limine_requests` 输入节，第 06 章的 `KEEP` 保留这些节并排好扫描范围。随后 `volatile` 约束 C 对外部写回状态的访问。`REQUEST` 宏只是共用属性的简写。下面先保留整组请求，再建立转换方法和读取入口。
 
 **完整替换 `kernel/boot/limine.c`。** 先写请求声明，再继续追加转换与入口；旧入口已移除，全部追加结束后再构建。汇编入口和链接脚本保留。
 
@@ -39,18 +51,18 @@ REQUEST static volatile struct limine_bootloader_info_request loader_request = {
     .id = LIMINE_BOOTLOADER_INFO_REQUEST_ID};  // 按引导器身份类别填写此请求 id
 REQUEST static volatile struct limine_paging_mode_request paging_request = {  // 请求并限制虚拟地址翻译使用的页表层数
     .id = LIMINE_PAGING_MODE_REQUEST_ID,     // 协议标识说明这项请求针对页表模式
-    .mode = LIMINE_PAGING_MODE_X86_64_4LVL,  // 首选四级模式，本项目按该模式理解地址
-    .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,   // 不接受超过四级的模式，保护固定布局前提
-    .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL};  // 不接受低于四级的模式，三项共同限制为四级
+    .mode = LIMINE_PAGING_MODE_X86_64_4LVL,  // 修订0以首选四级作为模式上界，下界为架构最低四级
+    .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,   // 显式上界字段从请求修订1起生效，本请求修订0忽略此字段
+    .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL};  // 显式下界也属于修订1，本次下界由协议的架构最低模式给出
 __attribute__((used, section(".limine_requests_end"))) static volatile uint64_t request_end[] =  // 保留放到结束标记节的静态数组
     LIMINE_REQUESTS_END_MARKER;  // 固定结束字节告诉引导器请求区在哪里结束
 ```
 
-请求已能让引导器提供外部对象，内核主函数却需要自己的接口。静态 boot_info 在整个内核运行期间存在，适配层将地图数值与名称写进去，随后交出它的地址。这样主函数不用继续识别 Limine 的类型。
+请求声明已经给出外部数据的入口。接下来准备接收转换结果的静态 `boot_info`：它在整个内核运行期间存在，地图条目和名称保存到它自己的数组中。最后交给主函数的就是这份对象的地址，第 05 章的验证器和统计函数也继续读取自有格式。
 
 内核跨度由链接标签 `__kernel_start/end` 给出。extern 数组声明只让 C 引用这些地址，不另创建数组；分别转 uintptr_t 再求整数差，得到包含 BSS 的虚拟跨度，不读取范围中的内容。两个标签不是同一 C 数组的元素，这里依赖固定目标的平坦地址表示，不套用一般数组内指针相减。
 
-memory_kind 再将外部用途常量转换为自有枚举。未识别的用途统一保留，不猜作空闲 RAM。结果对象和转换方法准备好，入口才能逐项组装。
+两套格式的用途编号分别定义。`memory_kind` 根据 Limine 的 `type` 选择 AiriOS 的 `kind`：例如引导器标为 usable 的范围转为 `AIRI_MEMORY_USABLE`，标为 bootloader reclaimable 的范围转为 `AIRI_MEMORY_BOOT_RECLAIM`。未识别的用途统一转为保留范围。先写出这些转换，入口逐项复制时才有明确规则。
 
 **追加到 `kernel/boot/limine.c` 末尾：**
 
@@ -85,9 +97,9 @@ static uint32_t memory_kind(uint64_t raw) {  // 把外部协议用途值转换�
 
 ## 入口先核对能否读取，再复制必需描述
 
-入口先初始化串口，使失败也能报告，再读取memory_request.response。memory指向响应结构，其中entries指向条目指针数组，entry_count说明有几项。检查从外向内进行：先确认memory，再确认数组和非零数量；数量不超过128，才允许后面存入自有数组并缩窄为uint32_t。测试宏只把本次局部memory置空，观察缺地图这条分支。
+汇编进入 C 时，装载阶段已经完成，先初始化串口，使后续拒绝路径也能报告。读取 `memory_request.response` 后，局部 `memory` 借用那份响应。检查沿刚才的数据形状从外向内进行：确认响应指针，再确认 entries 数组和非零数量；数量不超过 128，才允许存入自有固定数组并缩窄为 `uint32_t`。
 
-直接映射偏移、内核装载位置与四级页表响应也是必需输入；缺少任一项就停机。通过这组检查只说明可以开始读取和转换，区域本身是否重叠、溢出或没有usable，仍由自有验证器随后判断。
+缺地图测试在这里把局部 memory 置空，随后走同一个拒绝分支。直接映射、内核位置和四级页表响应也都是自有描述的必需输入，缺少时立即报告并停机。这一轮检查决定能否开始转换；转换后的区域还要交给第 05 章的验证器，检查重叠、溢出和可用 RAM 等内容。
 
 **追加入口的串口初始化与响应检查，后面继续接组装过程：**
 
@@ -117,9 +129,9 @@ _Noreturn void airi_limine_start(void) {  // 汇编 call 进入的 C 入口，�
 
 <a id="boot-lifetimes"></a>
 
-现在必需响应已存在，适配层把数值复制到静态boot_info。识别值、版本和size来自自有格式；HHDM偏移与两种内核起点来自各自响应；kernel_size用前面的链接标签地址整数差求出。引导器名称与版本经限容格式化进入自己的loader数组，可选身份响应缺失时采用备用文字。
+现在各份必需响应都可以读取，适配层开始形成自有副本。识别值、版本和 size 来自 `AiriBootInfo` 的格式约定；HHDM 偏移与两种内核起点来自各自响应；kernel_size 用前面的链接标签地址整数差求出。引导器名称与版本经限容格式化进入自己的 loader 数组，可选身份响应缺失时采用备用文字。
 
-地图要再沿entries取一次指针。`memory->entries[i]`是第i项的地址，先检查它非空，再用 `->base/length/type`读取所指描述。起点、长度和转换后的用途写入boot_info.regions[i]，指定成员初始化使未列出的保留字段为零。复制的是区域元数据，没有搬动该范围的RAM；后续日志与验证从这个自有数组读取。
+地图循环每次沿 `memory->entries[i]` 取得一个条目指针，先检查它非空，再读取 base、length、type。base 和 length 复制到 `boot_info.regions[i]`，type 经 `memory_kind` 转成自有 kind；指定成员初始化使保留字段置零。结果数组保存范围的描述，没有搬动这些范围内的 RAM。
 
 **继续追加固定字段、名称与逐项地图复制：**
 
@@ -148,9 +160,11 @@ _Noreturn void airi_limine_start(void) {  // 汇编 call 进入的 C 入口，�
 
 必需副本已经形成，显示响应另行可选。代码依次检查响应、数量、数组和第一项指针，只适配RGB模式。no-framebuffer宏略过这整段，静态framebuffer保持零，必需地图仍可使用。
 
-这里也复制地址、尺寸、pitch与颜色布局，但像素仍留在原显示内存。raw.address是引导器已经映射的虚拟地址，按本次direct_map_offset求对应物理起点；复制这个数值不会建立映射。当前保留引导页，绘图对原映射和像素范围的借用也继续保留。
+显示副本保存地址、尺寸、pitch 与颜色布局，像素仍留在原显示内存。`raw->address` 是已经映射的虚拟地址，按本次 `direct_map_offset` 减去偏移得到对应物理起点；以后的绘图仍使用虚拟地址字段。
 
-组装结束后，`airi_kernel_main(&boot_info)`按普通C ABI经RDI交出静态对象地址，仍在同一内核调用链中。四级响应只限定本次地址模型，本章尚未自行管理四层页表。
+复制完成后，地图数值由 `boot_info.regions` 自己持有，运行环境还有独立的保留责任：CPU 此时仍使用 Limine 建立的页表，显示访问也借用既有映射和原像素范围。因此引导器可回收区域继续保留，等内核有了明确的替换与回收过程再处理。
+
+最后，`airi_kernel_main(&boot_info)` 按普通 C ABI 经 RDI 交出静态对象地址，仍处于同一内核调用链。主函数接下来验证的，是刚才这一轮真实响应形成的自有副本。
 
 **最后追加可选显示与主函数交接，闭合入口：**
 
@@ -188,7 +202,7 @@ info 借用静态 boot_info，不是入口临时数组。主函数先调用 airi
 
 日志的 `%llu/%llx` 要求 unsigned long long，64 位字段先显式转为匹配类型，不能仅因位宽相同就忽略变参类型。内核位置、HHDM 和各区域因此都沿本次副本打印。
 
-例如某条 usable 长度为 0x4000，汇总就加入 16384；boot reclaim 另算，仍保留不给分配器。这里统计引导分类总量，尚未减去将来分配给任务的页面，也不是进程驻留内存 RSS。当前还没有实时空闲页池。
+假设本次某条 usable 长度为 `0x4000`，汇总就加入 16384 字节；这沿用第 05 章的统计规则，真实条目数量和长度则取自当前机器。boot reclaim 另算，继续保留。这里得到引导分类总量，等后面建立页面分配器以后，才另外记录哪些可用页已经借给调用者。
 
 **新建 `kernel/main.c`：**
 
@@ -248,16 +262,20 @@ SOURCES := kernel/boot/limine.c kernel/lib/base.c kernel/lib/runtime.c kernel/ar
 
 重新构建 ELF 和介质，再启动一次机器。观察脚本仍等待完整教学标记，标记之前的地址与地图则来自这次 Limine 响应。不能拿 05 的两项主机夹具或先前启动的日志代替本次数据。
 
+命令块在独立的 `sh -eu` 中顺序执行，任一构建或检查失败都会结束这次 shell，后面的命令不会消费旧产物。外层 SH 与内层 PY 各自关闭完整程序，保留它们所在的独占行。
+
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 本次构建成功后才继续检查或启动；失败时结束独立shell
 PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开
 import subprocess  # 启动主机工具，取得退出状态或保存进程对象
 from tools import make_command  # 取得指向当前工具和目标的 Make 参数列表
 subprocess.run(make_command(target='all'), check=True)  # 按当前源文件生成 ELF 与 ISO；任一步非零退出停止此观察
 PY
 python3 scripts/first_boot.py  # 启动本轮虚拟机并等待完整串口标记，成功或失败后都回收进程
+SH
 ```
 
 应依次出现 BOOT_INFO、KERNEL、HHDM、各项 MEMORY、MEMORY_SUMMARY 与完成标记，固件/引导器自身还可能先输出 BOOT 相关文字。区域数和地址由本次固件布局决定，不强行要求等于主机夹具。

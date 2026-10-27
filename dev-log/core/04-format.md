@@ -1,6 +1,6 @@
 # 04 · 在容量有限的数组里形成一行日志
 
-上一章能移动现有字节，内核中的状态值却常是整数。为了留下 `IO:123`，先要把 unsigned 值 123 转成字符，再与字符串 IO 和冒号连接。这里沿观察程序的实际调用 `airi_snprintf(text,5,"%s:%u","IO",123u)` 追踪：格式中有两个转换项，所以依次读取一个字符串指针和一个 unsigned，不能把相同输出当成只有 `%u` 的那条调用。
+上一章能移动现有字节，内核中的状态值却常是整数。为了留下一行 `IO:123`，需要把 unsigned 值 123 转成字符，再与字符串 IO 和冒号连接。观察程序将调用 `airi_snprintf(text,5,"%s:%u","IO",123u)`：`%s` 取出 IO，冒号按原样输出，`%u` 再把 123u 转成十进制文字。整个过程写入调用者给出的数组，设备发送在后面接上。
 
 ## 字符形成以后，才交给发送通路
 
@@ -87,7 +87,7 @@ static void number(struct output *o, uint64_t value, unsigned radix, unsigned wi
 
 airi_vsnprintf 建立输出记录以后，先沿 fmt 找到本次转换项。对 `"%s:%u"`，第一次跳过百分号，没有零填充宽度，也没有 l/ll/z 修饰，length 保持 NORMAL；`char spec=*fmt++` 取到 s，fmt 已移到后面的冒号。此刻尚未读取 `"IO"`，因为扫描格式和消费实参是两个动作。
 
-格式中的转换字母决定怎样解释这一项，例如 s 输出字符串、u 输出十进制无符号数、x 输出十六进制数。长度修饰 l/ll/z 则决定该按哪种整数类型取值，不是输出字符数；零填充宽度规定整数至少占多少个数位，不够才补零。这些区别分别保存在 spec、length、width 中。
+同一种整数可以按不同进制输出，同样的十进制输出也可能读取不同宽度的类型。因此解析器分别保存三项：转换字母 spec 选择字符串、十进制或十六进制等输出方式；length 根据 l/ll/z 选择取参类型；width 规定当前整数至少占多少位，不足时补零。这些状态都属于当前转换，目标数组容量仍由 cap 单独限制。
 
 `*fmt++` 先取当前位置再前移。对另一种 `%08x`，扫描先得到 width=8，再取到 spec=x；unsigned 值 0xab 因而输出为 `000000ab`。整数宽度限制到 64，畸形巨大输入也不会产生无界补零。普通字符直接交给 emit，不进入参数分支；残缺的末尾百分号会保留一个百分号后结束。
 
@@ -268,16 +268,20 @@ int main(void) {  // 主机 C 运行时调用此入口，返回值成为观察�
 
 分别把两个观察入口与同一基础库编译链接，再运行各自产物。主机 libc 只为观察入口提供 printf、strcmp 等服务；内核格式化实现没有因此获得主机输出能力，串口发送仍需后面接入。
 
+整个命令块交给独立的 `sh -eu` 执行。编译失败时立即结束，不会接着运行上一次留下的程序；结束行 `SH` 单独顶格输入。
+
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 构建失败便结束，不继续运行先前的主机产物。
 mkdir -p build  # 建立主机观察产物目录，已有目录也可继续
 cc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/tutorial/format.c kernel/lib/base.c  -o build/probe  # 把本轮观察源码和实现编译链接成指定主机可执行文件
 ./build/probe  # 运行刚生成的主机观察，非零退出表示实际结果不符
 mkdir -p build  # 建立主机观察产物目录，已有目录也可继续
 cc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/host/base/memmove_trace.c kernel/lib/base.c  -o build/memmove  # 把本轮观察源码和实现编译链接成指定主机可执行文件
 ./build/memmove  # 显示两个正确方向、错误循环和截断的实际结果
+SH
 ```
 
 第一项应显示 `stored=IO:1 required=6 capacity=5`。第二项显示正确右移 AABCD、左移 BCDEE、错误循环 AAAAA，以及 `cap=5 stored=abcd required=6`；全部比较通过后才有成功标记。

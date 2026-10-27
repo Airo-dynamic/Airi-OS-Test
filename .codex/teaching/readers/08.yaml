@@ -15,28 +15,13 @@ already_explained:
 first_use:
 - concept: 引导请求与响应
   at: ../../../dev-log/core/08-real-boot-info.md#boot-requests
-  establishes: 请求是内核 ELF 中的记录，Limine 按协议填响应；适配层再形成自有结构
+  establishes: 请求id为四个固定整数，装载后Limine写回response；entries是条目指针数组，base/length复制而type转为kind；基础修订与请求修订分别解释
 - concept: 启动信息的复制与借用
   at: ../../../dev-log/core/08-real-boot-info.md#boot-lifetimes
   establishes: 固定数组复制元数据，帧缓冲地址仍借用原像素；静态描述持续有效，使用地址依赖原映射
 borrowed: []
-feedback:
-- source: 作者全文顺读，响应用户对主线和语言的反馈
-  observation: 真实引导响应与自己的结构之间需要明确复制和借用关系。
-  revision: 沿 response 到 static boot_info 再到主函数；Make 的修改只在对应代码前解释。
 not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
 source_reading:
 - concept: 地址数值与借用内存
   at: ../../../dev-log/core/08-real-boot-info.md#boot-lifetimes
   establishes: 响应中的entries逐项取指针并检查后，地图描述复制到静态数组；framebuffer只复制布局与地址，仍借用引导器已映射像素
-  status: 本版就地解释；不推断读者已掌握
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/08-real-boot-info.md#boot-requests
-  establishes: memory_request 从 ELF 零指针到装入内存、引导器写回、C 读取，再进入静态自有副本。区分地图/名称复制与像素地址借用，验证后打印和分类统计保留。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/08-real-boot-info.md#boot-lifetimes
-  establishes: 先核对响应外层与数量，再就近复制字段/名称/地图，最后处理可选像素借用和交接；Make只精确替换SOURCES，不重复整份规则。

@@ -411,7 +411,7 @@ struct airi_trap_frame *airi_user_resume(struct airi_trap_frame *frame); // 检�
 ```asm
 TRAP 31 /* 保留向量。 */
 TRAP 32 /* 主PIC IRQ0对应的时钟入口，无硬件错误码。 */
-TRAP 255 /* 未使用的 IDT 项统一停止；可屏蔽中断仍关闭。 */
+TRAP 255 /* 未单独登记的 IDT 项进入统一停止入口。 */
 airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
 ```
 <!-- after -->
@@ -420,7 +420,7 @@ TRAP 31 /* 保留向量。 */
 TRAP 32 /* 主PIC IRQ0对应的时钟入口，无硬件错误码。 */
 TRAP 128 /* DPL3的AiriOS系统调用门。 */
 TRAP 129 /* DPL0启动/返回用户执行的内核门。 */
-TRAP 255 /* 未使用的 IDT 项统一停止；可屏蔽中断仍关闭。 */
+TRAP 255 /* 未单独登记的 IDT 项进入统一停止入口。 */
 airi_trap_common: /* CPU 现场和 vector/error 已形成。 */
 ```
 

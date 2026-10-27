@@ -31,18 +31,4 @@ first_use:
 borrowed:
 - component: 主机libc、ASan与UBSan
   contract: libc作为字节和格式化结果的对照，运行时检查只作用于主机程序，不替代guest设备验证
-feedback:
-- source: 2026-10-15独立教程审查
-  observation: K11缺少文件编辑范围，绘图调用被误写成前章已有，回调和Make条件只有概括。
-  revision: 从mem的同一UART路径展开占位实现、同步扩展和构建选择；明确全部文件完成后构建，旧观察器由K12取代。
 not_inferred: 已解释、敲完和运行成功不证明学习者掌握。
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/11-serial-build.md#display-selection
-  establishes: 以同一 mem 保留串口主线，链接时选显示定义；回调函数/数据指针和命令栈副本寿命分别解释。Make 条件只读取必要清单，主机检查不冒充设备证据。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/11-serial-build.md#command-extension
-  establishes: 保留成熟链接选择与同步回调模型，接口及输出改名用精确旧新窗口落地；主入口、构建和四组主机检查按完整动作分块，持续接住同一会话。

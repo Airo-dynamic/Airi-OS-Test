@@ -157,13 +157,17 @@ int main(void) {  // 主机 C 运行时调用此入口，返回值成为观察�
 
 `-std=c11` 选择 C11，`-O0` 关闭优化，`-g` 保留调试信息，`-Wall -Wextra -Werror` 启用常见警告并把警告当失败。`-Iinclude` 指定项目头文件目录，`-o` 指定可执行产物路径。mkdir 只准备输出目录，真正运行发生在最后一条命令。
 
+整个命令块交给独立的 `sh -eu` 执行。编译失败时立即结束，不会接着运行上一次留下的程序；结束行 `SH` 单独顶格输入。
+
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 构建失败便结束，不继续运行先前的主机产物。
 mkdir -p build  # 建立主机观察产物目录，已有目录也可继续
 cc -std=c11 -O0 -g -Wall -Wextra -Werror -Iinclude labs/tutorial/bytes.c kernel/lib/base.c  -o build/probe  # 把本轮观察源码和实现编译链接成指定主机可执行文件
 ./build/probe  # 运行刚生成的主机观察，非零退出表示实际结果不符
+SH
 ```
 
 应输出 `right=AABCD left=BCDEE zero=0`，并以 0 结束。前两项说明两个方向都保住了待读源字节，第三项说明零长度比较没有要求输入空间；六字节核对还检查了字符串结束位置。

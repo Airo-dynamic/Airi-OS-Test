@@ -18,29 +18,15 @@ first_use:
   establishes: -serial file 将 guest UART 字节收集到主机记录；等待新行标记而非仅等待进程存活
 - concept: QEMU 机器与启动材料
   at: ../../../dev-log/core/07-first-boot.md#qemu-machine
-  establishes: TCG 模拟目标 CPU；q35 等参数固定机器，固件 vars 每轮复制
+  establishes: QEMU按q35/单核/256MiB创建机器，TCG执行目标指令；pflash提供固件code与本轮vars，光盘ISO提供后续引导和内核输入
+- concept: 介质内路径与两次装载
+  at: ../../../dev-log/core/07-first-boot.md#boot-medium
+  establishes: staging是主机目录，ISO保存目录及启动信息；OVMF先从登记bin内部FAT取得EFI，Limine再从外层介质读取配置与内核
 borrowed:
 - component: QEMU 与 OVMF
   contract: 按固定机器启动镜像，UART 字节输出到日志；vars 使用副本
-feedback:
-- source: author independent replay/review, not a reader mastery test
-  observation: 实际固件ANSI可能贴首标记；内核先写换行，观察器仍要求完整行。
-- source: 作者全文顺读，响应用户对主线和语言的反馈
-  observation: 镜像与观察脚本需要以本次启动的文件和进程为中心。
-  revision: 从介质中的 ELF 追踪 OVMF、Limine、READY 和进程清理。
 not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
 source_reading:
 - concept: 子进程句柄、截止时间与回收
   at: ../../../dev-log/core/07-first-boot.md#code-scripts-first-boot-py-1
   establishes: Popen交回运行中的进程，poll的None表示未退出；monotonic设90秒总截止时间，finally负责成功与失败后的回收
-  status: 本版就地解释；不推断读者已掌握
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/07-first-boot.md#code-config-boot-limine-conf-1
-  establishes: 区分主机 staging、外层 ISO 与 CD 映像内部 FAT；固件读启动映像的 EFI，Limine 再取配置与内核。固定版本构建规则已核实，完整行、超时与主机回收条件保留。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/07-first-boot.md#host-guest-output
-  establishes: staging四份输入分别接到外层ISO与内部FAT启动映像；脚本先准备本轮路径和argv，再就近启动Popen、等待完整新行并回收，90秒截止与失败条件保留。

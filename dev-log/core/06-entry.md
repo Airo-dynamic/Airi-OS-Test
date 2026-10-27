@@ -1,6 +1,10 @@
 # 06 · 让引导器进入自己的 C 代码，并发出第一行文字
 
-前面的观察入口由 Mac 运行时调用 main，再借 printf 显示结果。现在要把同一工程变成独立内核，就需要自己接过这些职责。运行时的顺序是：Limine 装入 ELF 并跳到 `_start`，汇编准备栈并调用 C 入口，C 初始化串口，发送 `[AIRI_LESSON_READY] _start -> C -> UART`，最后停机。下面按这条路径所需的组件逐一实现，到章末再链接完整程序。
+前面的观察入口由 Mac 运行时调用 main，再借 printf 显示结果。现在让自己的程序进入虚拟电脑：Limine 装入内核文件，从约定的入口 `_start` 开始执行；入口汇编准备自己的栈，再调用 C；C 初始化串口，发送 `[AIRI_LESSON_READY] _start -> C -> UART`，最后停机。
+
+这份内核文件采用 ELF 格式。它既保存机器码和数据，也保存入口地址、哪些文件字节应装入哪些内存位置等信息。编译和链接在主机上产生这份文件，Limine 稍后读取它并安排内存。本章先把完整文件构建出来，第 07 章再启动机器观察其中的指令实际执行。
+
+从 C 入口看，发送一行文字需要已经可调用的函数；从机器入口看，这些 C 调用又需要一份栈。因此先写串口和日志出口，随后建立汇编入口、协议记录和链接规则。各部分在章末共同形成 `_start → C → UART` 这条运行路径。
 
 ## 文字从内核内存走向主机日志
 
@@ -176,9 +180,11 @@ _Noreturn void airi_panic(const char *message) {  // 收到有效错误文字后
 
 <a id="entry-stack"></a>
 
-发送实现已有了，现在接回真正的运行起点。Limine 将内核 ELF 装入内存，启用 64 位模式、建立早期映射，再跳到 ELF 的 e_entry。ELF 保存机器码、数据、符号与装载要求，链接脚本会把 e_entry 指向 `_start`；此时没有主机运行时自动调用 main。
+发送函数已经写好，现在接回机器实际进入的位置。Limine 装载 ELF，建立早期映射，并使 CPU 处于可执行 64 位内核代码的状态。它从 ELF 头的 `e_entry` 取得入口地址，再把控制流交到那里；后面的链接脚本会把这个地址设为 `_start`。从这里开始，由自己的代码安排进入 C 的过程。
 
-C 函数需要保存返回位置、寄存器和局部变量，汇编入口先为这些操作准备栈。RSP 保存当前栈顶，x86-64 栈向低地址增长：预留区低端是 airi_stack_bottom，右端是 airi_stack_top，先把 RSP 设到 top，第一次压入才进入范围。64 KiB 放在 BSS，装载器提供零初始化空间，文件不必保存同样多的零字节。
+C 函数调用需要保存返回位置，也可能把寄存器和局部变量放进内存中的栈。CPU 寄存器 RSP 保存当前栈顶位置，压栈和函数调用据此读写内存。Limine 已经提供初始栈，这里再换到内核自己保留的 64 KiB 空间，使后续调用使用内核持续持有的存储。
+
+x86-64 栈向低地址增长：预留区低端是 `airi_stack_bottom`，右端是 `airi_stack_top`。先把 RSP 设为 top，第一次压入八字节时，它先降低八，再写入预留区内。空间放在 BSS，也就是装载时需要零初始化内存、文件中不必逐字保存零值的那部分；后面的链接规则会安排它的位置。
 
 AT&T 汇编源在前、目标在后，寄存器前写 `%`、立即数前写 `$`。lea 用 RIP 相对位置算出 airi_stack_top 地址再写 RSP，只取得地址，不读取顶端内容。RIP 相对寻址以本指令之后的位置加位移求目标，汇编器与链接器根据标签确定差值，见 [Intel 指令说明](https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-vol-2a-manual.pdf)。and 的 −16 掩码清低四位，使调用前 RSP 可被 16 整除。
 
@@ -244,11 +250,17 @@ int memcmp(const void *a, const void *b, size_t n) {  // 标准名的比较入�
 }
 ```
 
+<a id="limine-revision"></a>
+
 ## 让 C 入口消费引导器留下的支持状态
 
-汇编调用 airi_limine_start，入口先初始化串口并输出换行，再检查协议修订。这样修订不符也能报告错误；换行将固件可能留下的 ANSI 光标控制序列与内核记录分开。通过后发送本章标记并停机，真实内存响应稍后接入。
+汇编已经决定调用 `airi_limine_start`，现在为它写出 C 定义。函数先初始化串口并输出换行，使协议检查失败时也能留下错误。换行将固件可能留下的 ANSI 光标控制序列与内核记录分开。检查通过后发送本章标记并停机，地图响应在第 08 章加入。
 
-修订数组和起止数组先作为协议字节编进 ELF。Limine 装入它们，在进入 `_start` 之前按协议写回修订支持状态，C 入口随后读取。used 让编译器保留对象，section 选择输入节，volatile 要求读取实际存储，链接器的 KEEP 则保留这些节；这几个机制分别作用于构建和运行阶段。协议头仍使用第 02 章锁定的声明。
+这项检查需要引导器与内核提前约定数据的含义。`limine.h` 声明了固定的标记和修订记录：起始、结束标记各是一组可识别的整数；中间的 `revision` 数组由 `LIMINE_BASE_REVISION(6)` 初始化，前两个整数用于识别记录，第三个整数保存要求的基础修订 6。第 02 章的 12.9.2 是引导程序的发布版本，6 则选择这次交接遵守的协议行为。
+
+这些数组要先成为内核文件中的数据。Limine 将文件装入 RAM 后，按标记找到修订记录；支持所要求修订时，将第三项改成零，然后才进入 `_start`。稍后的 `LIMINE_BASE_REVISION_SUPPORTED(revision)` 就检查这一项是否为零。因而 C 读取的是装载后、已经由引导器处理过的内存对象。
+
+数组在 C 中没有普通调用者，也仍必须进入产物。`used` 要求编译器输出对象，`section` 把它归入指定输入节；后面的链接脚本再用 `KEEP` 保留并排列这些节。`volatile` 则作用于 C 对该对象的访问，使检查读取实际存储中的支持状态。协议标记负责识别数据，构建属性负责让这份数据确实到达引导器，两组工作接在同一个对象上。
 
 **新建 `kernel/boot/limine.c`：**
 
@@ -280,7 +292,9 @@ _Noreturn void airi_limine_start(void) {  // 汇编 call 进入的 C 入口，�
 
 <a id="elf-layout"></a>
 
-脚本以 OUTPUT_FORMAT 指定 ELF64 x86-64，以 ENTRY 选 `_start`。`.text/.rodata/.data/.bss` 是链接整理内容的节，分别承载代码、只读常量、可写初值和零初始化空间；PT_LOAD 段则给装载器“从文件读多少、内存留多少、放哪里”的要求。本脚本将内容分为 requests、text、rodata、data 四个装载段，装入之后才从入口执行。
+链接器面对的各份 `.o` 中，代码和数据按节组织。`.text` 保存指令，`.rodata` 保存只读常量，`.data` 保存可写初值，`.bss` 为零初始化对象保留空间。相同种类可以来自多个源文件，脚本将它们收集到最终布局。例如 entry.S 的指令与 serial.c 编译出的指令都会进入最终代码区域。
+
+Limine 装载时读取的是另一组记录：`PT_LOAD` 段说明从文件读多少字节、在内存留多少空间、放到哪个虚拟地址以及采用什么权限。链接器把节安排进段，再把 `_start` 的最终地址写入 `e_entry`。下面的脚本建立 requests、text、rodata、data 四个装载段；BSS 跟随可写数据获得内存空间，入口则落在代码段中。
 
 FLAGS 的读/写/执行分别是 4/2/1，因此 text=5、data=6。requests 标为只读，固定引导协议仍允许 Limine 在交接前写回状态。位置计数器从 0xffffffff80000000 起，各类节按 4096 对齐；KEEP 依次保留请求起点、记录和终点，通配 `.text.*` 收集各输入子节。导出的 `__kernel_start/end` 标签记录包含 BSS 的跨度，之后 C 只取地址即可计算大小。
 
@@ -403,10 +417,13 @@ image: $(OUT)/airios.elf # 先有当前 ELF，才执行下一行镜像打包
 
 代码与构建规则都已写齐，下面才真正调用 Make。第一段借 tools 选择工具并执行 kernel；第二段让 readelf 读取产物头与装载段，再用 nm 的 `-u` 列出未解决引用。check_output 捕获输出，去掉空白后仍有内容就失败。
 
+命令块在独立的 `sh -eu` 中顺序执行，任一构建或检查失败都会结束这次 shell，后面的命令不会消费旧产物。外层 SH 与内层 PY 各自关闭完整程序，保留它们所在的独占行。
+
 **在学习目录根目录运行：**
 
 <!-- run -->
 ```sh
+sh -eu <<'SH'  # 本次构建成功后才继续检查或启动；失败时结束独立shell
 PYTHONPATH=scripts python3 - <<'PY'  # 标准输入中到下一独立 PY 行之前的内容交给 Python，不由 shell 展开
 import subprocess  # 启动主机工具，取得退出状态或保存进程对象
 from tools import make_command  # 取得指向当前工具和目标的 Make 参数列表
@@ -418,6 +435,7 @@ from tools import tool  # 按显式覆盖、Homebrew、PATH 的顺序选择工�
 subprocess.run([tool('llvm-readelf','llvm'), '-h', '-l', 'build/normal/airios.elf'], check=True)  # 打印 ELF 文件头和装载段，核对入口、机器架构及各段布局
 assert not subprocess.check_output([tool('llvm-nm','llvm'), '-u', 'build/normal/airios.elf']).strip()  # 捕获未解决符号列表；去空白后仍有字节就断言失败
 PY
+SH
 ```
 
 应看到 ELF64、x86-64、EXEC、高地址入口和对应装载段，nm 未解决列表为空。这证明生成与链接已经闭合，没有证明虚拟 CPU 实际运行过它。

@@ -1,32 +1,31 @@
 checkpoint: K14
 baseline: baseline.yaml
 start: K13 + L01
-current_operation: 让UD2和非法选择子经CPU异常栈进入C报告，再由iretq恢复
+current_operation: 让UD2和非法选择子经IDT与统一现场进入C，精确匹配后改写返回RIP，由iretq和探针ret回到调用者
 already_explained:
 - concept: 栈与普通C调用
   at: ../../../dev-log/core/06-entry.md
   establishes: 自有栈和call进入C，当前尚无用户态
 first_use:
-- concept: IDT GDT TSS与CPU现场
+- concept: 向量经IDT和GDT选择入口，再形成硬件现场
   at: ../../../dev-log/core/14-exceptions.md#trap-frame
-  establishes: CPU查门和代码段，64位现场含SS/RSP；TSS用于独立栈
+  establishes: UD为向量6，IDTR定位16字节门；门以入口地址和代码选择子8进入内核；CPU对齐栈并保存含原SS/RSP的五格，软件补vector/error及15个GPR后按176字节结构直接读取
 - concept: 汇编宏与异常ABI
   at: ../../../dev-log/core/14-exceptions.md#trap-entry
-  establishes: 两种错误码形状统一，保存GPR、对齐调用栈并由iretq恢复
+  establishes: TRAP宏统一有无硬件错误码，RDI指向原位现场而RSP另向下对齐供普通C调用；R12保留现场起点，C返回后逆序恢复并由iretq消费可能改写的RIP
+- concept: DF进入时由CPU先换IST备用栈
+  at: ../../../dev-log/core/14-exceptions.md#trap-stack
+  establishes: DF门ist=1选TSS的ist[0]，CPU在备用栈压入原SS/RSP等现场；GDT两项TSS描述符由ltr选择，当前同权限UD/GP不指定IST；仅安装而未破坏原栈实测DF
 - concept: 表的寿命与精确故障恢复
   at: ../../../dev-log/core/14-exceptions.md#trap-owner
-  establishes: 静态表持续有效，仅登记的RIP向量错误码可以恢复
+  establishes: 静态GDT/IDT/TSS/备用栈持续有效，局部十字节描述仅交出地址与界限；site/vector/error全部匹配才一次性消费登记并修改原位rip，UD/GP经iretq后再以ret回到同一次普通调用，其他故障停止
+- concept: IDT门属性的硬件编码
+  at: ../../../dev-log/core/14-exceptions.md#trap-gate-encoding
+  establishes: flags字节的P/DPL/固定零/Type各有位位置，0x80与64位中断门类型0x0e合成0x8e；DPL约束软件中断进入权限，中断门进入时清IF
+- concept: GDT代码数据段与64位TSS描述符的字段组成
+  at: ../../../dev-log/core/14-exceptions.md#trap-descriptor-encoding
+  establishes: 段描述符按limit/base/access/flags布局，access0x9a及0x92、flags0xa及0xc组成两个64位常量；TSS界限0x67与属性0x89放入第一项，64位基址拆为低24位、下一字节与第二项高32位，各字段不重叠
 not_assumed:
 - 用户进程、设备中断、调度、页分配、页表和信号
 limits:
 - 运行证据不记录为读者已掌握
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/14-exceptions.md#trap-frame
-  establishes: 沿 ud2 故障到 IDT、统一异常现场、C 精确登记与 iretq 恢复组织全文；静态表和局部描述符寿命分开，GP 错误码与未登记停止条件保留，既有实测不冒称本轮。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/14-exceptions.md#trap-frame
-  establishes: 沿真实UD的压栈次序建立C字段，分清现场指针与对齐后的调用栈，再沿登记、dispatch与iretq闭合恢复；长实现按操作分块，已有构建入口只做精确局部替换。

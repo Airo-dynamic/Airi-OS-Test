@@ -1,7 +1,7 @@
 checkpoint: L07
 baseline: baseline.yaml
 start: L06
-current_operation: 五个Linux读请求按cookie收取CQ，再独立FSYNC
+current_operation: 准备五个显式偏移Linux文件读，按cookie收取实际CQ与数组有效前缀，再独立提交FSYNC
 already_explained:
 - concept: 就绪不执行读
   at: ../../../dev-log/linux/06-epoll.md#epoll-lt-et
@@ -9,25 +9,15 @@ already_explained:
 first_use:
 - concept: 部分提交与SQ身份
   at: ../../../dev-log/linux/07-uring.md#uring-submit
-  establishes: 五项表固定偏移/长度/目标；cookie103对应buffers[3]，get_sqe/prep只准备，submit累计交出数量而非字节或完成数
+  establishes: 共享SQ/CQ槽与普通目标数组分别存储；1536字节文件的cookie103取FD/buffers[3]/16/1530，get_sqe和prep只准备；submit正返回值累计交出项数，部分提交续交剩余项，重试共用两秒截止而单次CQ等待各有两秒
 - concept: CQ与借用缓冲
   at: ../../../dev-log/linux/07-uring.md#uring-completion
-  establishes: wait成功只取得记录；cookie103的res=6只验证六字节；FSYNC的0不是读EOF；cqe_seen归还槽不释放普通数组，不能套用AiriOS的BUSY接口
+  establishes: wait成功只取得槽，cookie103映射下标3并检查seen位，res=6只比较buffers[3]与source[1530..1535]的六字节；cqe_seen归还完成槽不释放数组；五读后cookie900的FSYNC结果0表示同步成功，未单独打印其CQ
+- concept: Linux环境与失败证据
+  at: ../../../dev-log/linux/07-uring.md#uring-environment
+  establishes: 库可编译与内核允许建环分别检查；工具或能力拒绝返回77，运行总期限30秒并留2秒强制退出；脚本先写passed=false，实际CQ及成功标记通过后才允许取回为verified，普通数组无需register调用
 not_assumed:
 - Linux允许io_uring、安装liburing即内核可用、完成必须乱序
 limits:
-- SSH255，实际Linux分支及依赖未验证；普通静态数组不称固定注册缓冲
-
-prose_revision:
-  date: 2026-10-24
-  limitation: require用perror核对CQ时可能显示旧errno，且失败项未必先打印实际cookie/res；已明示，不视为完整诊断。
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/linux/07-uring.md#uring-submit
-  establishes: 保留已认可完整稿并复查 L05/L06/K32 交接；cookie103 的六字节有效前缀、提交数量、CQ 槽与应用数组寿命以及 liburing 错误诊断限制仍完整。
-
-explanatory_revision:
-  date: 2026-10-26
-  scope: 保留成熟cookie103六字节与SQ/CQ生命周期，补明wait_one预算属于单次CQ等待。
-  evidence: 完整正文、旁注和编辑动作复读；纯内存源码/命令/旧锚点与冻结版本一致，未新增Linux实测。
+- 2026-10-27已连接个人Linux，工具检查缺strace并返回77，尚未编译或建立队列；普通静态数组不称固定注册缓冲
+- CQ不符时require使用的errno可能陈旧，失败项在URING_CQ打印前退出；res需直接读取，现有日志不保证保留意外cookie/res

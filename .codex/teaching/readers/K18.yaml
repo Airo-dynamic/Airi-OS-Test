@@ -1,7 +1,7 @@
 checkpoint: K18
 baseline: baseline.yaml
 start: K17 + L02
-current_operation: PIT事件经PIC和IDT32进入CPU，EOI后iretq，hlt等待真实五tick
+current_operation: PIT周期经IRQ0和PIC交付向量32，C增加ticks并EOI，iretq继续hlt后的循环，等待基准后至少五次处理
 already_explained:
 - concept: 完整异常现场
   at: ../../../dev-log/core/14-exceptions.md#trap-entry
@@ -9,25 +9,21 @@ already_explained:
 first_use:
 - concept: IRQ线、向量和IF
   at: ../../../dev-log/core/18-timer.md#pit-pic-route
-  establishes: 设备、控制器、CPU三层都允许才交付；PIC路线当前关闭本地APIC
+  establishes: PIT独立计数，IRQ0传设备请求，PIC应答提供向量32供CPU查IDT；设备配置、控制器掩码和CPU的IF分别生效；固定单核兼容路线清IA32_APIC_BASE全局使能，遇x2APIC拒绝
 - concept: PIC ICW、掩码、EOI和PIT分频
   at: ../../../dev-log/core/18-timer.md#timer-config
-  establishes: 配置完成才sti，IRQ里只计数与确认，不调用分配器或日志
+  establishes: 两PIC先屏蔽，再按ICW1至4声明模式/基址/级联/软件EOI；PIT端口接11931低高字节，清ticks后仅开IRQ0并最后sti；处理函数计数后向主片EOI，普通代码读取volatile差值，周期事件弥补检查与hlt间到达但不保证精确五次或墙钟时间
+- concept: PIC与PIT控制字的字段编码
+  at: ../../../dev-log/core/18-timer.md#timer-control-words
+  establishes: ICW1的初始化位与IC4合成0x11，SNGL与LTIM为零选择级联和边沿；PIT按SC00/RW11/Mode010/BCD0合成0x34，11931拆成低0x9b和高0x2e，再按RW约定组成0x2e9b
+- concept: 设备向量复用异常现场
+  at: ../../../dev-log/core/18-timer.md#timer-entry
+  establishes: PIC编号用于IDT选门，TRAP32另把编号压进现场；专用IDT32进入原公共保存，C在故障报告前计数返回，EOI确认PIC而iretq恢复寄存器与IF，不修改RIP或切任务
 - concept: 屏蔽故障与有界拒绝
   at: ../../../dev-log/core/18-timer.md#masked-timer
-  establishes: 先到实际配置再超时，不能把UEFI未完成混作驱动失败
+  establishes: 掩码0xff保留PIT及IF却阻止IRQ0交付，ticks不增而hlt停住；本轮配置标记和35秒超时共同成立才接受预期故障，finally回收QEMU，UEFI未到驱动属于另一处失败
 not_assumed:
 - 任务切换、用户态抢占、等待队列、APIC路由和SMP
 limits:
 - 固定单核q35兼容PIC时钟，非Linux现代时钟实现
 - 运行不记录为读者掌握
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/18-timer.md#pit-pic-route
-  establishes: 至少五次事件连接设备、控制器和 CPU 三环节；初始化后才开 IF，EOI 后才可继续交付。保留屏蔽故障、APIC 前提、周期等待与未来防丢唤醒区别。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/18-timer.md#timer-config
-  establishes: 保留设备控制器CPU三环节与屏蔽故障模型，配置和观察代码分块后就近区分CONFIG与真实tick完成；继承汇编、分派、构建与工具只替换实际增量。

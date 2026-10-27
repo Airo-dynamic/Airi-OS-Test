@@ -24,7 +24,7 @@ first_use:
   establishes: 发送前反复检查可接收状态；尝试次数不等于时间，状态位不证明主机已显示
 - concept: ELF 入口与栈
   at: ../../../dev-log/core/06-entry.md#entry-stack
-  establishes: 引导器跳到 ELF 指定入口；RSP 定位自有 BSS 栈，lea 计算地址不解引用
+  establishes: ELF入口指向_start；引导器已有初始栈，入口再切到内核持有的64KiB BSS栈，RSP下降后写入，lea仅计算位置
 - concept: C 调用约定
   at: ../../../dev-log/core/06-entry.md#call-abi
   establishes: call 压入返回地址；入口满足对齐和方向标志，C 调用依赖这些前提
@@ -34,33 +34,17 @@ first_use:
 - concept: 构建依赖与独立运行选项
   at: ../../../dev-log/core/06-entry.md#make-rules
   establishes: Make 根据目标与依赖时间决定重编译，模式变量定位输入输出；freestanding 与自有运行时排除宿主启动服务
+- concept: 静态协议记录的构建和写回
+  at: ../../../dev-log/core/06-entry.md#limine-revision
+  establishes: 编译与链接保留起止标记和修订数组，Limine装载后将受支持的第三项写零，C入口才检查；12.9.2发布版本与基础修订6不同
 borrowed:
 - component: Limine 与固定协议头
   contract: 进入内核前完成装载与早期映射，填写协议状态；本节入口自己准备栈并访问 COM1。
-feedback:
-- source: 作者全文顺读，响应用户对主线和语言的反馈
-  observation: 汇编、串口、链接和构建需要连接为一条启动执行路径。
-  revision: 沿 ELF 入口建立栈、调用 C 和写 UART；区分生成 ELF 与真正启动。
-- source: 用户本会话反馈：串口未得到解释
-  observation: 术语出现在正文和画像中，却未形成可用于设备发送或接收的模型
-  revision: 04 建立字节和字符通路，06 展开 UART 与端口，10 追踪输入返回；画像引用具体段落及范围
 not_inferred: 解释位置、敲完与运行成功不证明真实读者已掌握；作者必须读取所引用段落确认成立范围。
 source_reading:
 - concept: 汇编位置、栈对齐与符号
   at: ../../../dev-log/core/06-entry.md#code-kernel-arch-x86-64-entry-s-1
   establishes: 标签给地址，.size 的当前位置差给长度；RIP 相对形成自有栈顶地址，call 压入返回地址后满足 C 入口对齐
-  status: 本版就地解释；不推断读者已掌握
 - concept: 当前编译单元中的static inline函数
   at: ../../../dev-log/core/06-entry.md#port-registers
   establishes: serial.c中的static限制out8/in8仅由当前单元按名字引用；放入头文件时才由每个包含者取得内部定义，inline不保证机器码一定展开
-  status: 本版就地解释；不推断读者已掌握
-
-full_prose_review:
-  date: 2026-10-24
-  at: ../../../dev-log/core/06-entry.md#serial-path
-  establishes: 先给出实际运行顺序，再将 UART 参数、寄存器约束、栈准备、ELF 链接与 Make 消费接回同一标记。保留所有端口、ABI、构建选项和失败限制。
-
-prose_revision:
-  date: 2026-10-26
-  at: ../../../dev-log/core/06-entry.md#port-registers
-  establishes: out8实参经约束进入AL/DX后才访问UART；初始化、轮询、字符串、日志和停机分别就近闭合；栈对齐数值明确为演算，主机构建与guest执行层次分开。
