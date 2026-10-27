@@ -66,6 +66,16 @@ G17 复核另发现既有实现边界：行尾 Delete、行首 Backspace（以�
 
 完整输出、输入摘要、旧版恢复点及隔离稿件保存在外部归档 `/Users/airi/Documents/文档工作区归档/AiriOS-20261027-教程体系`：`final-validation/`、`shell-boundary-validation/`、`runtime/`、`gui-runtime-validation/`、`manual-followalong-05-evidence.md`、`skill-forward-test/`、`skills-validation/`。发布和各端实际 Git 同步结果补入该处 delivery.json，不能用本表推定已同步。
 
+## 发布、同步与追加诊断
+
+试点成稿提交为 main `72320f4dd6f7b5bf445d065269fd71a1f38cabb9`、gui `a45d46e294d21417cf617bab35feb2b11c979e79`，技能为 `c7c2d1f91462ede2ba6bde44c810bdc1a08ff77b`，均已推送既有 origin。AiriOS 使用本机已保存的 Airo-dynamic 凭据单次推送，没有更改默认 GitHub 账户。
+
+MBP 与个人 Linux 均通过 Git 建立干净维护检出：`~/.local/share/Airi-SKILLS`、`~/.local/share/AiriOS-tutorial-review` 和 `~/.local/share/AiriOS-tutorial-review-gui`。已核对各自提交，重跑 main docs-check 和技能格式检查。私有技能仓库通过仅监听环回地址的 Git 服务与 SSH 通道取得，GitHub 凭据没有复制到远端；临时服务随后关闭，origin 仍为既有 GitHub URL。教程技能的全局与相关项目入口指向各自新维护检出；其他技能的未发布修改仍在原目录。
+
+原 MBP 脏技能检出、MBA 桌面检出和 Linux 的旧工程均未 reset、stash 或覆盖。Linux 原 `~/Projects/Airi-OS-Test` 固定在 `770e0b6ac6afa93a0929fb5c6f2c40d21a85e60d`，旧学习记录留在原位，未迁到新维护检出；本轮同步的是新发布教程与技能，不能据此宣称旧学习记录已经整合。
+
+同步后追加执行原生旁注只读定位：GUI 284 块零候选；main 1429 块有 49 个低覆盖候选。用同一新工具检查原 main 基线，仍为同样 49 个，忽略正文行号后候选内容完全一致。本轮 K14/K18 的五个候选来自精确替换块开头的既有 Make 上下文：完整重建 Makefile 中的 SOURCES、CASE 和缺地图宏上方已有原生说明，切片没有携带那些前置行。没有为消除定位提示改动这些实现窗口。其他候选随全量任务继续判断，本轮不报告全课程 99% 位置检查通过，也不把候选数当作阅读质量分数。完整两个报告及聚合比较保存在 MBP 外部归档。
+
 ## 全量重构仍待完成
 
 - [x] 固定原版、备份两端原技能并合并本次相关内容。
